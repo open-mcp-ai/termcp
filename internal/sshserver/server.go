@@ -14,18 +14,17 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/creack/pty"
-	gliderssh "github.com/gliderlabs/ssh"
+	"github.com/charmbracelet/ssh"
 	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
+	sshstd "golang.org/x/crypto/ssh"
 )
 
 const internalPassword = "interactive-process-internal"
 
-// Server wraps a gliderlabs SSH server for internal use.
+// Server wraps an internal SSH server.
 type Server struct {
 	addr     string
-	server   *gliderssh.Server
+	server   *ssh.Server
 	listener net.Listener
 	started  atomic.Bool
 }
@@ -37,19 +36,16 @@ func New(addr string) *Server {
 		addr = "127.0.0.1:0"
 	}
 	s := &Server{addr: addr}
-	s.server = &gliderssh.Server{
+	srv := &ssh.Server{
 		Addr: addr,
-		Handler: func(sess gliderssh.Session) {
+		Handler: func(sess ssh.Session) {
 			s.handleSession(sess)
 		},
-		PasswordHandler: func(ctx gliderssh.Context, password string) bool {
+		PasswordHandler: func(ctx ssh.Context, password string) bool {
 			return password == internalPassword
 		},
-		PtyCallback: func(ctx gliderssh.Context, pty gliderssh.Pty) bool {
-			return true
-		},
-		SubsystemHandlers: map[string]gliderssh.SubsystemHandler{
-			"sftp": func(sess gliderssh.Session) {
+		SubsystemHandlers: map[string]ssh.SubsystemHandler{
+			"sftp": func(sess ssh.Session) {
 				server, err := sftp.NewServer(sess)
 				if err != nil {
 					slog.Error("sftp server init failed", "err", err)
@@ -63,6 +59,8 @@ func New(addr string) *Server {
 			},
 		},
 	}
+	_ = srv.SetOption(ssh.AllocatePty())
+	s.server = srv
 	return s
 }
 
@@ -80,7 +78,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("generate host key: %w", err)
 	}
-	if err := s.server.SetOption(gliderssh.HostKeyPEM(pemBytes)); err != nil {
+	if err := s.server.SetOption(ssh.HostKeyPEM(pemBytes)); err != nil {
 		return fmt.Errorf("set host key: %w", err)
 	}
 
@@ -107,7 +105,7 @@ func (s *Server) Stop() error {
 	return s.server.Close()
 }
 
-func sshSignalToOSSig(sig gliderssh.Signal) os.Signal {
+func sshSignalToOSSig(sig ssh.Signal) os.Signal {
 	switch sig {
 	case "TERM":
 		return syscall.SIGTERM
@@ -122,7 +120,7 @@ func sshSignalToOSSig(sig gliderssh.Signal) os.Signal {
 	}
 }
 
-func (s *Server) handleSession(sess gliderssh.Session) {
+func (s *Server) handleSession(sess ssh.Session) {
 	cmdArgs := sess.Command()
 	if len(cmdArgs) == 0 {
 		io.WriteString(sess, "no command\n")
@@ -130,12 +128,10 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 		return
 	}
 
-	ptyReq, winCh, isPty := sess.Pty()
-
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 
 	// Forward signals from client to local process.
-	sigCh := make(chan gliderssh.Signal, 8)
+	sigCh := make(chan ssh.Signal, 8)
 	sess.Signals(sigCh)
 	go func() {
 		for sig := range sigCh {
@@ -147,45 +143,33 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 		}
 	}()
 
-	var exitCode int
+	ppty, winCh, isPty := sess.Pty()
 	if isPty {
-		f, err := pty.StartWithSize(cmd, &pty.Winsize{
-			Rows: uint16(ptyReq.Window.Height),
-			Cols: uint16(ptyReq.Window.Width),
-		})
-		if err != nil {
+		go func() {
+			for range winCh {
+			}
+		}()
+		if err := ppty.Start(cmd); err != nil {
 			io.WriteString(sess, err.Error()+"\n")
 			sess.Exit(1)
 			return
 		}
-		defer f.Close()
-
-		go func() {
-			for win := range winCh {
-				if err := pty.Setsize(f, &pty.Winsize{
-					Rows: uint16(win.Height),
-					Cols: uint16(win.Width),
-				}); err != nil {
-					slog.Warn("pty setsize failed", "err", err)
-				}
-			}
-		}()
-
-		go func() { io.Copy(f, sess) }()
-		io.Copy(sess, f)
-
-		cmd.Wait()
 	} else {
 		cmd.Stdin = sess
 		cmd.Stdout = sess
 		cmd.Stderr = sess.Stderr()
-		cmd.Run()
+		if err := cmd.Start(); err != nil {
+			io.WriteString(sess, err.Error()+"\n")
+			sess.Exit(1)
+			return
+		}
 	}
 
+	cmd.Wait()
+
+	exitCode := 127
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
-	} else {
-		exitCode = 127 // command not found
 	}
 	sess.Exit(exitCode)
 }
@@ -209,12 +193,12 @@ func InternalPassword() string {
 }
 
 // ClientConfig returns a pre-configured ssh.ClientConfig for connecting to the internal server.
-func ClientConfig() *ssh.ClientConfig {
-	return &ssh.ClientConfig{
+func ClientConfig() *sshstd.ClientConfig {
+	return &sshstd.ClientConfig{
 		User: "internal",
-		Auth: []ssh.AuthMethod{
-			ssh.Password(internalPassword),
+		Auth: []sshstd.AuthMethod{
+			sshstd.Password(internalPassword),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: sshstd.InsecureIgnoreHostKey(),
 	}
 }
