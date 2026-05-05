@@ -1,12 +1,20 @@
 package sshclient
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 )
+
+func testShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe"
+	}
+	return "bash"
+}
 
 func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 	t.Helper()
@@ -40,7 +48,7 @@ func TestStart_PipeMode(t *testing.T) {
 func TestStart_PtyMode(t *testing.T) {
 	_, addr := startTestSSHServer(t)
 
-	es, err := Start(addr, "bash", nil, true, 24, 80)
+	es, err := Start(addr, testShell(), nil, true, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +75,7 @@ func TestStart_PtyMode(t *testing.T) {
 func TestStart_ResizePty(t *testing.T) {
 	_, addr := startTestSSHServer(t)
 
-	es, err := Start(addr, "bash", nil, true, 24, 80)
+	es, err := Start(addr, testShell(), nil, true, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +90,9 @@ func TestStart_ResizePty(t *testing.T) {
 }
 
 func TestStart_Signal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signals not supported on Windows")
+	}
 	_, addr := startTestSSHServer(t)
 
 	es, err := Start(addr, "sleep", []string{"60"}, false, 24, 80)
