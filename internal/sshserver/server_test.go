@@ -1,12 +1,20 @@
 package sshserver
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+func testShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe"
+	}
+	return "/bin/bash"
+}
 
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
@@ -61,6 +69,9 @@ func TestServer_PipeSession(t *testing.T) {
 }
 
 func TestServer_SignalTerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signals not supported on Windows")
+	}
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -111,6 +122,9 @@ func TestServer_SignalTerm(t *testing.T) {
 }
 
 func TestServer_SignalInterrupt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signals not supported on Windows")
+	}
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -210,7 +224,7 @@ func TestServer_PtySession(t *testing.T) {
 	stdin, _ := session.StdinPipe()
 	stdout, _ := session.StdoutPipe()
 
-	if err := session.Start("/bin/bash"); err != nil {
+	if err := session.Start(testShell()); err != nil {
 		t.Fatal(err)
 	}
 
