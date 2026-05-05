@@ -29,7 +29,6 @@ func testShellEchoCommand(s string) string {
 	}
 	return "echo " + s
 }
-
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
@@ -182,6 +181,9 @@ func TestServer_SignalInterrupt(t *testing.T) {
 }
 
 func TestServer_SignalTerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signals not supported on Windows")
+	}
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -232,6 +234,9 @@ func TestServer_SignalTerm(t *testing.T) {
 }
 
 func TestServer_SignalInterrupt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signals not supported on Windows")
+	}
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
