@@ -1,0 +1,27 @@
+__pycache__/
+*.egg-info/
+venv/
+build/
+*.Identifier
+
+# Go
+/server
+*.exe
+
+# IDE
+.idea/
+
+# Data
+data/
+testdata/
+
+# Private (author only)
+.claude/
+docs/superpowers/
+
+# MAC
+.DS_Store
+
+# other program
+templates/
+.env
