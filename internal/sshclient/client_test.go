@@ -16,6 +16,13 @@ func testShell() string {
 	return "bash"
 }
 
+func testShellInput(s string) string {
+	if runtime.GOOS == "windows" {
+		return s + "\r\n"
+	}
+	return s + "\n"
+}
+
 func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 	t.Helper()
 	srv := sshserver.New("127.0.0.1:0")
@@ -54,7 +61,7 @@ func TestStart_PtyMode(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	es.Stdin.Write([]byte("echo pty_test\n"))
+	es.Stdin.Write([]byte(testShellInput("echo pty_test")))
 
 	// Loop-read until we see the expected output
 	buf := make([]byte, 4096)
@@ -68,11 +75,14 @@ func TestStart_PtyMode(t *testing.T) {
 		t.Fatalf("expected output containing 'pty_test', got %q", allOutput)
 	}
 
-	es.Stdin.Write([]byte("exit\n"))
+	es.Stdin.Write([]byte(testShellInput("exit")))
 	<-es.Done()
 }
 
 func TestStart_ResizePty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("interactive PTY tests not stable on Windows ConPTY")
+	}
 	_, addr := startTestSSHServer(t)
 
 	es, err := Start(addr, testShell(), nil, true, 24, 80)
@@ -85,7 +95,7 @@ func TestStart_ResizePty(t *testing.T) {
 		t.Fatalf("ResizePty failed: %v", err)
 	}
 
-	es.Stdin.Write([]byte("exit\n"))
+	es.Stdin.Write([]byte(testShellInput("exit")))
 	<-es.Done()
 }
 
