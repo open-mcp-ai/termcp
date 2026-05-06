@@ -30,6 +30,13 @@ func raceTestShell() string {
 	return "bash"
 }
 
+func raceTestShellArgs() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"-NoLogo", "-NoProfile"}
+	}
+	return nil
+}
+
 func raceTestInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
@@ -47,7 +54,7 @@ func raceTestSleepCommand(seconds string) (string, []string) {
 func TestRace_ConcurrentSendInput(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +83,7 @@ func TestRace_ConcurrentSendInput(t *testing.T) {
 func TestRace_SendInputDuringTerminate(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +148,7 @@ func TestRace_ConcurrentTerminate(t *testing.T) {
 func TestRace_ConcurrentReadWrite(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
