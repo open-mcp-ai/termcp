@@ -16,6 +16,13 @@ func testShell() string {
 	return "/bin/bash"
 }
 
+func testShellInput(s string) string {
+	if runtime.GOOS == "windows" {
+		return s + "\r\n"
+	}
+	return s + "\n"
+}
+
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
@@ -229,7 +236,7 @@ func TestServer_PtySession(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	stdin.Write([]byte("echo test_pty\n"))
+	stdin.Write([]byte(testShellInput("echo test_pty")))
 
 	// Read in a loop until we see "test_pty" or timeout
 	deadline := time.Now().Add(5 * time.Second)
@@ -243,6 +250,6 @@ func TestServer_PtySession(t *testing.T) {
 		t.Fatalf("expected output containing 'test_pty', got %q", allOutput)
 	}
 
-	stdin.Write([]byte("exit\n"))
+	stdin.Write([]byte(testShellInput("exit")))
 	session.Wait()
 }
