@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,35 @@ func parseResult(t *testing.T, result *mcpgo.CallToolResult) map[string]any {
 		t.Fatalf("failed to parse result: %v, text: %s", err, text)
 	}
 	return m
+}
+
+func testShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe"
+	}
+	return "bash"
+}
+
+func testShellInput(s string) string {
+	if runtime.GOOS == "windows" {
+		return s + "\r\n"
+	}
+	return s + "\n"
+}
+
+func testShellArgs(args ...string) []any {
+	values := make([]any, len(args))
+	for i, arg := range args {
+		values[i] = arg
+	}
+	return values
+}
+
+func testShellEchoArgs(s string) []any {
+	if runtime.GOOS == "windows" {
+		return testShellArgs("-NoProfile", "-Command", "Write-Output "+s)
+	}
+	return testShellArgs("-c", "echo "+s)
 }
 
 func TestHandleStartProcess_MissingCommand(t *testing.T) {
@@ -165,7 +195,7 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 
 	// Start a bash session
 	startReq := makeRequest(map[string]any{
-		"command": "bash",
+		"command": testShell(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -180,8 +210,8 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 	// Send input and read
 	sarReq := makeRequest(map[string]any{
 		"session_id":  sessionID,
-		"text":        "echo handler_test",
-		"press_enter": true,
+		"text":        testShellInput("echo handler_test"),
+		"press_enter": false,
 		"timeout":     3.0,
 	})
 	sarResult, err := s.handleSendAndRead(context.Background(), sarReq)
@@ -240,7 +270,7 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{
-		"command": "bash",
+		"command": testShell(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -256,8 +286,8 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	start := time.Now()
 	bgReq := makeRequest(map[string]any{
 		"session_id":  sessionID,
-		"text":        "echo bg_test",
-		"press_enter": true,
+		"text":        testShellInput("echo bg_test"),
+		"press_enter": false,
 	})
 	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
 	if err != nil {
@@ -301,7 +331,7 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{
-		"command": "bash",
+		"command": testShell(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -323,8 +353,8 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 	start := time.Now()
 	sarReq := makeRequest(map[string]any{
 		"session_id":  sessionID,
-		"text":        "sleep 10",
-		"press_enter": true,
+		"text":        testShellInput("sleep 10"),
+		"press_enter": false,
 		"timeout":     30.0,
 	})
 	sarResult, err := s.handleSendAndRead(ctx, sarReq)
@@ -352,8 +382,8 @@ func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{
-		"command": "bash",
-		"args":    []any{"-c", "echo done"},
+		"command": testShell(),
+		"args":    testShellEchoArgs("done"),
 		"mode":    "pty",
 	})
 	startResult, _ := s.handleStartProcess(context.Background(), startReq)
