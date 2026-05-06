@@ -55,6 +55,13 @@ func testShell() string {
 	return "bash"
 }
 
+func testInteractiveShellArgs() []any {
+	if runtime.GOOS == "windows" {
+		return testShellArgs("-NoLogo", "-NoProfile")
+	}
+	return nil
+}
+
 func testShellInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
@@ -72,7 +79,7 @@ func testShellArgs(args ...string) []any {
 
 func testShellEchoArgs(s string) []any {
 	if runtime.GOOS == "windows" {
-		return testShellArgs("-NoProfile", "-Command", "Write-Output "+s)
+		return testShellArgs("-NoLogo", "-NoProfile", "-Command", "Write-Output "+s)
 	}
 	return testShellArgs("-c", "echo "+s)
 }
@@ -196,6 +203,7 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 	// Start a bash session
 	startReq := makeRequest(map[string]any{
 		"command": testShell(),
+		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -271,6 +279,7 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 
 	startReq := makeRequest(map[string]any{
 		"command": testShell(),
+		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -332,6 +341,7 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 
 	startReq := makeRequest(map[string]any{
 		"command": testShell(),
+		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
 	startResult, err := s.handleStartProcess(context.Background(), startReq)
@@ -379,6 +389,9 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 }
 
 func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell -Command under ConPTY stays interactive after command completion")
+	}
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{

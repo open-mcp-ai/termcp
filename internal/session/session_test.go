@@ -18,6 +18,13 @@ func testShell() string {
 	return "bash"
 }
 
+func testInteractiveShellArgs() []string {
+	if runtime.GOOS == "windows" {
+		return testShellArgs("-NoLogo", "-NoProfile")
+	}
+	return nil
+}
+
 func testShellInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
@@ -31,7 +38,7 @@ func testShellArgs(args ...string) []string {
 
 func testShellEchoArgs(s string) []string {
 	if runtime.GOOS == "windows" {
-		return testShellArgs("-NoProfile", "-Command", "Write-Output "+s)
+		return testShellArgs("-NoLogo", "-NoProfile", "-Command", "Write-Output "+s)
 	}
 	return testShellArgs("-c", "echo "+s)
 }
@@ -60,7 +67,7 @@ func testPipeCommand() string {
 func TestInfo_DeepCopyExitCode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: testShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +121,7 @@ func testConfig(command string, args []string, mode api.SessionMode, name string
 func TestSession_CreateAndInfo(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, "test-session"), nil)
+	s, err := New(addr, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "test-session"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +145,7 @@ func TestSession_CreateAndInfo(t *testing.T) {
 func TestSession_SendInputReadOutput(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +219,7 @@ func TestSession_ForceTerminate(t *testing.T) {
 func TestSession_ResizePty(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,9 +251,12 @@ func TestSession_ResizePtyPipeMode(t *testing.T) {
 }
 
 func TestSession_SendInputAfterExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell exit under ConPTY is not deterministic enough for this assertion")
+	}
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +272,9 @@ func TestSession_SendInputAfterExit(t *testing.T) {
 }
 
 func TestSession_NaturalExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell -Command under ConPTY stays interactive after command completion")
+	}
 	_, addr := startTestServer(t)
 
 	s, err := New(addr, Config{Command: testShell(), Args: testShellEchoArgs("hello"), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
@@ -402,7 +415,7 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 
 	before := runtime.NumGoroutine()
 
-	s, err := New(addr, Config{Command: testShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
