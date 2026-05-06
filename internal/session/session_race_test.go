@@ -44,6 +44,13 @@ func raceTestInput(s string) string {
 	return s + "\n"
 }
 
+func raceTestInteractiveOutputCommand(s string) string {
+	if runtime.GOOS == "windows" {
+		return "Write-Output " + s
+	}
+	return "echo " + s
+}
+
 func raceTestSleepCommand(seconds string) (string, []string) {
 	if runtime.GOOS == "windows" {
 		return "powershell.exe", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds " + seconds}
@@ -69,7 +76,7 @@ func TestRace_ConcurrentSendInput(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			err := s.SendInput(raceTestInput("echo concurrent"+strings.Repeat(" ", id%3)), false)
+			err := s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("concurrent"+strings.Repeat(" ", id%3))), false)
 			if err != nil {
 				atomic.AddInt64(&errCount, 1)
 			}
@@ -102,7 +109,7 @@ func TestRace_SendInputDuringTerminate(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 20; i++ {
-			err := s.SendInput(raceTestInput("echo race_test"), false)
+			err := s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("race_test")), false)
 			if err != nil {
 				atomic.AddInt64(&errCount, 1)
 			}
@@ -163,7 +170,7 @@ func TestRace_ConcurrentReadWrite(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				s.SendInput(raceTestInput("echo rw"+strings.Repeat(" ", id)), false)
+				s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("rw"+strings.Repeat(" ", id))), false)
 				time.Sleep(20 * time.Millisecond)
 			}
 		}(i)
