@@ -23,6 +23,13 @@ func testShellInput(s string) string {
 	return s + "\n"
 }
 
+func testShellEchoCommand(s string) string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe -NoProfile -Command Write-Output " + s
+	}
+	return "echo " + s
+}
+
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
@@ -66,7 +73,7 @@ func TestServer_PipeSession(t *testing.T) {
 	}
 	defer session.Close()
 
-	out, err := session.Output("echo hello")
+	out, err := session.Output(testShellEchoCommand("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
