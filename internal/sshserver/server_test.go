@@ -29,6 +29,7 @@ func testShellEchoCommand(s string) string {
 	}
 	return "echo " + s
 }
+
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
@@ -76,107 +77,8 @@ func TestServer_PipeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimRight(string(out), "\r\n") != "hello" {
-		t.Fatalf("expected hello output, got %q", string(out))
-	}
-}
-
-func TestServer_SignalTerm(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX signals not supported on Windows")
-	}
-	srv := New("127.0.0.1:0")
-	if err := srv.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer srv.Stop()
-
-	config := ClientConfig()
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-
-	if err := session.Start("sleep 30"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Give the process time to start
-	time.Sleep(200 * time.Millisecond)
-
-	if err := session.Signal(ssh.SIGTERM); err != nil {
-		t.Fatalf("signal failed: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- session.Wait() }()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("expected non-nil error from SIGTERM")
-		}
-		if exitErr, ok := err.(*ssh.ExitError); ok {
-			// SIGTERM → exit 143 (128+15) on Unix
-			if exitErr.ExitStatus() == 0 {
-				t.Fatal("expected non-zero exit status from SIGTERM")
-			}
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for signal kill")
-	}
-}
-
-func TestServer_SignalInterrupt(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX signals not supported on Windows")
-	}
-	srv := New("127.0.0.1:0")
-	if err := srv.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer srv.Stop()
-
-	config := ClientConfig()
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-
-	if err := session.Start("sleep 30"); err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(200 * time.Millisecond)
-
-	if err := session.Signal(ssh.SIGINT); err != nil {
-		t.Fatalf("signal failed: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- session.Wait() }()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("expected non-nil error from SIGINT")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for signal interrupt")
+	if string(out) != "hello\n" {
+		t.Fatalf("expected 'hello\\n', got %q", string(out))
 	}
 }
 

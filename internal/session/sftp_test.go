@@ -18,13 +18,6 @@ func sftpTestShell() string {
 	return "bash"
 }
 
-func sftpTestShellArgs() []string {
-	if runtime.GOOS == "windows" {
-		return []string{"-NoLogo", "-NoProfile"}
-	}
-	return nil
-}
-
 func sftpTestInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
@@ -39,7 +32,7 @@ func joinRemotePath(dir, name string) string {
 func TestSFTP_UploadDownloadRoundTrip(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +66,7 @@ func TestSFTP_UploadDownloadRoundTrip(t *testing.T) {
 func TestSFTP_ListFiles(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +97,7 @@ func TestSFTP_ListFiles(t *testing.T) {
 func TestSFTP_BinaryDownload(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +130,7 @@ func TestSFTP_BinaryDownload(t *testing.T) {
 func TestSFTP_UploadTooLarge(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +149,7 @@ func TestSFTP_UploadTooLarge(t *testing.T) {
 func TestSFTP_DownloadNonExistent(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +164,7 @@ func TestSFTP_DownloadNonExistent(t *testing.T) {
 func TestSFTP_PostExitDownload(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: sftpTestShell(), Args: sftpTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: sftpTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

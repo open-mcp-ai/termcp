@@ -43,6 +43,7 @@ func failingCommand() (string, []string) {
 	}
 	return "false", nil
 }
+
 func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 	t.Helper()
 	srv := sshserver.New("127.0.0.1:0")
