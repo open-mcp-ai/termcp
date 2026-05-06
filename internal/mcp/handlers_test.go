@@ -69,6 +69,13 @@ func testShellInput(s string) string {
 	return s + "\n"
 }
 
+func testInteractiveOutputCommand(s string) string {
+	if runtime.GOOS == "windows" {
+		return "Write-Output " + s
+	}
+	return "echo " + s
+}
+
 func testShellArgs(args ...string) []any {
 	values := make([]any, len(args))
 	for i, arg := range args {
@@ -82,6 +89,31 @@ func testShellEchoArgs(s string) []any {
 		return testShellArgs("-NoLogo", "-NoProfile", "-Command", "Write-Output "+s)
 	}
 	return testShellArgs("-c", "echo "+s)
+}
+
+func testReadOutputUntil(t *testing.T, s *Server, sessionID, marker string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var output string
+	for time.Now().Before(deadline) {
+		readReq := makeRequest(map[string]any{
+			"session_id": sessionID,
+			"timeout":    0.5,
+		})
+		readResult, err := s.handleReadOutput(context.Background(), readReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if readResult.IsError {
+			t.Fatalf("unexpected error: %s", readResult.Content[0].(mcpgo.TextContent).Text)
+		}
+		readM := parseResult(t, readResult)
+		output += readM["output"].(string)
+		if strings.Contains(output, marker) {
+			break
+		}
+	}
+	return output
 }
 
 func TestHandleStartProcess_MissingCommand(t *testing.T) {
@@ -218,7 +250,7 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 	// Send input and read
 	sarReq := makeRequest(map[string]any{
 		"session_id":  sessionID,
-		"text":        testShellInput("echo handler_test"),
+		"text":        testShellInput(testInteractiveOutputCommand("handler_test")),
 		"press_enter": false,
 		"timeout":     3.0,
 	})
@@ -232,8 +264,11 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 
 	sarM := parseResult(t, sarResult)
 	output := sarM["output"].(string)
-	if len(output) == 0 {
-		t.Fatal("expected non-empty output")
+	if !strings.Contains(output, "handler_test") {
+		output += testReadOutputUntil(t, s, sessionID, "handler_test", 3*time.Second)
+	}
+	if !strings.Contains(output, "handler_test") {
+		t.Fatalf("expected output containing 'handler_test', got %q", output)
 	}
 
 	// Cleanup
@@ -295,7 +330,7 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	start := time.Now()
 	bgReq := makeRequest(map[string]any{
 		"session_id":  sessionID,
-		"text":        testShellInput("echo bg_test"),
+		"text":        testShellInput(testInteractiveOutputCommand("bg_test")),
 		"press_enter": false,
 	})
 	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
@@ -316,18 +351,8 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	}
 
 	// Verify the input was actually delivered by reading output
-	time.Sleep(200 * time.Millisecond)
-	readReq := makeRequest(map[string]any{
-		"session_id": sessionID,
-		"timeout":    2.0,
-	})
-	readResult, err := s.handleReadOutput(context.Background(), readReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	readM := parseResult(t, readResult)
-	output := readM["output"].(string)
-	if len(output) == 0 || !strings.Contains(output, "bg_test") {
+	output := testReadOutputUntil(t, s, sessionID, "bg_test", 3*time.Second)
+	if !strings.Contains(output, "bg_test") {
 		t.Fatalf("expected output containing 'bg_test', got %q", output)
 	}
 
