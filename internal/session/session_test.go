@@ -32,6 +32,13 @@ func testShellInput(s string) string {
 	return s + "\n"
 }
 
+func testInteractiveOutputCommand(s string) string {
+	if runtime.GOOS == "windows" {
+		return "Write-Output " + s
+	}
+	return "echo " + s
+}
+
 func testShellArgs(args ...string) []string {
 	return args
 }
@@ -153,7 +160,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if err := s.SendInput(testShellInput("echo session_test"), false); err != nil {
+	if err := s.SendInput(testShellInput(testInteractiveOutputCommand("session_test")), false); err != nil {
 		t.Fatal(err)
 	}
 
