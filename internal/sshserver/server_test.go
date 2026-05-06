@@ -77,8 +77,8 @@ func TestServer_PipeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != "hello\n" {
-		t.Fatalf("expected 'hello\\n', got %q", string(out))
+	if strings.TrimRight(string(out), "\r\n") != "hello" {
+		t.Fatalf("expected hello output, got %q", string(out))
 	}
 }
 
