@@ -11,10 +11,56 @@ import (
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
+func testShell() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe"
+	}
+	return "bash"
+}
+
+func testShellInput(s string) string {
+	if runtime.GOOS == "windows" {
+		return s + "\r\n"
+	}
+	return s + "\n"
+}
+
+func testShellArgs(args ...string) []string {
+	return args
+}
+
+func testShellEchoArgs(s string) []string {
+	if runtime.GOOS == "windows" {
+		return testShellArgs("-NoProfile", "-Command", "Write-Output "+s)
+	}
+	return testShellArgs("-c", "echo "+s)
+}
+
+func testEchoCommand(s string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoProfile", "-Command", "Write-Output " + s}
+	}
+	return "echo", []string{s}
+}
+
+func testSleepCommand(seconds string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds " + seconds}
+	}
+	return "sleep", []string{seconds}
+}
+
+func testPipeCommand() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe"
+	}
+	return "cat"
+}
+
 func TestInfo_DeepCopyExitCode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: "bash", Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: testShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +114,7 @@ func testConfig(command string, args []string, mode api.SessionMode, name string
 func TestSession_CreateAndInfo(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, api.ModePTY, "test-session"), nil)
+	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, "test-session"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +138,7 @@ func TestSession_CreateAndInfo(t *testing.T) {
 func TestSession_SendInputReadOutput(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +146,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if err := s.SendInput("echo session_test", true); err != nil {
+	if err := s.SendInput(testShellInput("echo session_test"), false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,7 +167,8 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 func TestSession_Terminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("sleep", []string{"60"}, api.ModePipe, ""), nil)
+	command, args := testSleepCommand("60")
+	s, err := New(addr, testConfig(command, args, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +194,8 @@ func TestSession_Terminate(t *testing.T) {
 func TestSession_ForceTerminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("sleep", []string{"60"}, api.ModePipe, ""), nil)
+	command, args := testSleepCommand("60")
+	s, err := New(addr, testConfig(command, args, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +212,7 @@ func TestSession_ForceTerminate(t *testing.T) {
 func TestSession_ResizePty(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +231,7 @@ func TestSession_ResizePty(t *testing.T) {
 func TestSession_ResizePtyPipeMode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("cat", nil, api.ModePipe, ""), nil)
+	s, err := New(addr, testConfig(testPipeCommand(), nil, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,12 +246,12 @@ func TestSession_ResizePtyPipeMode(t *testing.T) {
 func TestSession_SendInputAfterExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
+	s, err := New(addr, testConfig(testShell(), nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s.SendInput("exit", true)
+	s.SendInput(testShellInput("exit"), false)
 
 	time.Sleep(1 * time.Second)
 
@@ -216,7 +264,7 @@ func TestSession_SendInputAfterExit(t *testing.T) {
 func TestSession_NaturalExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: "bash", Args: []string{"-c", "echo hello"}, Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: testShell(), Args: testShellEchoArgs("hello"), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +285,8 @@ func TestManager_CreateAndGet(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: api.ModePipe, Name: "test", Rows: 24, Cols: 80})
+	command, args := testEchoCommand("hi")
+	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "test", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +305,10 @@ func TestManager_ListAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create(Config{Command: "echo", Args: []string{"a"}, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: "echo", Args: []string{"b"}, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	commandA, argsA := testEchoCommand("a")
+	commandB, argsB := testEchoCommand("b")
+	mgr.Create(Config{Command: commandA, Args: argsA, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: commandB, Args: argsB, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
 
 	all := mgr.ListAll()
 	if len(all) != 2 {
@@ -270,8 +321,9 @@ func TestManager_CleanupAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	command, args := testSleepCommand("60")
+	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
 
 	mgr.CleanupAll(true)
 
@@ -289,7 +341,8 @@ func TestManager_Delete(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"0.1"}, Mode: api.ModePipe, Name: "del-me", Rows: 24, Cols: 80})
+	command, args := testSleepCommand("0.1")
+	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "del-me", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +380,8 @@ func TestManager_DeleteRunningSession(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Rows: 24, Cols: 80})
+	command, args := testSleepCommand("60")
+	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +402,7 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 
 	before := runtime.NumGoroutine()
 
-	s, err := New(addr, Config{Command: "bash", Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: testShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

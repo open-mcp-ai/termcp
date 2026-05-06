@@ -8,16 +8,17 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-mcp-ai/termcp/pkg/api"
 	"github.com/open-mcp-ai/termcp/internal/ansi"
 	"github.com/open-mcp-ai/termcp/internal/buffer"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/sshclient"
+	"github.com/open-mcp-ai/termcp/pkg/api"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -175,7 +176,11 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
 	if pressEnter {
-		text += "\n"
+		if runtime.GOOS == "windows" {
+			text += "\r\n"
+		} else {
+			text += "\n"
+		}
 	}
 	s.stdinMu.Lock()
 	_, err := s.execSession.Stdin.Write([]byte(text))

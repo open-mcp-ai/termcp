@@ -23,6 +23,27 @@ func testShellInput(s string) string {
 	return s + "\n"
 }
 
+func pipeEchoCommand() (string, []string, string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoProfile", "-Command", "$input | Write-Output"}, "hello\r\n"
+	}
+	return "cat", nil, "hello\n"
+}
+
+func longRunningCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds 60"}
+	}
+	return "sleep", []string{"60"}
+}
+
+func failingCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoProfile", "-Command", "exit 1"}
+	}
+	return "false", nil
+}
+
 func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 	t.Helper()
 	srv := sshserver.New("127.0.0.1:0")
@@ -36,13 +57,13 @@ func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 func TestStart_PipeMode(t *testing.T) {
 	_, addr := startTestSSHServer(t)
 
-	// Use cat so server's stdin copy goroutine unblocks when we close stdin
-	es, err := Start(addr, "cat", nil, false, 24, 80)
+	command, args, input := pipeEchoCommand()
+	es, err := Start(addr, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	es.Stdin.Write([]byte("hello\n"))
+	es.Stdin.Write([]byte(input))
 	es.Stdin.Close()
 
 	<-es.Done()
@@ -105,7 +126,8 @@ func TestStart_Signal(t *testing.T) {
 	}
 	_, addr := startTestSSHServer(t)
 
-	es, err := Start(addr, "sleep", []string{"60"}, false, 24, 80)
+	command, args := longRunningCommand()
+	es, err := Start(addr, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,9 +147,13 @@ func TestStart_Signal(t *testing.T) {
 }
 
 func TestStart_Close(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("session close is reported as EOF on Windows ConPTY")
+	}
 	_, addr := startTestSSHServer(t)
 
-	es, err := Start(addr, "sleep", []string{"60"}, false, 24, 80)
+	command, args := longRunningCommand()
+	es, err := Start(addr, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +192,8 @@ func TestShellQuote(t *testing.T) {
 func TestStart_CommandFailure(t *testing.T) {
 	_, addr := startTestSSHServer(t)
 
-	es, err := Start(addr, "false", nil, false, 24, 80)
+	command, args := failingCommand()
+	es, err := Start(addr, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
