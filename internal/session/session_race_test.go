@@ -30,25 +30,11 @@ func raceTestShell() string {
 	return "bash"
 }
 
-func raceTestShellArgs() []string {
-	if runtime.GOOS == "windows" {
-		return []string{"-NoLogo", "-NoProfile"}
-	}
-	return nil
-}
-
 func raceTestInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
 	}
 	return s + "\n"
-}
-
-func raceTestInteractiveOutputCommand(s string) string {
-	if runtime.GOOS == "windows" {
-		return "Write-Output " + s
-	}
-	return "echo " + s
 }
 
 func raceTestSleepCommand(seconds string) (string, []string) {
@@ -61,7 +47,7 @@ func raceTestSleepCommand(seconds string) (string, []string) {
 func TestRace_ConcurrentSendInput(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +62,7 @@ func TestRace_ConcurrentSendInput(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			err := s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("concurrent"+strings.Repeat(" ", id%3))), false)
+			err := s.SendInput(raceTestInput("echo concurrent"+strings.Repeat(" ", id%3)), false)
 			if err != nil {
 				atomic.AddInt64(&errCount, 1)
 			}
@@ -90,7 +76,7 @@ func TestRace_ConcurrentSendInput(t *testing.T) {
 func TestRace_SendInputDuringTerminate(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +95,7 @@ func TestRace_SendInputDuringTerminate(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 20; i++ {
-			err := s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("race_test")), false)
+			err := s.SendInput(raceTestInput("echo race_test"), false)
 			if err != nil {
 				atomic.AddInt64(&errCount, 1)
 			}
@@ -155,7 +141,7 @@ func TestRace_ConcurrentTerminate(t *testing.T) {
 func TestRace_ConcurrentReadWrite(t *testing.T) {
 	addr := startRaceTestServer(t)
 
-	s, err := New(addr, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: raceTestShell(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +156,7 @@ func TestRace_ConcurrentReadWrite(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				s.SendInput(raceTestInput(raceTestInteractiveOutputCommand("rw"+strings.Repeat(" ", id))), false)
+				s.SendInput(raceTestInput("echo rw"+strings.Repeat(" ", id)), false)
 				time.Sleep(20 * time.Millisecond)
 			}
 		}(i)
