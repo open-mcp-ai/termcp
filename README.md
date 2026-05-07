@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey" alt="macOS / Linux">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="macOS / Linux / Windows">
   <img src="https://img.shields.io/badge/MCP-SSE_Transport-green.svg" alt="MCP SSE">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
@@ -82,7 +82,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 │   ├── mcp/
 │   │   ├── server.go            # MCP SSE server & tool registration
 │   │   └── handlers.go          # 13 tool handlers
-│   ├── sshserver/server.go      # Internal SSH server (gliderlabs/ssh)
+│   ├── sshserver/server.go      # Internal SSH server (charmbracelet/ssh)
 │   ├── sshclient/client.go      # Internal SSH client (crypto/ssh)
 │   ├── session/
 │   │   ├── session.go           # Session lifecycle (goroutine-safe)
@@ -100,7 +100,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 1. **Multi-Reader Ring Buffer**: Each agent registers as an independent reader with its own `ringbuffer.RingBuffer` instance. Writes broadcast to all readers. Slow readers lose oldest data (overwrite mode) rather than blocking the writer.
 
-2. **Internal SSH Architecture**: The server starts a gliderlabs/SSH server on localhost. Each `start_process` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing.
+2. **Internal SSH Architecture**: The server starts a charmbracelet/ssh server on localhost. Each `start_process` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY is used for native pseudo-terminal support.
 
 3. **SSE over HTTP Transport**: Unlike traditional stdio-based MCP servers, this server exposes an HTTP endpoint supporting MCP SSE transport. Agents connect remotely, enabling cross-machine deployment.
 
@@ -337,7 +337,7 @@ Returns: `{ messages: [{id, session_id, type, content, created_at, byte_size}, .
 go build -o server ./cmd/server
 ```
 
-**Requirements:** Go >= 1.21 / macOS or Linux
+**Requirements:** Go >= 1.21 / macOS, Linux, or Windows
 
 ### Run
 
