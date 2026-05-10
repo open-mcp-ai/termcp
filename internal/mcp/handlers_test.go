@@ -116,6 +116,34 @@ func testReadOutputUntil(t *testing.T, s *Server, sessionID, marker string, time
 	return output
 }
 
+func TestHandleDetectShell_Auto(t *testing.T) {
+	s := newTestServer(t)
+	result, err := s.handleDetectShell(context.Background(), makeRequest(map[string]any{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(mcpgo.TextContent).Text)
+	}
+
+	m := parseResult(t, result)
+	path, ok := m["path"].(string)
+	if !ok || path == "" {
+		t.Fatalf("expected non-empty shell path, got %#v", m["path"])
+	}
+	family, ok := m["family"].(string)
+	if !ok || family == "" {
+		t.Fatalf("expected non-empty shell family, got %#v", m["family"])
+	}
+	if family != "unix" && family != "powershell" && family != "cmd" {
+		t.Fatalf("expected supported shell family, got %q", family)
+	}
+	hint, ok := m["hint"].(string)
+	if !ok || hint == "" {
+		t.Fatalf("expected non-empty hint, got %#v", m["hint"])
+	}
+}
+
 func TestHandleStartProcess_MissingCommand(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{})
