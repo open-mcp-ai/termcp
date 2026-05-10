@@ -47,5 +47,15 @@ func appendSafeArgs(attrs []any, request mcpgo.CallToolRequest) []any {
 	if v, ok := args["reader_id"].(float64); ok {
 		attrs = append(attrs, "reader_id", int64(v))
 	}
+	if v, ok := args["text"].(string); ok && v != "" {
+		attrs = append(attrs, "text", truncate(v, 200))
+	}
 	return attrs
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

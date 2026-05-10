@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
@@ -236,5 +237,77 @@ func TestWithLogging_OmitsAbsentSessionAndReaderIDs(t *testing.T) {
 	}
 	if _, ok := attrValue(entry, "reader_id"); ok {
 		t.Fatal("entry: reader_id attr should be absent when not in args")
+	}
+}
+
+func TestWithLogging_ExtractsTextParam(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("send_input", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc-123",
+		"text":       "echo hello world",
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	if len(records) < 1 {
+		t.Fatal("expected entry record")
+	}
+	entry := records[0]
+
+	v, ok := attrValue(entry, "text")
+	if !ok {
+		t.Fatal("entry: expected text attr")
+	}
+	if v.String() != "echo hello world" {
+		t.Fatalf("entry: expected text='echo hello world', got %q", v.String())
+	}
+}
+
+func TestWithLogging_TruncatesLongText(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("send_input", h)
+
+	longText := strings.Repeat("x", 250)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"text":       longText,
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	if len(records) < 1 {
+		t.Fatal("expected entry record")
+	}
+	entry := records[0]
+
+	v, ok := attrValue(entry, "text")
+	if !ok {
+		t.Fatal("entry: expected text attr")
+	}
+	logged := v.String()
+	if len(logged) > 203 || len(logged) < 198 {
+		t.Fatalf("expected truncated length ~200, got %d: %q", len(logged), logged)
+	}
+	if !strings.HasSuffix(logged, "...") {
+		t.Fatalf("expected truncated text ending with '...', got %q", logged)
 	}
 }
