@@ -99,6 +99,10 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithNumber("cols", mcpgo.Description("Column count"), mcpgo.DefaultNumber(80)),
 	), withLogging("resize_pty", s.handleResizePty))
 
+	mcpServer.AddTool(mcpgo.NewTool("detect_shell",
+		mcpgo.WithDescription("Detect the available shell on the target system. Returns shell path, family (unix/powershell/cmd), and a hint for agents. Use this before start_process to choose the correct command and args for the platform."),
+	), withLogging("detect_shell", s.handleDetectShell))
+
 	mcpServer.AddTool(mcpgo.NewTool("list_messages",
 		mcpgo.WithDescription("List the message index for a session"),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
