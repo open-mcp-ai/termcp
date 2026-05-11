@@ -273,6 +273,352 @@ func TestWithLogging_ExtractsTextParam(t *testing.T) {
 	}
 }
 
+func TestWithLogging_ExtractsCommandParam(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("start_process", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"command":    "ssh",
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	if len(records) < 1 {
+		t.Fatal("expected entry record")
+	}
+	entry := records[0]
+
+	v, ok := attrValue(entry, "command")
+	if !ok {
+		t.Fatal("entry: expected command attr")
+	}
+	if v.String() != "ssh" {
+		t.Fatalf("entry: expected command=ssh, got %q", v.String())
+	}
+}
+
+func TestWithLogging_ExtractsModeParam(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("start_process", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"mode":       "pipe",
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+	v, ok := attrValue(entry, "mode")
+	if !ok {
+		t.Fatal("entry: expected mode attr")
+	}
+	if v.String() != "pipe" {
+		t.Fatalf("entry: expected mode=pipe, got %q", v.String())
+	}
+}
+
+func TestWithLogging_ExtractsRowsAndCols(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("start_process", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"rows":       float64(40),
+		"cols":       float64(120),
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+
+	for _, key := range []string{"rows", "cols"} {
+		v, ok := attrValue(entry, key)
+		if !ok {
+			t.Fatalf("entry: expected %s attr", key)
+		}
+		if v.Int64() <= 0 {
+			t.Fatalf("entry: expected %s > 0, got %v", key, v)
+		}
+	}
+}
+
+func TestWithLogging_ExtractsTimeoutAndPressEnter(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("send_and_read", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id":  "abc",
+		"timeout":     float64(3.5),
+		"press_enter": true,
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+
+	if v, ok := attrValue(entry, "timeout"); !ok {
+		t.Fatal("entry: expected timeout attr")
+	} else if v.Float64() != 3.5 {
+		t.Fatalf("entry: expected timeout=3.5, got %v", v)
+	}
+
+	if v, ok := attrValue(entry, "press_enter"); !ok {
+		t.Fatal("entry: expected press_enter attr")
+	} else if !v.Bool() {
+		t.Fatal("entry: expected press_enter=true")
+	}
+}
+
+func TestWithLogging_ExtractsRemotePathParam(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("upload_file", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id":  "abc",
+		"remote_path": "/tmp/evil.sh",
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+	v, ok := attrValue(entry, "remote_path")
+	if !ok {
+		t.Fatal("entry: expected remote_path attr")
+	}
+	if v.String() != "/tmp/evil.sh" {
+		t.Fatalf("entry: expected remote_path=/tmp/evil.sh, got %q", v.String())
+	}
+}
+
+func TestWithLogging_ExtractsForceAndGracePeriod(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("terminate_process", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id":   "abc",
+		"force":        true,
+		"grace_period": float64(3),
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+
+	if v, ok := attrValue(entry, "force"); !ok {
+		t.Fatal("entry: expected force attr")
+	} else if !v.Bool() {
+		t.Fatal("entry: expected force=true")
+	}
+
+	if v, ok := attrValue(entry, "grace_period"); !ok {
+		t.Fatal("entry: expected grace_period attr")
+	} else if v.Int64() != 3 {
+		t.Fatalf("entry: expected grace_period=3, got %v", v)
+	}
+}
+
+func TestWithLogging_ExtractsArgsParam(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("start_process", h)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"command":    "ping",
+		"args":       []any{"-c", "5", "google.com"},
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+	v, ok := attrValue(entry, "args")
+	if !ok {
+		t.Fatal("entry: expected args attr")
+	}
+	if v.String() != `["-c","5","google.com"]` {
+		t.Fatalf("entry: expected args JSON, got %q", v.String())
+	}
+}
+
+func TestWithLogging_TruncatesArgsOver10(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("start_process", h)
+
+	raw := make([]any, 15)
+	for i := range raw {
+		raw[i] = "arg"
+	}
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id": "abc",
+		"command":    "cmd",
+		"args":       raw,
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+	v, ok := attrValue(entry, "args")
+	if !ok {
+		t.Fatal("entry: expected args attr")
+	}
+	// Should contain "... (15 items total)"
+	if !strings.Contains(v.String(), "15 items total") {
+		t.Fatalf("entry: expected truncated args with item count, got %q", v.String())
+	}
+}
+
+func TestWithLogging_TruncatesContentBase64(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("ok"), nil
+	}
+	wrapped := withLogging("upload_file", h)
+
+	longB64 := strings.Repeat("x", 500)
+
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"session_id":     "abc",
+		"content_base64": longB64,
+	}
+
+	if _, err := wrapped(context.Background(), req); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	entry := records[0]
+	v, ok := attrValue(entry, "content_base64")
+	if !ok {
+		t.Fatal("entry: expected content_base64 attr")
+	}
+	logged := v.String()
+	if len(logged) > 50 || len(logged) < 44 {
+		t.Fatalf("expected truncated length ~47, got %d: %q", len(logged), logged)
+	}
+	if !strings.Contains(logged, "500 bytes") {
+		t.Fatalf("expected size info, got %q", logged)
+	}
+}
+
+func TestWithLogging_LogsOutputPreviewOnExit(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText("hello from process"), nil
+	}
+	wrapped := withLogging("read_output", h)
+
+	if _, err := wrapped(context.Background(), mcpgo.CallToolRequest{}); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	exit := records[len(records)-1]
+	v, ok := attrValue(exit, "output_preview")
+	if !ok {
+		t.Fatal("exit: expected output_preview attr")
+	}
+	if v.String() != "hello from process" {
+		t.Fatalf("exit: expected output_preview='hello from process', got %q", v.String())
+	}
+}
+
+func TestWithLogging_TruncatesLongOutputPreview(t *testing.T) {
+	cap := withCapturedLogger(t)
+
+	longOutput := strings.Repeat("y", 250)
+	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		return mcpgo.NewToolResultText(longOutput), nil
+	}
+	wrapped := withLogging("read_output", h)
+
+	if _, err := wrapped(context.Background(), mcpgo.CallToolRequest{}); err != nil {
+		t.Fatalf("wrapped returned error: %v", err)
+	}
+
+	records := cap.snapshot()
+	exit := records[len(records)-1]
+	v, ok := attrValue(exit, "output_preview")
+	if !ok {
+		t.Fatal("exit: expected output_preview attr")
+	}
+	logged := v.String()
+	if len(logged) > 203 || len(logged) < 198 {
+		t.Fatalf("expected truncated length ~200, got %d: %q", len(logged), logged)
+	}
+	if !strings.HasSuffix(logged, "...") {
+		t.Fatalf("expected truncated output ending with '...', got %q", logged)
+	}
+}
+
 func TestWithLogging_TruncatesLongText(t *testing.T) {
 	cap := withCapturedLogger(t)
 
