@@ -81,7 +81,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 │   ├── config/config.go         # Configuration with validation
 │   ├── mcp/
 │   │   ├── server.go            # MCP SSE server & tool registration
-│   │   └── handlers.go          # 13 tool handlers
+│   │   └── handlers.go          # 14 tool handlers
 │   ├── sshserver/server.go      # Internal SSH server (charmbracelet/ssh)
 │   ├── sshclient/client.go      # Internal SSH client (crypto/ssh)
 │   ├── session/
@@ -326,6 +326,22 @@ Get the content of one or more messages.
 | `message_ids` | string[] | No | — | Message IDs to retrieve |
 
 Returns: `{ messages: [{id, session_id, type, content, created_at, byte_size}, ...] }`
+
+### `detect_shell`
+
+Detect the available shell on the target system. No parameters required.
+
+Returns: `{ path, family, hint }`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | Full path to the shell binary (e.g., `/bin/zsh`, `C:\Windows\System32\cmd.exe`) |
+| `family` | string | Shell family: `"unix"`, `"powershell"`, or `"cmd"` |
+| `hint` | string | Human-readable description of the detection source |
+
+Cross-platform behavior:
+- **Unix**: reads `$SHELL` env var first; falls back to `/bin/zsh` → `/bin/bash` → `/bin/sh`
+- **Windows**: prefers `pwsh.exe` → `powershell.exe` → `cmd.exe`
 
 ---
 
