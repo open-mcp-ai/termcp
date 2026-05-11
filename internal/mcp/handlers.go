@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"runtime"
+	"github.com/open-mcp-ai/termcp/internal/shell"
 	"strings"
 	"time"
 
@@ -391,38 +389,8 @@ func (s *Server) handleDownloadFile(ctx context.Context, request mcpgo.CallToolR
 	}), nil
 }
 
-func detectShell() (path, family, hint string) {
-	if runtime.GOOS == "windows" {
-		if p, err := exec.LookPath("pwsh.exe"); err == nil {
-			return p, "powershell", "pwsh.exe (PowerShell Core)"
-		}
-		if p, err := exec.LookPath("powershell.exe"); err == nil {
-			return p, "powershell", "powershell.exe (Windows PowerShell)"
-		}
-		if p, err := exec.LookPath("cmd.exe"); err == nil {
-			return p, "cmd", "cmd.exe (Command Prompt)"
-		}
-		return "", "", "No shell found on Windows"
-	}
-
-	shell := os.Getenv("SHELL")
-	if shell != "" {
-		if p, err := exec.LookPath(shell); err == nil {
-			return p, "unix", fmt.Sprintf("$SHELL: %s", shell)
-		}
-	}
-
-	for _, sh := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
-		if _, err := os.Stat(sh); err == nil {
-			return sh, "unix", fmt.Sprintf("Default: %s", sh)
-		}
-	}
-
-	return "", "", "No shell found"
-}
-
 func (s *Server) handleDetectShell(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	path, family, hint := detectShell()
+	path, family, hint := shell.NewDetector().Detect()
 	if path == "" {
 		return mcpgo.NewToolResultError(hint), nil
 	}
