@@ -17,6 +17,7 @@ type captureHandler struct {
 }
 
 func (c *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (c *captureHandler) Level() slog.Level                        { return slog.LevelDebug } // required by Go 1.24+ slog optimization
 func (c *captureHandler) Handle(_ context.Context, r slog.Record) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -38,7 +39,8 @@ func withCapturedLogger(t *testing.T) *captureHandler {
 	t.Helper()
 	prev := slog.Default()
 	cap := &captureHandler{}
-	slog.SetDefault(slog.New(cap))
+	logger := slog.New(cap)
+	slog.SetDefault(logger)
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	return cap
 }
