@@ -4,38 +4,43 @@ import (
 	"context"
 	"time"
 
-	mcpserver "github.com/mark3labs/mcp-go/server"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 )
 
 // Server wraps the MCP SSE server and tool handlers.
 type Server struct {
-	mcpServer *mcpserver.MCPServer
-	sseServer *mcpserver.SSEServer
-	sessMgr   *session.Manager
-	msgMgr    *message.Manager
+	mcpServer  *mcpserver.MCPServer
+	sseServer  *mcpserver.SSEServer
+	sessMgr    *session.Manager
+	msgMgr     *message.Manager
+	sshConfigs *sshconfig.Store
 }
 
 // New creates and configures the MCP server with all tools registered.
-func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
+// sshConfigs may be nil (start_session / list_ssh_configs will error or return empty).
+func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store) *Server {
 	s := &Server{
-		sessMgr: sessMgr,
-		msgMgr:  msgMgr,
+		sessMgr:    sessMgr,
+		msgMgr:     msgMgr,
+		sshConfigs: sshConfigs,
 	}
 
 	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0")
 
-	mcpServer.AddTool(mcpgo.NewTool("start_process",
-		mcpgo.WithDescription("Start an interactive process and return its session info. For long-running commands, use background_send + read_output instead of send_and_read to avoid blocking."),
+	mcpServer.AddTool(mcpgo.NewTool("start_session",
+		mcpgo.WithDescription("Start an interactive session. SSH uses server-side JSON under data-dir/ssh_configs/<name>/config.json; pass only the profile name as ssh_config (see list_ssh_configs). Omit ssh_config or use \"internal\" for the built-in loopback. Remote profiles need kind \"remote\" and SFTP for file tools. Create profiles with: server binary ssh-config init <name> -data-dir <dir>; list with ssh-config list. On success: session_id, pid, ssh_config, initial_output (always empty) — use read_output for terminal text."),
 		mcpgo.WithString("command", mcpgo.Required(), mcpgo.Description("Command to execute")),
 		mcpgo.WithArray("args", mcpgo.Description("Command arguments"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("I/O mode: pty or pipe"), mcpgo.DefaultString("pty")),
 		mcpgo.WithString("name", mcpgo.Description("Session name")),
 		mcpgo.WithNumber("rows", mcpgo.Description("PTY rows"), mcpgo.DefaultNumber(24)),
 		mcpgo.WithNumber("cols", mcpgo.Description("PTY columns"), mcpgo.DefaultNumber(80)),
-	), withLogging("start_process", s.handleStartProcess))
+		mcpgo.WithString("ssh_config", mcpgo.Description("SSH config name (subfolder under data-dir/ssh_configs). Default internal if omitted or empty")),
+	), withLogging("start_session", s.handleStartSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
 		mcpgo.WithDescription("Send text input to a running interactive process without reading output. Pair with read_output to check the result."),
@@ -80,12 +85,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 	), withLogging("get_session_info", s.handleGetSessionInfo))
 
-	mcpServer.AddTool(mcpgo.NewTool("terminate_process",
-		mcpgo.WithDescription("Terminate an interactive process"),
+	mcpServer.AddTool(mcpgo.NewTool("terminate_session",
+		mcpgo.WithDescription("Terminate an interactive session (stops the remote process). Use delete_session afterward to remove exited session metadata."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithBoolean("force", mcpgo.Description("Use SIGKILL directly"), mcpgo.DefaultBool(false)),
-		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to wait after SIGTERM"), mcpgo.DefaultNumber(5)),
-	), withLogging("terminate_process", s.handleTerminateProcess))
+		mcpgo.WithBoolean("force", mcpgo.Description("If true, skip SIGTERM grace wait and close the session immediately"), mcpgo.DefaultBool(false)),
+		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to wait after SIGTERM before forcing close (ignored when force is true)"), mcpgo.DefaultNumber(5)),
+	), withLogging("terminate_session", s.handleTerminateSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("delete_session",
 		mcpgo.WithDescription("Delete an exited session from the registry"),
@@ -100,8 +105,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 	), withLogging("resize_pty", s.handleResizePty))
 
 	mcpServer.AddTool(mcpgo.NewTool("detect_shell",
-		mcpgo.WithDescription("Detect the available shell on the target system. Returns shell path, family (unix/powershell/cmd), and a hint for agents. Use this before start_process to choose the correct command and args for the platform."),
+		mcpgo.WithDescription("Detect the available shell on the target system. Returns shell path, family (unix/powershell/cmd), and a hint for agents. Use this before start_session to choose the correct command and args for the platform."),
 	), withLogging("detect_shell", s.handleDetectShell))
+
+	mcpServer.AddTool(mcpgo.NewTool("list_ssh_configs",
+		mcpgo.WithDescription("List SSH config names on the server (data-dir/ssh_configs/*/config.json). Includes the built-in internal entry. No secrets returned."),
+	), withLogging("list_ssh_configs", s.handleListSSHConfigs))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_messages",
 		mcpgo.WithDescription("List the message index for a session"),

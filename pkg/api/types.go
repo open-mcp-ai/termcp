@@ -27,23 +27,25 @@ type Session struct {
 	Name      string        `json:"name"`
 	Command   string        `json:"command"`
 	Args      []string      `json:"args"`
-	Mode      SessionMode   `json:"mode"`     // "pty" | "pipe"
-	Status    SessionStatus `json:"status"`   // running | exited | error
+	Mode      SessionMode   `json:"mode"`   // "pty" | "pipe"
+	Status    SessionStatus `json:"status"` // running | exited | error
 	ExitCode  *int          `json:"exit_code"`
 	PID       int           `json:"pid"`
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 	Rows      int           `json:"rows"`
 	Cols      int           `json:"cols"`
+	// SSHEndpoint is a coarse hint for clients: "internal" (built-in loopback SSH) or "remote" (no host/user/port exposed).
+	SSHEndpoint string `json:"ssh_endpoint,omitempty"`
 }
 
 // MsgType classifies a message in a session.
 type MsgType string
 
 const (
-	MsgInput   MsgType = "input"
-	MsgOutput  MsgType = "output"
-	MsgSystem  MsgType = "system"
+	MsgInput  MsgType = "input"
+	MsgOutput MsgType = "output"
+	MsgSystem MsgType = "system"
 )
 
 // Message represents a single input/output record within a session.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,18 +9,43 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/config"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
+		base := filepath.Base(os.Args[0])
+		if len(os.Args) < 3 {
+			printSSHConfigUsage(base)
+			os.Exit(2)
+		}
+		switch os.Args[2] {
+		case "init":
+			if len(os.Args) < 4 {
+				printSSHConfigUsage(base)
+				os.Exit(2)
+			}
+			runSSHConfigInit(os.Args[3:])
+		case "list":
+			runSSHConfigList(os.Args[3:])
+		default:
+			printSSHConfigUsage(base)
+			os.Exit(2)
+		}
+		return
+	}
+
 	cfg := config.Default()
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP server host")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
@@ -28,6 +54,9 @@ func main() {
 	flag.IntVar(&cfg.SSHPort, "ssh-port", cfg.SSHPort, "Internal SSH server port (0 = random)")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
 	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log output format: text|json")
+	flag.StringVar(&cfg.AdminHost, "admin-host", cfg.AdminHost, "SSH config admin API bind host")
+	flag.IntVar(&cfg.AdminPort, "admin-port", cfg.AdminPort, "SSH config admin HTTP port (0 = disabled; requires admin-token)")
+	flag.StringVar(&cfg.AdminToken, "admin-token", cfg.AdminToken, "Bearer / X-Admin-Token for PUT/GET/DELETE /api/ssh-configs")
 	flag.Parse()
 
 	if err := cfg.Validate(); err != nil {
@@ -52,8 +81,29 @@ func main() {
 	msgMgr := message.NewManager(store)
 	sessMgr := session.NewManager(actualSSHAddr, msgMgr, store)
 
-	// Start MCP SSE server
-	mcpSrv := mcpmod.New(sessMgr, msgMgr)
+	if err := sshconfig.EnsureInternal(cfg.DataDir); err != nil {
+		slog.Error("failed to ensure internal ssh config", "err", err)
+		os.Exit(1)
+	}
+	sshStore := sshconfig.NewStore(cfg.DataDir)
+	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore)
+
+	var adminSrv *http.Server
+	if cfg.AdminPort > 0 {
+		admin := &sshconfig.AdminHandler{Store: sshStore, Token: cfg.AdminToken}
+		mux := http.NewServeMux()
+		mux.Handle("/api/ssh-configs", admin)
+		mux.Handle("/api/ssh-configs/", admin)
+		adminAddr := fmt.Sprintf("%s:%d", cfg.AdminHost, cfg.AdminPort)
+		adminSrv = &http.Server{Addr: adminAddr, Handler: mux}
+		go func() {
+			slog.Info("SSH config admin API listening", "addr", adminAddr)
+			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("admin API server stopped", "err", err)
+			}
+		}()
+	}
+
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	slog.Info("MCP SSE server listening", "addr", addr)
 
@@ -68,6 +118,11 @@ func main() {
 		slog.Info("shutting down")
 		sessMgr.CleanupAll(true)
 		sshSrv.Stop()
+		if adminSrv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = adminSrv.Shutdown(ctx)
+			cancel()
+		}
 		mcpSrv.Stop()
 	}()
 
@@ -98,4 +153,49 @@ func buildLogHandler(cfg *config.Config) slog.Handler {
 		return slog.NewJSONHandler(os.Stderr, opts)
 	}
 	return slog.NewTextHandler(os.Stderr, opts)
+}
+
+func printSSHConfigUsage(program string) {
+	fmt.Fprintf(os.Stderr, "usage:\n")
+	fmt.Fprintf(os.Stderr, "  %s ssh-config init <name> [-data-dir path]\n", program)
+	fmt.Fprintf(os.Stderr, "  %s ssh-config list [-data-dir path]\n", program)
+}
+
+func parseSSHConfigDataDir(setName string, args []string) string {
+	fs := flag.NewFlagSet(setName, flag.ExitOnError)
+	d := fs.String("data-dir", config.Default().DataDir, "termcp data directory")
+	_ = fs.Parse(args)
+	return *d
+}
+
+func runSSHConfigInit(args []string) {
+	if len(args) < 1 {
+		printSSHConfigUsage(filepath.Base(os.Args[0]))
+		os.Exit(2)
+	}
+	name := args[0]
+	dataDir := parseSSHConfigDataDir("ssh-config init", args[1:])
+	if err := sshconfig.InitRemoteSkeleton(dataDir, name); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	p := filepath.Join(dataDir, "ssh_configs", name, "config.json")
+	fmt.Println("created", p)
+}
+
+func runSSHConfigList(args []string) {
+	dataDir := parseSSHConfigDataDir("ssh-config list", args)
+	if err := sshconfig.EnsureInternal(dataDir); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store := sshconfig.NewStore(dataDir)
+	names, err := store.List()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	for _, n := range names {
+		fmt.Println(n)
+	}
 }

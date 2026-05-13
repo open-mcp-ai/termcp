@@ -100,7 +100,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 1. **Multi-Reader Ring Buffer**: Each agent registers as an independent reader with its own `ringbuffer.RingBuffer` instance. Writes broadcast to all readers. Slow readers lose oldest data (overwrite mode) rather than blocking the writer.
 
-2. **Internal SSH Architecture**: The server starts a charmbracelet/ssh server on localhost. Each `start_process` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY is used for native pseudo-terminal support.
+2. **Internal SSH Architecture**: The server starts a charmbracelet/ssh server on localhost. Each `start_session` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY is used for native pseudo-terminal support.
 
 3. **SSE over HTTP Transport**: Unlike traditional stdio-based MCP servers, this server exposes an HTTP endpoint supporting MCP SSE transport. Agents connect remotely, enabling cross-machine deployment.
 
@@ -121,7 +121,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 AI Agent Flow                                   Process Output
 ─────────────────                              ────────────────
 
-start_process(
+start_session(
   command="ssh",
   args=["deploy@192.168.1.100"],
   mode="pty"
@@ -143,13 +143,13 @@ send_and_read(
                                           /dev/sda1       100G   45G   55G  45% /
                                           deploy@web-server:~$ "
 
-terminate_process(session_id="abc123")
+terminate_session(session_id="abc123")
 ```
 
 ### Example 2: Python REPL Debugging
 
 ```
-start_process(command="python3", mode="pty")
+start_session(command="python3", mode="pty")
                                     ←    "Python 3.10.12\n>>> "
 
 send_and_read(text="data = [1, 2, 3, 4, 5]", press_enter=true)
@@ -163,7 +163,7 @@ send_and_read(text="sum(data)", press_enter=true)
 
 ```
 # Agent A starts a monitoring process
-start_process(command="top", mode="pty")
+start_session(command="top", mode="pty")
   → session_id: "sess-001"
 
 # Agent B joins the same session without stealing output
@@ -182,17 +182,17 @@ read_output(session_id="sess-001", reader_id=2)
 unregister_reader(session_id="sess-001", reader_id=2)
 
 # Agent A terminates the session
-terminate_process(session_id="sess-001")
+terminate_session(session_id="sess-001")
 delete_session(session_id="sess-001")
 ```
 
 ### Example 4: Multi-session Parallel Management
 
 ```
-start_process(command="ping", args=["-c", "5", "google.com"], name="ping-test")
+start_session(command="ping", args=["-c", "5", "google.com"], name="ping-test")
   → session_id: "a1b2c3"
 
-start_process(command="python3", args=["-m", "http.server", "8080"], name="web-server")
+start_session(command="python3", args=["-m", "http.server", "8080"], name="web-server")
   → session_id: "d4e5f6"
 
 list_sessions()
@@ -200,17 +200,17 @@ list_sessions()
 
 read_output(session_id="a1b2c3")  → ping statistics
 
-terminate_process(session_id="a1b2c3")
-terminate_process(session_id="d4e5f6")
+terminate_session(session_id="a1b2c3")
+terminate_session(session_id="d4e5f6")
 ```
 
 ---
 
 ## Tool Reference
 
-### `start_process`
+### `start_session`
 
-Start an interactive process.
+Start a session. Connection details live in server-side **SSH config** files under `{data-dir}/ssh_configs/<name>/config.json`; pass only the **`ssh_config`** profile name (see `list_ssh_configs`).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -220,8 +220,17 @@ Start an interactive process.
 | `name` | string | No | Auto-generated | Session name |
 | `rows` | integer | No | `24` | PTY row count (1–1000) |
 | `cols` | integer | No | `80` | PTY column count (1–1000) |
+| `ssh_config` | string | No | `internal` | Name of `{data-dir}/ssh_configs/<name>/config.json`. Reserved **`internal`** (`kind: internal`) is the built-in loopback SSH; use `kind: remote` for real hosts |
 
-Returns: `{ session_id, pid, initial_output }`
+Remote sessions need **SFTP** on the server for file tools.
+
+Returns: `{ session_id, pid, ssh_config, initial_output }`. Field `ssh_config` is the server-side profile name only (no host or credentials). Field `initial_output` is always an empty string; use `read_output` for terminal text. Session list/detail APIs may still include coarse `ssh_endpoint` (`internal` / `remote`) without host or user.
+
+**Naming**: Prefer **SSH config** (not “SSH host”) because `internal` is not a remote machine. Layout: `{data-dir}/ssh_configs/<name>/config.json`. Create a remote skeleton with `go run ./cmd/server ssh-config init <name> -data-dir <dir>` (same binary as the MCP server), then edit secrets locally. List names on the host with `go run ./cmd/server ssh-config list -data-dir <dir>`. Optional admin HTTP: `-admin-port` + `-admin-token`, then `PUT /api/ssh-configs/<name>` with `Authorization: Bearer …` or `X-Admin-Token`. The model only passes `ssh_config`; use **`list_ssh_configs`** to list names.
+
+### `list_ssh_configs`
+
+Returns `{ "ssh_configs": ["internal", ...] }` — names only.
 
 ### `send_input`
 
@@ -257,17 +266,17 @@ List all sessions. Returns: `{ sessions: [...] }`
 
 ### `get_session_info`
 
-Get session details. Returns: `{ id, name, command, args, mode, status, exit_code, pid, created_at }`
+Get session details. Returns: `{ id, name, command, args, mode, status, exit_code, pid, ssh_endpoint, created_at, ... }` — `ssh_endpoint` is `"internal"` or `"remote"` only.
 
-### `terminate_process`
+### `terminate_session`
 
-Terminate a process.
+End an interactive session (stops the remote/local process behind that session).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `session_id` | string | Yes | — | Session ID |
-| `force` | boolean | No | `false` | Use SIGKILL directly |
-| `grace_period` | number | No | `5` | Seconds to wait after SIGTERM (0–60) |
+| `force` | boolean | No | `false` | If true, skip the SIGTERM grace wait and close the session immediately |
+| `grace_period` | number | No | `5` | Seconds to wait after SIGTERM before forcing close (ignored when `force` is true; 0–60) |
 
 ### `delete_session`
 
@@ -329,19 +338,23 @@ Returns: `{ messages: [{id, session_id, type, content, created_at, byte_size}, .
 
 ### `detect_shell`
 
-Detect the available shell on the target system. No parameters required.
+Inspect the shell environment on **the machine running the termcp MCP server** (the server process’s OS and `PATH`). **It does not** connect through an existing SSH session or report the shell on a `remote` SSH profile’s host.
 
 Returns: `{ path, family, hint }`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `path` | string | Full path to the shell binary (e.g., `/bin/zsh`, `C:\Windows\System32\cmd.exe`) |
+| `path` | string | Full path to the shell binary (e.g., `/bin/zsh`, `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`) |
 | `family` | string | Shell family: `"unix"`, `"powershell"`, or `"cmd"` |
 | `hint` | string | Human-readable description of the detection source |
 
-Cross-platform behavior:
+Use **`path` as `start_session`’s `command`** (with suitable `args`) when you want a local **`internal`** session to match that host—e.g. on Windows, avoid using `bash` if it resolves to WSL unless that is intended.
+
+On the **server host** only:
 - **Unix**: reads `$SHELL` env var first; falls back to `/bin/zsh` → `/bin/bash` → `/bin/sh`
 - **Windows**: prefers `pwsh.exe` → `powershell.exe` → `cmd.exe`
+
+For a **remote** profile, detect the shell by running commands in that session (e.g. `echo $SHELL`) and reading output with `read_output`.
 
 ---
 
