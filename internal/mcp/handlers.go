@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-mcp-ai/termcp/internal/shell"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/shell"
+	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
@@ -93,7 +96,60 @@ func getStringSlice(args map[string]any, key string) []string {
 	return nil
 }
 
-func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func remoteFromEntry(e *sshconfig.Entry) (*session.RemoteSSH, error) {
+	pem := strings.TrimSpace(e.PrivateKeyPEM)
+	if fn := strings.TrimSpace(e.PrivateKeyFile); fn != "" {
+		b, err := os.ReadFile(filepath.Clean(fn))
+		if err != nil {
+			return nil, fmt.Errorf("private_key_file %q: %w", fn, err)
+		}
+		pem = string(b)
+	}
+	trust := true
+	if e.TrustUnknownHost != nil {
+		trust = *e.TrustUnknownHost
+	}
+	port := e.Port
+	if port == 0 {
+		port = 22
+	}
+	return &session.RemoteSSH{
+		Host:               e.Host,
+		Port:               port,
+		User:               e.User,
+		Password:           e.Password,
+		PrivateKeyPEM:      pem,
+		KeyPassphrase:      e.KeyPassphrase,
+		TrustUnknownHost:   trust,
+		KnownHosts:         e.KnownHosts,
+		DialTimeoutSeconds: e.DialTimeoutSeconds,
+	}, nil
+}
+
+// resolveSSHFromArgs returns the ssh_config name and remote dial settings (nil Remote = built-in loopback).
+func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *session.RemoteSSH, error) {
+	if s.sshConfigs == nil {
+		return "", nil, fmt.Errorf("ssh config store not configured")
+	}
+	name := strings.TrimSpace(getString(args, "ssh_config", ""))
+	if name == "" {
+		name = "internal"
+	}
+	ent, err := s.sshConfigs.Load(name)
+	if err != nil {
+		return "", nil, err
+	}
+	if ent.Kind == sshconfig.KindInternal {
+		return name, nil, nil
+	}
+	r, err := remoteFromEntry(ent)
+	if err != nil {
+		return "", nil, err
+	}
+	return name, r, nil
+}
+
+func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	command := getString(args, "command", "")
 	if command == "" {
@@ -103,6 +159,11 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 		return bad, nil
 	}
 
+	cfgName, remote, err := s.resolveSSHFromArgs(args)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+
 	sess, err := s.sessMgr.Create(session.Config{
 		Command: command,
 		Args:    getStringSlice(args, "args"),
@@ -110,18 +171,19 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 		Name:    getString(args, "name", ""),
 		Rows:    int(getFloat64(args, "rows", 24)),
 		Cols:    int(getFloat64(args, "cols", 80)),
+		Remote:  remote,
 	})
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	initial, _ := sess.ReadOutput(ctx, 500*time.Millisecond, true, 0)
 
 	result := map[string]any{
 		"session_id":     sess.ID,
 		"pid":            sess.PID,
-		"initial_output": initial,
+		"ssh_config":     cfgName,
+		"initial_output": "",
 	}
 	return jsonResult(result), nil
 }
@@ -222,7 +284,7 @@ func (s *Server) handleGetSessionInfo(ctx context.Context, request mcpgo.CallToo
 	return mcpgo.NewToolResultText(string(data)), nil
 }
 
-func (s *Server) handleTerminateProcess(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleTerminateSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
 	force := getBool(args, "force", false)
@@ -387,6 +449,21 @@ func (s *Server) handleDownloadFile(ctx context.Context, request mcpgo.CallToolR
 		"encoding": result.Encoding,
 		"size":     result.Size,
 	}), nil
+}
+
+func (s *Server) handleListSSHConfigs(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.sshConfigs == nil {
+		return jsonResult(map[string]any{"ssh_configs": []any{}}), nil
+	}
+	names, err := s.sshConfigs.List()
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	arr := make([]any, len(names))
+	for i, n := range names {
+		arr[i] = n
+	}
+	return jsonResult(map[string]any{"ssh_configs": arr}), nil
 }
 
 func (s *Server) handleDetectShell(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

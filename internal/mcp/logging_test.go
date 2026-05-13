@@ -17,7 +17,7 @@ type captureHandler struct {
 }
 
 func (c *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (c *captureHandler) Level() slog.Level                        { return slog.LevelDebug } // required by Go 1.24+ slog optimization
+func (c *captureHandler) Level() slog.Level                            { return slog.LevelDebug } // required by Go 1.24+ slog optimization
 func (c *captureHandler) Handle(_ context.Context, r slog.Record) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -281,7 +281,7 @@ func TestWithLogging_ExtractsCommandParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_process", h)
+	wrapped := withLogging("start_session", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -314,7 +314,7 @@ func TestWithLogging_ExtractsModeParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_process", h)
+	wrapped := withLogging("start_session", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -343,7 +343,7 @@ func TestWithLogging_ExtractsRowsAndCols(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_process", h)
+	wrapped := withLogging("start_session", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -440,7 +440,7 @@ func TestWithLogging_ExtractsForceAndGracePeriod(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("terminate_process", h)
+	wrapped := withLogging("terminate_session", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -475,7 +475,7 @@ func TestWithLogging_ExtractsArgsParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_process", h)
+	wrapped := withLogging("start_session", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -505,7 +505,7 @@ func TestWithLogging_TruncatesArgsOver10(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_process", h)
+	wrapped := withLogging("start_session", h)
 
 	raw := make([]any, 15)
 	for i := range raw {
