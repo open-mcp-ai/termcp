@@ -11,6 +11,7 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
 )
@@ -26,8 +27,11 @@ func newTestServer(t *testing.T) *Server {
 	dir := t.TempDir()
 	store := storage.New(dir)
 	msgMgr := message.NewManager(store)
+	if err := sshconfig.EnsureInternal(dir); err != nil {
+		t.Fatal(err)
+	}
 	sessMgr := session.NewManager(srv.Addr(), msgMgr, store)
-	return New(sessMgr, msgMgr)
+	return New(sessMgr, msgMgr, sshconfig.NewStore(dir))
 }
 
 func makeRequest(args map[string]any) mcpgo.CallToolRequest {
@@ -144,10 +148,10 @@ func TestHandleDetectShell_Auto(t *testing.T) {
 	}
 }
 
-func TestHandleStartProcess_MissingCommand(t *testing.T) {
+func TestHandleStartSession_MissingCommand(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{})
-	result, err := s.handleStartProcess(context.Background(), req)
+	result, err := s.handleStartSession(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +160,7 @@ func TestHandleStartProcess_MissingCommand(t *testing.T) {
 	}
 }
 
-func TestHandleStartProcess_Success(t *testing.T) {
+func TestHandleStartSession_Success(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{
 		"command": "echo",
@@ -164,7 +168,7 @@ func TestHandleStartProcess_Success(t *testing.T) {
 		"mode":    "pipe",
 	})
 
-	result, err := s.handleStartProcess(context.Background(), req)
+	result, err := s.handleStartSession(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +179,12 @@ func TestHandleStartProcess_Success(t *testing.T) {
 	m := parseResult(t, result)
 	if m["session_id"] == nil {
 		t.Fatal("expected session_id in result")
+	}
+	if m["ssh_config"] != "internal" {
+		t.Fatalf("expected ssh_config internal, got %v", m["ssh_config"])
+	}
+	if m["initial_output"] != "" {
+		t.Fatalf("expected empty initial_output, got %v", m["initial_output"])
 	}
 }
 
@@ -210,13 +220,13 @@ func TestHandleListSessions_Empty(t *testing.T) {
 	}
 }
 
-func TestHandleTerminateProcess_SessionNotFound(t *testing.T) {
+func TestHandleTerminateSession_SessionNotFound(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{
 		"session_id": "nonexistent",
 	})
 
-	result, err := s.handleTerminateProcess(context.Background(), req)
+	result, err := s.handleTerminateSession(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +276,7 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
-	startResult, err := s.handleStartProcess(context.Background(), startReq)
+	startResult, err := s.handleStartSession(context.Background(), startReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +314,7 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 		"session_id": sessionID,
 		"force":      true,
 	})
-	s.handleTerminateProcess(context.Background(), termReq)
+	s.handleTerminateSession(context.Background(), termReq)
 }
 
 func TestHandleListMessages(t *testing.T) {
@@ -315,7 +325,7 @@ func TestHandleListMessages(t *testing.T) {
 		"args":    []any{"test"},
 		"mode":    "pipe",
 	})
-	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
 
@@ -345,7 +355,7 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
-	startResult, err := s.handleStartProcess(context.Background(), startReq)
+	startResult, err := s.handleStartSession(context.Background(), startReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +396,7 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 
 	// Cleanup
 	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
-	s.handleTerminateProcess(context.Background(), termReq)
+	s.handleTerminateSession(context.Background(), termReq)
 }
 
 func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
@@ -397,7 +407,7 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 		"args":    testInteractiveShellArgs(),
 		"mode":    "pty",
 	})
-	startResult, err := s.handleStartProcess(context.Background(), startReq)
+	startResult, err := s.handleStartSession(context.Background(), startReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +448,7 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 
 	// Cleanup
 	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
-	s.handleTerminateProcess(context.Background(), termReq)
+	s.handleTerminateSession(context.Background(), termReq)
 }
 
 func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
@@ -452,7 +462,7 @@ func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 		"args":    testShellEchoArgs("done"),
 		"mode":    "pty",
 	})
-	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
 
@@ -473,21 +483,21 @@ func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 	}
 }
 
-func TestHandleStartProcess_InvalidMode(t *testing.T) {
+func TestHandleStartSession_InvalidMode(t *testing.T) {
 	s := newTestServer(t)
 	for _, mode := range []string{"websocket", "", "PIPE"} {
 		req := makeRequest(map[string]any{
 			"command": "echo",
 			"mode":    mode,
 		})
-		result, _ := s.handleStartProcess(context.Background(), req)
+		result, _ := s.handleStartSession(context.Background(), req)
 		if !result.IsError {
 			t.Fatalf("expected error for mode %q", mode)
 		}
 	}
 }
 
-func TestHandleStartProcess_InvalidRowsCols(t *testing.T) {
+func TestHandleStartSession_InvalidRowsCols(t *testing.T) {
 	s := newTestServer(t)
 	for _, tc := range []struct {
 		rows float64
@@ -501,7 +511,7 @@ func TestHandleStartProcess_InvalidRowsCols(t *testing.T) {
 			"rows":    tc.rows,
 			"cols":    tc.cols,
 		})
-		result, _ := s.handleStartProcess(context.Background(), req)
+		result, _ := s.handleStartSession(context.Background(), req)
 		if !result.IsError {
 			t.Fatalf("expected error for rows=%v cols=%v", tc.rows, tc.cols)
 		}
@@ -511,7 +521,7 @@ func TestHandleStartProcess_InvalidRowsCols(t *testing.T) {
 func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
 	s := newTestServer(t)
 	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
-	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
 
@@ -527,11 +537,11 @@ func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
 	}
 }
 
-func TestHandleTerminateProcess_InvalidGracePeriod(t *testing.T) {
+func TestHandleTerminateSession_InvalidGracePeriod(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
-	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
 
@@ -540,7 +550,7 @@ func TestHandleTerminateProcess_InvalidGracePeriod(t *testing.T) {
 			"session_id":   sessionID,
 			"grace_period": gp,
 		})
-		result, _ := s.handleTerminateProcess(context.Background(), req)
+		result, _ := s.handleTerminateSession(context.Background(), req)
 		if !result.IsError {
 			t.Fatalf("expected error for grace_period %v", gp)
 		}

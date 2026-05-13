@@ -11,8 +11,8 @@
     ┌──────────────────────────┼──────────────────────────┐
     │               internal/mcp/ (server.go)               │
     │                                                       │
-    │  17 个工具: start_process, send_input, read_output,    │
-    │  send_and_read, terminate_process, resize_pty,       │
+    │  19 个工具: start_session, send_input, read_output,    │
+    │  send_and_read, list_ssh_configs, terminate_session, resize_pty,       │
     │  upload_file, download_file, list_files, ...          │
     │                                                       │
     │  logging.go: 每个 handler 包装结构化日志 (耗时/错误)    │
@@ -67,12 +67,12 @@
              └─────────────────┘
 ```
 
-## 二、进程启动流程（start_process）
+## 二、进程启动流程（start_session）
 
 ```
 AI Agent                    MCP Server              Session.Manager        sshclient              sshserver              OS
   │                            │                         │                     │                      │                     │
-  │  start_process(            │                         │                     │                      │                     │
+  │  start_session(            │                         │                     │                      │                     │
   │    command="bash",         │                         │                     │                      │                     │
   │    mode="pty",             │                         │                     │                      │                     │
   │    rows=24, cols=80)       │                         │                     │                      │                     │
@@ -123,11 +123,10 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │  ← Session{ID,PID,...}  │                     │                      │                     │
   │                            │                         │                     │                      │                     │
   │                            │  sleep(100ms)            │                     │                      │                     │
-  │                            │  ReadOutput(500ms) ────>│                     │                      │                     │
-  │                            │                         │  buf.Read(reader0)   │                      │                     │
-  │                            │                         │  ansi.Strip+Compact  │                      │                     │
-  │  ← {session_id, pid,      │                         │                     │                      │                     │
-  │     initial_output}        │                         │                     │                      │                     │
+  │  ← {session_id, pid,       │                         │                     │                      │                     │
+  │     ssh_config,            │                         │                     │                      │                     │
+  │     initial_output:""}   │                         │                     │                      │                     │
+  │     (首包不读终端输出)      │                         │                     │                      │                     │
 ```
 
 ## 三、输入流向（send_input）
@@ -207,12 +206,12 @@ AI Agent                    Session                    sshclient              ss
 | 阻塞等待 | `sync.Cond.Wait()` + 超时 goroutine，支持 context 取消 |
 | 输出清洗 | 两次处理：Strip(去ANSI) → Compact(压缩噪音) |
 
-## 五、信号/终止流向（terminate_process）
+## 五、信号/终止流向（terminate_session）
 
 ```
 AI Agent                Session                    sshclient              sshserver              OS
   │                        │                          │                      │                     │
-  │  terminate_process(   │                          │                      │                     │
+  │  terminate_session(   │                          │                      │                     │
   │    session_id,        │                          │                      │                     │
   │    force=false,       │                          │                      │                     │
   │    grace_period=5)    │                          │                      │                     │
@@ -278,7 +277,7 @@ AI Agent                Session                    sshclient              sshser
 ```
 Agent A (reader 0)           Session              Agent B (新加入)
   │                            │                     │
-  │  start_process() ────────>│                     │
+  │  start_session() ────────>│                     │
   │  ← reader_id:0 (默认)     │                     │
   │                            │                     │
   │  read_output(             │                     │
@@ -362,14 +361,14 @@ message.Manager.Append(sessionID, type, content)
 ## 十、会话生命周期状态机
 
 ```
-                  start_process()
+                  start_session()
                        │
                        ▼
                ┌──────────────┐
                │   running    │
                └──┬───────┬───┘
                   │       │
-    进程自行退出  │       │  terminate_process()
+    进程自行退出  │       │  terminate_session()
     (startReaders │       │
      goroutine    │       │
      检测退出)    │       │

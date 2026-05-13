@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +20,26 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/buffer"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/sshclient"
+	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
 // Lock ordering: mu -> stdinMu. Never acquire in reverse order.
+
+// RemoteSSH selects a user-supplied SSH server instead of the built-in internal one.
+type RemoteSSH struct {
+	Host               string
+	Port               int
+	User               string
+	Password           string
+	PrivateKeyPEM      string
+	KeyPassphrase      string
+	TrustUnknownHost   bool
+	KnownHosts         string
+	DialTimeoutSeconds int
+}
 
 // Config holds parameters for creating a new Session.
 type Config struct {
@@ -33,6 +49,7 @@ type Config struct {
 	Name    string
 	Rows    int
 	Cols    int
+	Remote  *RemoteSSH
 }
 
 // Session wraps an interactive process session managed over SSH.
@@ -54,7 +71,7 @@ type Session struct {
 }
 
 // New creates and starts a new Session.
-func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) {
+func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) {
 	id := uuid.New().String()[:12]
 	name := cfg.Name
 	if name == "" {
@@ -62,7 +79,53 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 	}
 
 	usePty := cfg.Mode == api.ModePTY
-	execSession, err := sshclient.Start(sshAddr, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+
+	var dialAddr string
+	var clientCfg *ssh.ClientConfig
+	var sshEndpointPublic string // "internal" | "remote" for MCP / JSON (no host or credentials)
+
+	if cfg.Remote != nil && strings.TrimSpace(cfg.Remote.Host) != "" {
+		r := cfg.Remote
+		port := r.Port
+		if port == 0 {
+			port = 22
+		}
+		if port < 1 || port > 65535 {
+			return nil, fmt.Errorf("ssh_port must be between 1 and 65535, got %d", port)
+		}
+		host := strings.TrimSpace(r.Host)
+		dialAddr = net.JoinHostPort(host, strconv.Itoa(port))
+
+		toSec := r.DialTimeoutSeconds
+		if toSec <= 0 {
+			toSec = 30
+		}
+		if toSec > 120 {
+			toSec = 120
+		}
+		dialTimeout := time.Duration(toSec) * time.Second
+
+		var err error
+		clientCfg, err = sshclient.BuildClientConfig(sshclient.DialAuth{
+			User:              strings.TrimSpace(r.User),
+			Password:          r.Password,
+			PrivateKeyPEM:     r.PrivateKeyPEM,
+			KeyPassphrase:     r.KeyPassphrase,
+			TrustUnknownHost:  r.TrustUnknownHost,
+			KnownHostsContent: r.KnownHosts,
+			DialTimeout:       dialTimeout,
+		})
+		if err != nil {
+			return nil, err
+		}
+		sshEndpointPublic = "remote"
+	} else {
+		dialAddr = defaultSSHAddr
+		clientCfg = sshserver.ClientConfig()
+		sshEndpointPublic = "internal"
+	}
+
+	execSession, err := sshclient.StartWithConfig(dialAddr, clientCfg, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
 	if err != nil {
 		return nil, err
 	}
@@ -72,29 +135,30 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 
 	s := &Session{
 		Session: api.Session{
-			ID:        id,
-			Name:      name,
-			Command:   cfg.Command,
-			Args:      cfg.Args,
-			Mode:      cfg.Mode,
-			Status:    api.SessionRunning,
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
-			Rows:      cfg.Rows,
-			Cols:      cfg.Cols,
+			ID:          id,
+			Name:        name,
+			Command:     cfg.Command,
+			Args:        cfg.Args,
+			Mode:        cfg.Mode,
+			Status:      api.SessionRunning,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			Rows:        cfg.Rows,
+			Cols:        cfg.Cols,
+			SSHEndpoint: sshEndpointPublic,
 		},
 		execSession: execSession,
 		buf:         buf,
 		readerID:    rid,
 		msgMgr:      msgMgr,
-		sshAddr:     sshAddr,
+		sshAddr:     dialAddr,
 		done:        make(chan struct{}),
 		sftpClose:   make(chan struct{}),
 	}
 
 	s.startReaders()
 
-	sftpClient, err := sshclient.NewSFTPClient(sshAddr)
+	sftpClient, err := sshclient.NewSFTPClientWithConfig(dialAddr, clientCfg)
 	if err != nil {
 		execSession.Close()
 		return nil, fmt.Errorf("sftp client: %w", err)
@@ -104,7 +168,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
-	slog.Debug("session started", "session_id", id, "command", cfg.Command)
+	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic, "dial_addr", dialAddr)
 
 	return s, nil
 }

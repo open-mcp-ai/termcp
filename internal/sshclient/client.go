@@ -26,14 +26,21 @@ type ExecSession struct {
 // Start connects to the internal SSH server and starts a command.
 // addr is the SSH server address (e.g. "127.0.0.1:2222").
 // If pty is true, a pseudo-terminal is requested with the given dimensions.
+func Start(addr string, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	return StartWithConfig(addr, sshserver.ClientConfig(), command, args, pty, rows, cols)
+}
+
 func closeIfCloser(r io.Reader) {
 	if c, ok := r.(io.Closer); ok {
 		c.Close()
 	}
 }
 
-func Start(addr string, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
-	config := sshserver.ClientConfig()
+// StartWithConfig dials addr with the given SSH client config and starts a command.
+func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
@@ -181,9 +188,16 @@ func (c *SFTPConn) Close() error {
 	return err
 }
 
-// NewSFTPClient dials a new SSH connection and opens an SFTP session.
+// NewSFTPClient dials the internal SSH server and opens an SFTP session.
 func NewSFTPClient(addr string) (*SFTPConn, error) {
-	config := sshserver.ClientConfig()
+	return NewSFTPClientWithConfig(addr, sshserver.ClientConfig())
+}
+
+// NewSFTPClientWithConfig dials with the given config and opens SFTP.
+func NewSFTPClientWithConfig(addr string, config *ssh.ClientConfig) (*SFTPConn, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial for sftp: %w", err)
