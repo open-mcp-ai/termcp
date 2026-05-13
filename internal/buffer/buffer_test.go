@@ -72,11 +72,10 @@ func TestBuffer_ReadTimeout(t *testing.T) {
 	}
 }
 
-func TestBuffer_Overwrite(t *testing.T) {
+func TestBuffer_LargeWriteRetainsAll(t *testing.T) {
 	b := New(32)
 	r, _ := b.NewReader()
 
-	// Write 48 bytes into 32-byte buffer — first 16 bytes overwritten
 	b.Write([]byte(strings.Repeat("a", 16)))
 	b.Write([]byte(strings.Repeat("b", 16)))
 	b.Write([]byte(strings.Repeat("c", 16)))
@@ -86,14 +85,17 @@ func TestBuffer_Overwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(data)
-	if strings.Contains(s, strings.Repeat("a", 16)) {
-		t.Fatal("expected 'a' chunk to be overwritten")
+	if len(s) != 48 {
+		t.Fatalf("expected 48 bytes, got %d", len(s))
+	}
+	if !strings.Contains(s, strings.Repeat("a", 16)) {
+		t.Fatalf("expected 'a' chunk, got %q", s)
 	}
 	if !strings.Contains(s, strings.Repeat("b", 16)) {
-		t.Fatalf("expected 'b' chunk to survive, got %q", s)
+		t.Fatalf("expected 'b' chunk, got %q", s)
 	}
 	if !strings.Contains(s, strings.Repeat("c", 16)) {
-		t.Fatalf("expected 'c' chunk to survive, got %q", s)
+		t.Fatalf("expected 'c' chunk, got %q", s)
 	}
 }
 
@@ -166,6 +168,37 @@ func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestBuffer_NewReaderSeededFrom(t *testing.T) {
+	b := New(1024)
+	src, _ := b.NewReader()
+	b.Write([]byte("backlog"))
+	dst, err := b.NewReaderSeededFrom(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSrc, err := b.Read(context.Background(), src, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotSrc) != "backlog" {
+		t.Fatalf("src expected backlog intact, got %q", string(gotSrc))
+	}
+	gotDst, err := b.Read(context.Background(), dst, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotDst) != "backlog" {
+		t.Fatalf("dst expected seeded backlog, got %q", string(gotDst))
+	}
+
+	b.Write([]byte("more"))
+	g1, _ := b.Read(context.Background(), src, time.Second)
+	g2, _ := b.Read(context.Background(), dst, time.Second)
+	if string(g1) != "more" || string(g2) != "more" {
+		t.Fatalf("after write both readers: src=%q dst=%q", string(g1), string(g2))
+	}
 }
 
 func TestBuffer_MultiReaderIndependence(t *testing.T) {

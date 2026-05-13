@@ -77,6 +77,22 @@ func (s *Store) Load(name string) (*Entry, error) {
 	return ParseAndValidate(data)
 }
 
+// ReadRaw returns the raw config.json bytes for a name (file must exist and parse as valid Entry).
+func (s *Store) ReadRaw(name string) ([]byte, error) {
+	p, err := s.configPath(name)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseAndValidate(data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // List returns sorted config names that have config.json.
 func (s *Store) List() ([]string, error) {
 	s.mu.Lock()
