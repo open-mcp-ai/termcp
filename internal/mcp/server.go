@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -22,7 +23,8 @@ type Server struct {
 
 // New creates and configures the MCP server with all tools registered.
 // sshConfigs may be nil (start_session / list_ssh_configs will error or return empty).
-func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store) *Server {
+// sseOpts are passed to the underlying mcp-go SSE server (e.g. mcpserver.WithHTTPServer).
+func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store, sseOpts ...mcpserver.SSEOption) *Server {
 	s := &Server{
 		sessMgr:    sessMgr,
 		msgMgr:     msgMgr,
@@ -154,8 +156,18 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("list_files", s.handleListFiles))
 
 	s.mcpServer = mcpServer
-	s.sseServer = mcpserver.NewSSEServer(mcpServer)
+	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)
 	return s
+}
+
+// SSEHandler exposes the MCP SSE endpoint for mounting on a shared mux.
+func (s *Server) SSEHandler() http.Handler {
+	return s.sseServer.SSEHandler()
+}
+
+// MessageHandler exposes the MCP JSON-RPC message endpoint for mounting on a shared mux.
+func (s *Server) MessageHandler() http.Handler {
+	return s.sseServer.MessageHandler()
 }
 
 // Start begins serving MCP over SSE on the given address.

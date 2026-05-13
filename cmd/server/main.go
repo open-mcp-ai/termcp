@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/open-mcp-ai/termcp/internal/config"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
@@ -21,6 +23,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
+	"github.com/open-mcp-ai/termcp/internal/webui"
 )
 
 func main() {
@@ -86,16 +89,23 @@ func main() {
 		os.Exit(1)
 	}
 	sshStore := sshconfig.NewStore(cfg.DataDir)
-	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore)
+
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	mux := http.NewServeMux()
+	mainSrv := &http.Server{Addr: addr, Handler: mux}
+	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, mcpserver.WithHTTPServer(mainSrv))
+	mux.Handle("GET /sse", mcpSrv.SSEHandler())
+	mux.Handle("POST /message", mcpSrv.MessageHandler())
+	(&webui.Handler{Sessions: sessMgr, SSH: sshStore}).Register(mux)
 
 	var adminSrv *http.Server
 	if cfg.AdminPort > 0 {
 		admin := &sshconfig.AdminHandler{Store: sshStore, Token: cfg.AdminToken}
-		mux := http.NewServeMux()
-		mux.Handle("/api/ssh-configs", admin)
-		mux.Handle("/api/ssh-configs/", admin)
+		adminMux := http.NewServeMux()
+		adminMux.Handle("/api/ssh-configs", admin)
+		adminMux.Handle("/api/ssh-configs/", admin)
 		adminAddr := fmt.Sprintf("%s:%d", cfg.AdminHost, cfg.AdminPort)
-		adminSrv = &http.Server{Addr: adminAddr, Handler: mux}
+		adminSrv = &http.Server{Addr: adminAddr, Handler: adminMux}
 		go func() {
 			slog.Info("SSH config admin API listening", "addr", adminAddr)
 			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -104,8 +114,8 @@ func main() {
 		}()
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	slog.Info("MCP SSE server listening", "addr", addr)
+	slog.Info("web UI", "url", fmt.Sprintf("http://%s/", addr))
 
 	var shuttingDown atomic.Bool
 

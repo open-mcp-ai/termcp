@@ -7,7 +7,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.50.0
 	github.com/pkg/sftp v1.13.10
-	github.com/smallnest/ringbuffer v0.1.1
 	golang.org/x/crypto v0.50.0
 )
 

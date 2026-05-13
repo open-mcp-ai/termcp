@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>termcp</title>
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, sans-serif; background: #f6f8fa; color: #24292f; }
+    .app-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #d0d7de; background: #fff; flex-wrap: wrap; box-shadow: 0 1px 0 rgba(27,31,36,.04); }
+    .app-header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; color: #1f2328; }
+    .app-header .hint { font-size: 0.8rem; color: #656d76; flex: 1; min-width: 140px; }
+    .btn { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #d0d7de; background: #f6f8fa; color: #24292f; cursor: pointer; }
+    .btn:hover { background: #eaeef2; border-color: #afb8c1; }
+    .btn-primary { background: #2da44e; border-color: #2da44e; color: #fff; }
+    .btn-primary:hover { background: #2c974b; border-color: #2c974b; }
+    .btn-danger { background: #cf222e; border-color: #cf222e; color: #fff; }
+    .btn-danger:hover { background: #a40e26; border-color: #a40e26; }
+    .dock { padding: 16px; min-height: calc(100% - 56px); }
+    .dock-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #656d76; margin-bottom: 10px; }
+    .conn-grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+    .conn-tile { position: relative; width: 96px; cursor: pointer; text-align: center; user-select: none; }
+    /* 图标与角标（齿轮 / 红×）共用定位上下文，角标相对图标区右上角 */
+    .conn-tile-stack { position: relative; width: 72px; margin: 0 auto 8px; }
+    .conn-tile .conn-tile-stack > .icon-wrap {
+      width: 72px; height: 72px; margin: 0; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; background: linear-gradient(180deg, #fff, #f6f8fa); border: 1px solid #d0d7de;
+      box-shadow: 0 2px 8px rgba(27,31,36,.06); transition: transform .12s, border-color .12s, box-shadow .12s;
+    }
+    .conn-tile:hover .conn-tile-stack > .icon-wrap {
+      transform: translateY(-2px); border-color: #0969da; box-shadow: 0 4px 14px rgba(9,105,218,.15);
+    }
+    .conn-tile.add-tile .conn-tile-stack > .icon-wrap { border-style: dashed; border-color: #0969da; color: #0969da; font-size: 2.2rem; line-height: 1; }
+    .conn-tile.sess-tile .conn-tile-stack > .icon-wrap { font-size: 1.75rem; }
+    .conn-tile .nm { font-size: 0.85rem; font-weight: 600; word-break: break-all; line-height: 1.2; color: #1f2328; }
+    .conn-tile .sub { font-size: 0.68rem; color: #656d76; margin-top: 2px; line-height: 1.2; max-height: 2.4em; overflow: hidden; }
+    .conn-tile.add-tile { width: 108px; }
+    .conn-tile.add-tile .nm { color: #0969da; font-size: 0.78rem; }
+    .conn-load-banner { display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #fff8c5; border: 1px solid #d4a72c; color: #24292f; font-size: 0.85rem; }
+    .conn-tile .conn-tile-stack .gear {
+      position: absolute; right: 2px; top: 2px; z-index: 3; width: 22px; height: 22px; border: none; border-radius: 4px;
+      background: rgba(255,255,255,.9); color: #57606a; cursor: pointer; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12);
+      opacity: 0; transition: opacity .12s;
+    }
+    .conn-tile:hover .conn-tile-stack .gear { opacity: 1; }
+    .conn-tile .conn-tile-stack .sess-x {
+      position: absolute; right: 2px; top: 2px; z-index: 3; width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px;
+      background: rgba(207,34,46,.12); color: #cf222e; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08); opacity: 1; transition: background .12s, color .12s;
+    }
+    .conn-tile .conn-tile-stack .sess-x:hover { background: #cf222e; color: #fff; }
+
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(31,35,38,.45); z-index: 20000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .modal-backdrop.hidden { display: none; }
+    .modal { background: #fff; border: 1px solid #d0d7de; border-radius: 10px; max-width: 720px; width: 100%; max-height: 90vh; overflow: auto; box-shadow: 0 16px 48px rgba(27,31,36,.18); }
+    .modal-h { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #d0d7de; background: #f6f8fa; }
+    .modal-h h2 { margin: 0; font-size: 1rem; color: #1f2328; }
+    .modal-body { padding: 16px; }
+    .modal-body label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 4px; }
+    .modal-body input, .modal-body textarea, .modal-body select { width: 100%; font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #d0d7de; background: #fff; color: #24292f; margin-bottom: 12px; }
+    .modal-body textarea { min-height: 220px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 8px; }
+    .err { color: #cf222e; font-size: 0.85rem; margin: 0 0 8px; }
+    .muted { color: #656d76; }
+
+    /* 浮动终端：深色（与原先一致）；主页仍为浅色 */
+    .shell-windows-container { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
+    .shell-windows-container > * { pointer-events: auto; }
+    .shell-window { position: fixed; width: 640px; height: 480px; min-width: 320px; min-height: 240px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); border: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; z-index: 10001; }
+    .shell-window-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #333; background: #2d2d2d; cursor: move; user-select: none; flex-shrink: 0; z-index: 2; }
+    .shell-window-title { margin: 0; font-size: 13px; color: #eee; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .shell-window-title .sid { font-size: 11px; color: #7ee787; font-weight: 600; margin-left: 6px; }
+    .shell-window-title .subt { font-size: 11px; color: #888; }
+    .shell-window-header-btns { display: flex; gap: 0; flex-shrink: 0; }
+    .shell-window-header-btns button { width: 26px; height: 26px; padding: 0; border: none; background: transparent; color: #aaa; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+    .shell-window-collapse-btn { position: relative; margin-right: 2px; }
+    .shell-window-collapse-btn .ic-u, .shell-window-collapse-btn .ic-d { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+    .shell-window-header-btns button:hover { color: #eee; background: rgba(255,255,255,.08); }
+    .shell-window-content { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: #1e1e1e; }
+    .shell-terminal-wrap { flex: 1; min-height: 100px; min-width: 0; padding: 6px 6px 0; overflow: hidden; display: flex; flex-direction: column; }
+    .shell-terminal-wrap .xterm { height: 100%; min-height: 0; }
+    .shell-terminal-wrap .xterm .xterm-viewport {
+      background-color: #1e1e1e !important;
+      scrollbar-color: #484f58 #1e1e1e;
+    }
+    .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar { width: 10px; height: 10px; }
+    .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-track { background: #1e1e1e; }
+    .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+      background: #484f58;
+      border-radius: 5px;
+      border: 2px solid #1e1e1e;
+    }
+    .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6e7681; }
+    .shell-window.shell-window-collapsed .shell-window-content,
+    .shell-window.shell-window-collapsed .shell-window-resize-handle { display: none; }
+    .shell-window.shell-window-collapsed { height: auto; min-height: 0; }
+    .shell-window-resize-handle { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; pointer-events: none; z-index: 10; }
+    .shell-window-resize-handle::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 12px; height: 12px; pointer-events: auto; cursor: nwse-resize; border-right: 2px solid rgba(255,255,255,.28); border-bottom: 2px solid rgba(255,255,255,.28); }
+    @media (max-width: 768px) {
+      .shell-window { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-width: 0; max-height: calc(100dvh - 16px); }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <h1>termcp</h1>
+    <span class="hint">上方 Entries 为 SSH 配置；下方 Sessions 为运行中会话。点 Session 磁贴打开终端；磁贴右上角红 × 立即结束会话。浮动终端的 × 只关窗口。</span>
+    <button type="button" class="btn btn-primary" id="btn-add-conn">＋ 添加连接</button>
+    <button type="button" class="btn" id="btn-refresh-conn">刷新</button>
+  </header>
+  <div class="dock">
+    <div class="dock-title">Entries（SSH 配置）</div>
+    <div id="conn-load-banner" class="conn-load-banner" role="status"></div>
+    <div id="conn-grid" class="conn-grid"></div>
+    <div class="dock-title" style="margin-top:22px">Sessions（运行中）</div>
+    <p class="muted" style="margin:0 0 10px;font-size:0.8rem;line-height:1.45">列表由 <strong>SSE</strong> <code>/api/sessions/stream</code> 推送。新会话只出现磁贴，<strong>点击磁贴</strong>才打开终端。磁贴<strong>右上角红 ×</strong>会立即结束远端会话；浮动窗 × 仅关闭本地窗口。</p>
+    <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
+    <div id="session-grid" class="conn-grid"></div>
+  </div>
+
+  <div id="shell-windows-container" class="shell-windows-container" aria-live="polite"></div>
+
+  <div id="modal-conn" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-h">
+        <h2 id="modal-conn-title">添加连接</h2>
+        <button type="button" class="btn" id="modal-conn-close">关闭</button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-conn-err" class="err" style="display:none"></p>
+        <p style="margin:0 0 12px;font-size:0.85rem;line-height:1.5" class="muted">填写<strong>配置名称</strong>（仅字母数字、下划线、连字符），按需修改下方 JSON，点<strong>保存</strong>写入服务器。保存后磁贴会出现，再点击磁贴输入命令即可开终端。</p>
+        <label for="conn-name">配置名称（目录名）</label>
+        <input type="text" id="conn-name" placeholder="my-server" autocomplete="off">
+        <label for="conn-json">config.json 内容</label>
+        <textarea id="conn-json" spellcheck="false"></textarea>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">删除</button>
+          <button type="button" class="btn btn-primary" id="conn-save">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-start" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-h">
+        <h2 id="start-title">启动会话</h2>
+        <button type="button" class="btn" id="modal-start-close">关闭</button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-start-err" class="err" style="display:none"></p>
+        <input type="hidden" id="start-ssh-config">
+        <label for="start-cmd">命令</label>
+        <input type="text" id="start-cmd" placeholder="bash / sh / powershell …" autocomplete="off">
+        <label for="start-mode">模式</label>
+        <select id="start-mode"><option value="pty">pty</option><option value="pipe">pipe</option></select>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" id="start-run">连接</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/xterm/xterm.js"></script>
+  <script>
+(function () {
+  var shellWindowCount = 0;
+  var startConnName = '';
+  var editingConnName = '';
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function shellWindowsEl() {
+    return document.getElementById('shell-windows-container');
+  }
+
+  function setLoadBanner(bannerEl, msg) {
+    if (!bannerEl) return;
+    if (msg) {
+      bannerEl.textContent = msg;
+      bannerEl.style.display = 'block';
+    } else {
+      bannerEl.textContent = '';
+      bannerEl.style.display = 'none';
+    }
+  }
+
+  /** /api/sessions/{id}{suffix} — suffix 如 /stream、/input、/terminate */
+  function sessionAPI(sessionId, suffix) {
+    return '/api/sessions/' + encodeURIComponent(sessionId) + suffix;
+  }
+
+  /** SSE 断线重连：当前等待秒数 prev → 下一次等待上限 */
+  function sseBackoffNext(prev) {
+    var d = prev || 1000;
+    return Math.min(30000, Math.max(2000, Math.floor(d * 1.5)));
+  }
+
+  function safeESClose(es) {
+    try { es.close(); } catch (e) {}
+  }
+
+  function clearRetryTimer(id) {
+    if (!id) return;
+    try { clearTimeout(id); } catch (e) {}
+  }
+
+  function bringShellWindowToFront(win) {
+    var c = shellWindowsEl();
+    if (c && win.parentNode === c) c.appendChild(win);
+  }
+
+  function getShellWindowBySid(sessionId) {
+    var c = shellWindowsEl();
+    if (!c) return null;
+    var wins = c.querySelectorAll('.shell-window');
+    for (var i = 0; i < wins.length; i++) {
+      if (wins[i]._sid === sessionId) return wins[i];
+    }
+    return null;
+  }
+
+  function openOrFocusShellWindow(connLabel, sessionId, clickEvent) {
+    var ex = getShellWindowBySid(sessionId);
+    if (ex) {
+      bringShellWindowToFront(ex);
+      if (ex._term) try { ex._term.focus(); } catch (e) {}
+      return;
+    }
+    openShellWindow(connLabel, sessionId, clickEvent);
+  }
+
+  function sessionTileTitle(s) {
+    var parts = (s.command || '').trim();
+    if (s.args && s.args.length) parts += ' ' + s.args.join(' ');
+    if (parts.length > 40) parts = parts.slice(0, 37) + '…';
+    return parts || '(no command)';
+  }
+
+  function sessionTileSub(s) {
+    var bits = [s.id || ''];
+    if (s.ssh_endpoint) bits.push(s.ssh_endpoint);
+    if (s.mode) bits.push(String(s.mode));
+    return bits.join(' · ');
+  }
+
+  function renderSessionGrid(sessions, bannerMsg) {
+    var grid = document.getElementById('session-grid');
+    if (!grid) return;
+    setLoadBanner(document.getElementById('session-load-banner'), bannerMsg);
+    grid.innerHTML = '';
+    var running = (sessions || []).filter(function (s) { return s.status === 'running'; });
+    if (running.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.style.cssText = 'padding:8px 4px;font-size:0.85rem';
+      empty.textContent = '暂无运行中的会话。';
+      grid.appendChild(empty);
+      return;
+    }
+    running.forEach(function (s) {
+      var tile = document.createElement('div');
+      tile.className = 'conn-tile sess-tile';
+      var nm = s.name || s.id || 'session';
+      tile.innerHTML =
+        '<div class="conn-tile-stack">' +
+        '<button type="button" class="sess-x" title="结束会话（立即断开远端）" aria-label="结束会话">' +
+          '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
+        '</button>' +
+        '<div class="icon-wrap" title="打开终端">🖥</div>' +
+        '</div>' +
+        '<div class="nm">' + escapeHtml(nm) + '</div>' +
+        '<div class="sub">' + escapeHtml(sessionTileSub(s)) + '</div>';
+      tile.title = sessionTileTitle(s);
+      var sx = tile.querySelector('.sess-x');
+      sx.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).catch(function () {});
+        var w = getShellWindowBySid(s.id);
+        if (w) closeShellWindow(w);
+      };
+      tile.onclick = function (e) {
+        if (e.target.closest('.sess-x')) return;
+        openOrFocusShellWindow(nm, s.id, e);
+      };
+      grid.appendChild(tile);
+    });
+  }
+
+  function applySessionsSnapshot(sessions) {
+    window._lastSessionsSnapshot = sessions;
+    renderSessionGrid(sessions, '');
+  }
+
+  /** 建立会话列表 SSE；断线后指数退避自动重连（手动刷新按钮会走 startSessionListSSE 重置退避）。 */
+  function connectSessionListSSE() {
+    clearRetryTimer(window._sessionListSSERetryTimer);
+    window._sessionListSSERetryTimer = null;
+    if (window._sessionListES) {
+      safeESClose(window._sessionListES);
+      window._sessionListES = null;
+    }
+    var es = new EventSource('/api/sessions/stream');
+    window._sessionListES = es;
+    es.addEventListener('open', function () {
+      window._sessionListSSEBackoff = 1000;
+      renderSessionGrid(window._lastSessionsSnapshot || [], '');
+    });
+    es.addEventListener('sessions', function (ev) {
+      try {
+        var j = JSON.parse(ev.data);
+        applySessionsSnapshot(j.sessions || []);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+    es.onerror = function () {
+      safeESClose(es);
+      if (window._sessionListES === es) window._sessionListES = null;
+      if (window._sessionListSSERetryTimer) return;
+      var delay = window._sessionListSSEBackoff || 1000;
+      window._sessionListSSEBackoff = sseBackoffNext(delay);
+      renderSessionGrid(window._lastSessionsSnapshot || [], '会话列表 SSE 断开，约 ' + Math.ceil(delay / 1000) + ' 秒后自动重连…');
+      window._sessionListSSERetryTimer = setTimeout(function () {
+        window._sessionListSSERetryTimer = null;
+        connectSessionListSSE();
+      }, delay);
+    };
+  }
+
+  function startSessionListSSE() {
+    window._sessionListSSEBackoff = 1000;
+    connectSessionListSSE();
+  }
+
+  function closeShellWindow(win) {
+    win._inputClosed = true;
+    if (win._inputAbort) {
+      try { win._inputAbort.abort(); } catch (e) {}
+      win._inputAbort = null;
+    }
+    if (win._shellStreamRetryTimer) {
+      clearRetryTimer(win._shellStreamRetryTimer);
+      win._shellStreamRetryTimer = null;
+    }
+    if (win._es) { safeESClose(win._es); win._es = null; }
+    if (win._shellResizeSyncTimer) {
+      clearRetryTimer(win._shellResizeSyncTimer);
+      win._shellResizeSyncTimer = null;
+    }
+    if (win._fitRo && win._shellTermEl) {
+      try { win._fitRo.unobserve(win._shellTermEl); } catch (e) {}
+      win._fitRo = null;
+    }
+    if (win._term) { try { win._term.dispose(); } catch (e) {} win._term = null; }
+    win.remove();
+  }
+
+  function setupShellWindowDrag(win, header) {
+    var drag = { active: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
+    function onMove(e) {
+      if (!drag.active) return;
+      win.style.left = (drag.startLeft + e.clientX - drag.startX) + 'px';
+      win.style.top = (drag.startTop + e.clientY - drag.startY) + 'px';
+    }
+    function onUp() {
+      if (!drag.active) return;
+      drag.active = false;
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    header.addEventListener('mousedown', function (e) {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      bringShellWindowToFront(win);
+      drag.active = true;
+      drag.startX = e.clientX; drag.startY = e.clientY;
+      var rect = win.getBoundingClientRect();
+      drag.startLeft = rect.left; drag.startTop = rect.top;
+      document.body.style.cursor = 'move';
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  function setupShellWindowResize(win) {
+    var handle = win.querySelector('.shell-window-resize-handle');
+    if (!handle) return;
+    var resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
+    function onMove(e) {
+      if (!resizing) return;
+      var w = Math.max(320, startW + e.clientX - startX);
+      var h = Math.max(240, startH + e.clientY - startY);
+      win.style.width = w + 'px';
+      win.style.height = h + 'px';
+      if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
+    }
+    function onUp() {
+      if (!resizing) return;
+      resizing = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (win._shellResizeSyncTimer) {
+        clearRetryTimer(win._shellResizeSyncTimer);
+        win._shellResizeSyncTimer = null;
+      }
+      if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, true);
+    }
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      resizing = true;
+      startX = e.clientX; startY = e.clientY;
+      var rect = win.getBoundingClientRect();
+      startW = rect.width; startH = rect.height;
+      document.body.style.cursor = 'nwse-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  function postResize(win) {
+    if (!win._sid || !win._term) return;
+    fetch(sessionAPI(win._sid, '/resize'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: win._term.rows, cols: win._term.cols })
+    }).catch(function () {});
+  }
+
+  /** 容器尺寸变化后防抖同步 PTY（mr-robot 对 WebSocket 用纯本地 fit；SSH resize 便宜，这里补一层防抖） */
+  function scheduleShellRemoteResize(win) {
+    if (!win || !win._sid) return;
+    if (win._shellResizeSyncTimer) clearRetryTimer(win._shellResizeSyncTimer);
+    win._shellResizeSyncTimer = setTimeout(function () {
+      win._shellResizeSyncTimer = null;
+      postResize(win);
+    }, 200);
+  }
+
+  /**
+   * mr-robot 风格适配：列宽按 .xterm-viewport 可见宽度（避免纵向滚动条吃掉列数），
+   * 再用 .xterm-screen 与当前行列校准单元格尺寸；syncRemote 为真时立即 POST /resize。
+   */
+  function fitShellTerminal(term, container, win, syncRemote) {
+    if (!container || !container.isConnected || !term) return;
+    var vp = term.element && term.element.querySelector('.xterm-viewport');
+    var w = container.clientWidth;
+    if (vp && vp.clientWidth > 0) w = vp.clientWidth;
+    var h = container.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    var fontSize = (typeof term.getOption === 'function' && term.getOption('fontSize')) || 13;
+    var fontFamily = (typeof term.getOption === 'function' && term.getOption('fontFamily')) || 'Consolas, Monaco, monospace';
+    var measure = document.createElement('span');
+    measure.style.cssText = 'position:absolute;visibility:hidden;top:0;left:0;white-space:pre;font:' + fontSize + 'px ' + fontFamily;
+    measure.textContent = 'M';
+    document.body.appendChild(measure);
+    var charWidth = measure.offsetWidth || 8;
+    var lineHeight = Math.ceil(fontSize * 1.35) || 16;
+    document.body.removeChild(measure);
+    var screenEl = term.element && term.element.querySelector('.xterm-screen');
+    var prevCols = term.cols;
+    var prevRows = term.rows;
+    if (screenEl && prevCols > 0 && prevRows > 0) {
+      var cw = screenEl.clientWidth / prevCols;
+      var lh = screenEl.clientHeight / prevRows;
+      if (cw > 0) charWidth = cw;
+      if (lh > 0) lineHeight = lh;
+    }
+    var cols = Math.max(2, Math.floor(w / charWidth));
+    var rows = Math.max(2, Math.floor((h - 4) / lineHeight));
+    term.resize(cols, rows);
+    if (syncRemote) postResize(win);
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64);
+    var u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+
+  function openShellWindow(connLabel, sessionId, clickEvent) {
+    if (typeof Terminal === 'undefined') { alert('xterm 未加载'); return; }
+    if (getShellWindowBySid(sessionId)) {
+      openOrFocusShellWindow(connLabel, sessionId, clickEvent);
+      return;
+    }
+    var container = shellWindowsEl();
+    if (!container) return;
+    shellWindowCount += 1;
+    var win = document.createElement('div');
+    win.className = 'shell-window';
+    win.id = 'shell-window-' + shellWindowCount;
+    win._sid = sessionId;
+    win.innerHTML =
+      '<div class="shell-window-header">' +
+        '<h3 class="shell-window-title">' + escapeHtml(connLabel) +
+        ' <span class="sid">' + escapeHtml(sessionId) + '</span>' +
+        ' <span class="subt">session</span></h3>' +
+        '<div class="shell-window-header-btns">' +
+          '<button type="button" class="shell-window-collapse-btn" title="收起">' +
+            '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
+            '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
+          '</button>' +
+          '<button type="button" class="close-btn" title="关闭窗口（不结束会话）">' +
+            '<svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="shell-window-content"><div class="shell-terminal-wrap"></div></div>' +
+      '<div class="shell-window-resize-handle" title="拖动调整大小"></div>';
+
+    var termEl = win.querySelector('.shell-terminal-wrap');
+    var header = win.querySelector('.shell-window-header');
+    var closeBtn = win.querySelector('.close-btn');
+    var collapseBtn = win.querySelector('.shell-window-collapse-btn');
+    var winW = 640, winH = 480, th = 21;
+    var left, top;
+    if (clickEvent && typeof clickEvent.clientX === 'number') {
+      left = Math.max(8, Math.min(clickEvent.clientX - winW / 2, window.innerWidth - winW - 8));
+      top = Math.max(8, Math.min(clickEvent.clientY - th, window.innerHeight - winH - 8));
+    } else {
+      var off = (shellWindowCount - 1) % 5;
+      left = 80 + off * 24; top = 60 + off * 24;
+    }
+    win.style.left = left + 'px';
+    win.style.top = top + 'px';
+
+    container.appendChild(win);
+
+    win.addEventListener('mousedown', function (e) {
+      if (e.target.closest('.shell-terminal-wrap')) {
+        if (win._term) win._term.focus();
+      } else {
+        bringShellWindowToFront(win);
+      }
+    });
+
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'Consolas, Monaco, monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        cursorAccent: '#1e1e1e',
+        selectionBackground: '#264f7844'
+      },
+      scrollback: 3000
+    });
+    term.open(termEl);
+    win._term = term;
+    win._shellTermEl = termEl;
+    termEl.addEventListener('click', function () { term.focus(); });
+    termEl.addEventListener('mousedown', function () { term.focus(); });
+
+    fitShellTerminal(term, termEl, win, true);
+    requestAnimationFrame(function () {
+      fitShellTerminal(term, termEl, win, true);
+      requestAnimationFrame(function () {
+        fitShellTerminal(term, termEl, win, true);
+        if (typeof term.refresh === 'function') {
+          try { term.refresh(0, term.rows - 1); } catch (e) {}
+        }
+      });
+    });
+    var ro = new ResizeObserver(function () {
+      if (win.classList.contains('shell-window-collapsed')) return;
+      fitShellTerminal(term, termEl, win, false);
+      scheduleShellRemoteResize(win);
+    });
+    ro.observe(termEl);
+    win._fitRo = ro;
+
+    win._streamDone = false;
+    win._shellStreamBackoff = 1000;
+    function attachShellStream() {
+      clearRetryTimer(win._shellStreamRetryTimer);
+      win._shellStreamRetryTimer = null;
+      if (win._es) {
+        safeESClose(win._es);
+        win._es = null;
+      }
+      var es = new EventSource(sessionAPI(sessionId, '/stream'));
+      win._es = es;
+      es.addEventListener('open', function () { win._shellStreamBackoff = 1000; });
+      es.onmessage = function (ev) {
+        try { term.write(b64ToBytes(ev.data)); } catch (e) { console.error(e); }
+      };
+      es.addEventListener('done', function () {
+        win._streamDone = true;
+        clearRetryTimer(win._shellStreamRetryTimer);
+        win._shellStreamRetryTimer = null;
+        try { term.writeln('\r\n\x1b[33m[会话已结束]\x1b[0m'); } catch (e) {}
+        safeESClose(es);
+        if (win._es === es) win._es = null;
+      });
+      es.onerror = function () {
+        safeESClose(es);
+        if (win._es === es) win._es = null;
+        if (win._streamDone || !win._term) return;
+        if (win._shellStreamRetryTimer) return;
+        var delay = win._shellStreamBackoff || 1000;
+        win._shellStreamBackoff = sseBackoffNext(delay);
+        try { term.writeln('\r\n\x1b[90m[输出流断开，' + Math.ceil(delay / 1000) + ' 秒后重连…]\x1b[0m'); } catch (e) {}
+        win._shellStreamRetryTimer = setTimeout(function () {
+          win._shellStreamRetryTimer = null;
+          if (win._streamDone || !win._term || win._sid !== sessionId) return;
+          attachShellStream();
+        }, delay);
+      };
+    }
+    attachShellStream();
+
+    /* 串行 POST，避免并行 fetch 导致按键乱序（tmux/escape 序列对顺序极敏感） */
+    win._inputClosed = false;
+    win._inputAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    win._inputChain = Promise.resolve();
+    term.onData(function (data) {
+      if (win._inputClosed) return;
+      win._inputChain = win._inputChain.then(function () {
+        if (win._inputClosed) return Promise.resolve();
+        var opts = { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data };
+        if (win._inputAbort && win._inputAbort.signal) opts.signal = win._inputAbort.signal;
+        return fetch(sessionAPI(sessionId, '/input'), opts);
+      }).catch(function () {});
+    });
+
+    collapseBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    collapseBtn.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var collapsing = !win.classList.contains('shell-window-collapsed');
+      if (collapsing) {
+        win._savedH = win.style.height || (win.getBoundingClientRect().height + 'px');
+        win.style.height = 'auto';
+        win.style.minHeight = '0';
+      } else {
+        win.style.height = win._savedH || '';
+        win.style.minHeight = '';
+      }
+      win.classList.toggle('shell-window-collapsed');
+      var icD = collapseBtn.querySelector('.ic-d');
+      var icU = collapseBtn.querySelector('.ic-u');
+      if (icD && icU) {
+        icD.style.display = win.classList.contains('shell-window-collapsed') ? 'none' : '';
+        icU.style.display = win.classList.contains('shell-window-collapsed') ? '' : 'none';
+      }
+      collapseBtn.title = win.classList.contains('shell-window-collapsed') ? '展开' : '收起';
+      if (!win.classList.contains('shell-window-collapsed')) {
+        fitShellTerminal(term, termEl, win, true);
+      }
+    });
+
+    closeBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    closeBtn.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      closeShellWindow(win);
+    });
+
+    setupShellWindowDrag(win, header);
+    setupShellWindowResize(win);
+    setTimeout(function () { term.focus(); }, 0);
+  }
+
+  function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+  function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+  function appendAddConnectionTile(grid) {
+    var add = document.createElement('div');
+    add.className = 'conn-tile add-tile';
+    add.innerHTML = '<div class="conn-tile-stack"><div class="icon-wrap" title="添加 SSH 连接">＋</div></div><div class="nm">添加连接</div><div class="sub">新建 config</div>';
+    add.onclick = function () { openConnModal(false, ''); };
+    grid.appendChild(add);
+  }
+
+  function renderConnGrid(connections, bannerMsg) {
+    var grid = document.getElementById('conn-grid');
+    if (!grid) return;
+    setLoadBanner(document.getElementById('conn-load-banner'), bannerMsg);
+    grid.innerHTML = '';
+    appendAddConnectionTile(grid);
+    (connections || []).forEach(function (c) {
+      var tile = document.createElement('div');
+      tile.className = 'conn-tile';
+      var icon = c.kind === 'internal' ? '🔁' : '🌐';
+      var sub = c.kind === 'internal' ? 'loopback' : ((c.user || '') + '@' + (c.host || '') + (c.port && c.port !== 22 ? ':' + c.port : ''));
+      tile.innerHTML =
+        '<div class="conn-tile-stack">' +
+        '<button type="button" class="gear" title="编辑">⚙</button>' +
+        '<div class="icon-wrap">' + icon + '</div>' +
+        '</div>' +
+        '<div class="nm">' + escapeHtml(c.name) + '</div>' +
+        '<div class="sub">' + escapeHtml(sub) + '</div>';
+      var gear = tile.querySelector('.gear');
+      gear.onclick = function (e) { e.stopPropagation(); openConnModal(true, c.name); };
+      tile.onclick = function (e) {
+        if (e.target.closest('.gear')) return;
+        openStartModal(c.name, e);
+      };
+      grid.appendChild(tile);
+    });
+  }
+
+  function loadConnections() {
+    return fetch('/api/connections')
+      .then(function (r) {
+        return r.text().then(function (t) {
+          if (!r.ok) {
+            throw new Error(t || ('HTTP ' + r.status));
+          }
+          try {
+            return JSON.parse(t);
+          } catch (e) {
+            throw new Error('服务器返回的不是 JSON');
+          }
+        });
+      })
+      .then(function (j) {
+        renderConnGrid(j.connections || [], '');
+      })
+      .catch(function (e) {
+        console.error(e);
+        var msg = (e && e.message) ? e.message : String(e);
+        renderConnGrid([], '加载 Entries 列表失败：' + msg + '。请检查是否已启动 termcp 主服务、或从正确端口访问。仍可通过上方「添加连接」或下方磁贴新建。');
+      });
+  }
+
+  function openConnModal(edit, name) {
+    editingConnName = edit ? name : '';
+    document.getElementById('modal-conn-err').style.display = 'none';
+    document.getElementById('modal-conn-title').textContent = edit ? '编辑连接' : '添加连接';
+    document.getElementById('conn-delete').style.display = edit && name !== 'internal' ? 'inline-block' : 'none';
+    var nameEl = document.getElementById('conn-name');
+    nameEl.value = edit ? name : '';
+    nameEl.readOnly = !!edit;
+    var ta = document.getElementById('conn-json');
+    if (edit) {
+      fetch('/api/connections/' + encodeURIComponent(name)).then(function (r) {
+        if (!r.ok) throw new Error(r.statusText);
+        return r.text();
+      }).then(function (t) { ta.value = t; }).catch(function (err) {
+        document.getElementById('modal-conn-err').textContent = String(err.message || err);
+        document.getElementById('modal-conn-err').style.display = 'block';
+      });
+    } else {
+      fetch('/api/connection-templates').then(function (r) { return r.json(); }).then(function (t) {
+        ta.value = t.remote || '{}';
+      }).catch(function () { ta.value = '{}'; });
+    }
+    showModal('modal-conn');
+  }
+
+  document.getElementById('modal-conn-close').onclick = function () { hideModal('modal-conn'); };
+  document.getElementById('conn-save').onclick = function () {
+    var err = document.getElementById('modal-conn-err');
+    err.style.display = 'none';
+    var name = document.getElementById('conn-name').value.trim();
+    var body = document.getElementById('conn-json').value;
+    if (!name) { err.textContent = '请填写配置名称'; err.style.display = 'block'; return; }
+    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        hideModal('modal-conn');
+        loadConnections();
+      })
+      .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
+  };
+  document.getElementById('conn-delete').onclick = function () {
+    var name = document.getElementById('conn-name').value.trim();
+    if (!name || name === 'internal') return;
+    if (!confirm('删除连接 ' + name + ' ?')) return;
+    fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        hideModal('modal-conn');
+        loadConnections();
+      })
+      .catch(function (e) {
+        var err = document.getElementById('modal-conn-err');
+        err.textContent = String(e.message || e);
+        err.style.display = 'block';
+      });
+  };
+
+  function openStartModal(connName, clickEvent) {
+    startConnName = connName;
+    document.getElementById('modal-start-err').style.display = 'none';
+    document.getElementById('start-ssh-config').value = connName;
+    document.getElementById('start-title').textContent = '连接 · ' + connName;
+    var def = '';
+    try { def = localStorage.getItem('termcp.defaultCommand') || ''; } catch (e) {}
+    if (!def) def = 'bash';
+    document.getElementById('start-cmd').value = def;
+    document.getElementById('start-mode').value = 'pty';
+    showModal('modal-start');
+    window._startClickEvt = clickEvent;
+  }
+  document.getElementById('modal-start-close').onclick = function () { hideModal('modal-start'); };
+  document.getElementById('start-run').onclick = function () {
+    var err = document.getElementById('modal-start-err');
+    err.style.display = 'none';
+    var cmd = document.getElementById('start-cmd').value.trim();
+    if (!cmd) { err.textContent = '请填写命令'; err.style.display = 'block'; return; }
+    try { localStorage.setItem('termcp.defaultCommand', cmd); } catch (e) {}
+    var body = {
+      command: cmd,
+      args: [],
+      mode: document.getElementById('start-mode').value,
+      ssh_config: document.getElementById('start-ssh-config').value,
+      rows: 24,
+      cols: 80
+    };
+    fetch('/api/sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        return r.json();
+      })
+      .then(function (j) {
+        hideModal('modal-start');
+        var sid = j && j.session_id;
+        if (sid) {
+          openShellWindow(startConnName || 'session', sid, window._startClickEvt);
+        }
+      })
+      .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
+  };
+
+  document.getElementById('btn-add-conn').onclick = function () { openConnModal(false, ''); };
+  document.getElementById('btn-refresh-conn').onclick = function () {
+    loadConnections();
+    startSessionListSSE();
+  };
+  loadConnections();
+  startSessionListSSE();
+})();
+  </script>
+</body>
+</html>

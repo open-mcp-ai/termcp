@@ -6,10 +6,9 @@ import (
 	"io"
 	"sync"
 	"time"
-
-	"github.com/smallnest/ringbuffer"
 )
 
+// DefaultMaxBytes is kept for API compatibility with buffer.New(maxBytes); sizing is no longer enforced.
 const DefaultMaxBytes = 1024 * 1024
 
 var (
@@ -17,33 +16,37 @@ var (
 	ErrReader = errors.New("buffer: invalid reader ID")
 )
 
-// Buffer is a thread-safe multi-reader ring buffer for process output.
-// Each reader gets its own independent view of the data via a ringbuffer
-// that supports overwrite semantics.
-type Buffer struct {
-	mu      sync.Mutex
-	size    int
-	readers map[int]*ringbuffer.RingBuffer
-	nextID  int
-	closed  bool
-	cond    *sync.Cond
+type readerState struct {
+	readPos int64 // next byte offset in master to deliver
 }
 
-// New creates a Buffer with the given max capacity in bytes.
+// Buffer is a thread-safe multi-reader append-only log of process output.
+// All readers share one master byte slice; each reader has an independent read cursor.
+// Fully consumed prefixes are dropped when compactThreshold is exceeded to bound memory.
+type Buffer struct {
+	mu                sync.Mutex
+	master            []byte
+	readers           map[int]*readerState
+	nextID            int
+	closed            bool
+	cond              *sync.Cond
+	compactThreshold  int // compact when len(master) > this
+	compactMinAdvance int // and min(readPos) >= this
+}
+
+// New creates a Buffer. maxBytes is ignored (historical ring capacity); output grows without a fixed cap.
 func New(maxBytes int) *Buffer {
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxBytes
-	}
+	_ = maxBytes // API compatibility; no hard limit on retained history
 	b := &Buffer{
-		size:    maxBytes,
-		readers: make(map[int]*ringbuffer.RingBuffer),
+		readers:           make(map[int]*readerState),
+		compactThreshold:  8 << 20, // 8 MiB before attempting prefix trim
+		compactMinAdvance: 1 << 20, // require ≥1 MiB reclaimable prefix
 	}
 	b.cond = sync.NewCond(&b.mu)
 	return b
 }
 
-// NewReader registers a new independent reader and returns its ID.
-// Returns ErrClosed if the buffer is already closed.
+// NewReader registers a new independent reader that only observes writes after registration.
 func (b *Buffer) NewReader() (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -52,13 +55,28 @@ func (b *Buffer) NewReader() (int, error) {
 	}
 	id := b.nextID
 	b.nextID++
-	rb := ringbuffer.New(b.size)
-	rb.SetOverwrite(true)
-	b.readers[id] = rb
+	b.readers[id] = &readerState{readPos: int64(len(b.master))}
 	return id, nil
 }
 
-// Unregister removes a reader and wakes any goroutines waiting on it.
+// NewReaderSeededFrom registers a new reader whose cursor starts at srcReaderID's cursor
+// (same logical position — no duplicate copy of backlog).
+func (b *Buffer) NewReaderSeededFrom(srcReaderID int) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return 0, ErrClosed
+	}
+	src, ok := b.readers[srcReaderID]
+	if !ok {
+		return 0, ErrReader
+	}
+	id := b.nextID
+	b.nextID++
+	b.readers[id] = &readerState{readPos: src.readPos}
+	return id, nil
+}
+
 func (b *Buffer) Unregister(id int) {
 	b.mu.Lock()
 	delete(b.readers, id)
@@ -66,7 +84,7 @@ func (b *Buffer) Unregister(id int) {
 	b.cond.Broadcast()
 }
 
-// Write appends data to the buffer, broadcasting to all waiting readers.
+// Write appends data for all readers and wakes waiters.
 func (b *Buffer) Write(data []byte) error {
 	if len(data) == 0 {
 		return nil
@@ -76,26 +94,43 @@ func (b *Buffer) Write(data []byte) error {
 	if b.closed {
 		return ErrClosed
 	}
-	for _, rb := range b.readers {
-		rb.Write(data)
-	}
+	b.master = append(b.master, data...)
+	b.maybeCompactLocked()
 	b.cond.Broadcast()
 	return nil
 }
 
-// Read reads all available data for the given reader.
-// If no data is available, it waits up to timeout or until ctx is cancelled.
-// Returns (nil, ErrReader) for invalid reader IDs.
-// Returns (nil, io.EOF) if the buffer is closed.
+// maybeCompactLocked drops a prefix of master that every reader has already passed.
+// Caller must hold b.mu.
+func (b *Buffer) maybeCompactLocked() {
+	if len(b.master) <= b.compactThreshold {
+		return
+	}
+	minPos := int64(len(b.master))
+	for _, rs := range b.readers {
+		if rs.readPos < minPos {
+			minPos = rs.readPos
+		}
+	}
+	if minPos < int64(b.compactMinAdvance) {
+		return
+	}
+	b.master = b.master[minPos:]
+	for _, rs := range b.readers {
+		rs.readPos -= minPos
+	}
+}
+
+// Read returns all bytes available ahead of the reader's cursor, then advances the cursor.
 func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) ([]byte, error) {
 	b.mu.Lock()
-	rb, ok := b.readers[readerID]
+	rs, ok := b.readers[readerID]
 	if !ok {
 		b.mu.Unlock()
 		return nil, ErrReader
 	}
 
-	if data := b.drain(rb); data != nil {
+	if data := b.drainLocked(rs); data != nil {
 		b.mu.Unlock()
 		return data, nil
 	}
@@ -124,7 +159,7 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) 
 	}()
 	defer close(stop)
 
-	for rb.Length() == 0 && !b.closed {
+	for rs.readPos >= int64(len(b.master)) && !b.closed {
 		if time.Until(deadline) <= 0 {
 			b.mu.Unlock()
 			return nil, nil
@@ -144,7 +179,7 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) 
 		}
 	}
 
-	if data := b.drain(rb); data != nil {
+	if data := b.drainLocked(rs); data != nil {
 		b.mu.Unlock()
 		return data, nil
 	}
@@ -156,29 +191,29 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) 
 	return nil, nil
 }
 
-// drain reads all available bytes from a ringbuffer. Returns nil if empty.
-// Must be called with b.mu held.
-func (b *Buffer) drain(rb *ringbuffer.RingBuffer) []byte {
-	if length := rb.Length(); length > 0 {
-		buf := make([]byte, length)
-		n, _ := rb.Read(buf)
-		return buf[:n]
+// drainLocked copies master[readPos:] and advances readPos to len(master). b.mu held.
+func (b *Buffer) drainLocked(rs *readerState) []byte {
+	end := int64(len(b.master))
+	if rs.readPos >= end {
+		return nil
 	}
-	return nil
+	s := b.master[rs.readPos:end]
+	out := make([]byte, len(s))
+	copy(out, s)
+	rs.readPos = end
+	return out
 }
 
-// HasMore returns whether the given reader has unread data.
 func (b *Buffer) HasMore(readerID int) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	rb, ok := b.readers[readerID]
+	rs, ok := b.readers[readerID]
 	if !ok {
 		return false
 	}
-	return rb.Length() > 0
+	return rs.readPos < int64(len(b.master))
 }
 
-// Close marks the buffer as closed and wakes all waiting readers.
 func (b *Buffer) Close() {
 	b.mu.Lock()
 	b.closed = true

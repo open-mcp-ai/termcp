@@ -17,6 +17,9 @@ type Manager struct {
 	sshAddr  string
 	msgMgr   *message.Manager
 	store    *storage.Store
+
+	listChangeMu sync.RWMutex
+	onListChange func()
 }
 
 // NewManager creates a Manager.
@@ -29,8 +32,29 @@ func NewManager(sshAddr string, msgMgr *message.Manager, store *storage.Store) *
 	}
 }
 
+// SetSessionListListener registers a callback invoked without holding Manager locks whenever
+// the session set or a session's lifecycle state may have changed (create, delete, exit, terminate).
+func (m *Manager) SetSessionListListener(fn func()) {
+	m.listChangeMu.Lock()
+	m.onListChange = fn
+	m.listChangeMu.Unlock()
+}
+
+func (m *Manager) notifyListChange() {
+	m.listChangeMu.RLock()
+	fn := m.onListChange
+	m.listChangeMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // Create starts a new session and registers it.
 func (m *Manager) Create(cfg Config) (*Session, error) {
+	cfg.OnExit = func() {
+		m.persist()
+		m.notifyListChange()
+	}
 	s, err := New(m.sshAddr, cfg, m.msgMgr)
 	if err != nil {
 		return nil, err
@@ -41,6 +65,7 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 	m.mu.Unlock()
 
 	m.persist()
+	m.notifyListChange()
 	return s, nil
 }
 
@@ -70,6 +95,7 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	if s != nil {
 		s.Terminate(force, gracePeriod)
 		m.persist()
+		m.notifyListChange()
 	}
 }
 
@@ -89,6 +115,7 @@ func (m *Manager) Delete(id string) error {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	m.persist()
+	m.notifyListChange()
 	return nil
 }
 
@@ -121,6 +148,7 @@ func (m *Manager) CleanupAll(force bool) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	m.persist(sessions)
+	m.notifyListChange()
 }
 
 func (m *Manager) persist(sessions ...[]api.Session) {

@@ -50,6 +50,8 @@ type Config struct {
 	Rows    int
 	Cols    int
 	Remote  *RemoteSSH
+	// OnExit is optional; invoked once after the process exits and status is updated (Manager wires this for persistence + UI).
+	OnExit func()
 }
 
 // Session wraps an interactive process session managed over SSH.
@@ -68,6 +70,7 @@ type Session struct {
 	msgMgr        *message.Manager
 	sshAddr       string
 	done          chan struct{}
+	onExit        func()
 }
 
 // New creates and starts a new Session.
@@ -154,6 +157,7 @@ func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, 
 		sshAddr:     dialAddr,
 		done:        make(chan struct{}),
 		sftpClose:   make(chan struct{}),
+		onExit:      cfg.OnExit,
 	}
 
 	s.startReaders()
@@ -214,6 +218,9 @@ func (s *Session) startReaders() {
 				s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
 			}
 			slog.Debug("session exited", "session_id", s.ID, "exit_code", code)
+			if fn := s.onExit; fn != nil {
+				fn()
+			}
 		})
 		// Delay SFTP close so agent can download files after process exits.
 		go func() {
@@ -231,34 +238,56 @@ func (s *Session) startReaders() {
 	}()
 }
 
-// SendInput writes text to the process stdin.
+// SendInput writes text to the process stdin and records it in the message log.
 func (s *Session) SendInput(text string, pressEnter bool) error {
+	return s.sendInput([]byte(text), pressEnter, true)
+}
+
+// SendTerminalBytes writes raw keystrokes to stdin without appending to the message log (web UI).
+func (s *Session) SendTerminalBytes(data []byte, pressEnter bool) error {
+	return s.sendInput(data, pressEnter, false)
+}
+
+func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 	s.mu.RLock()
 	running := s.Status == api.SessionRunning
 	s.mu.RUnlock()
 	if !running {
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
+	var toWrite []byte
 	if pressEnter {
 		if runtime.GOOS == "windows" {
-			text += "\r\n"
+			toWrite = append(append([]byte(nil), data...), '\r', '\n')
 		} else {
-			text += "\n"
+			toWrite = append(append([]byte(nil), data...), '\n')
 		}
+	} else {
+		toWrite = data
 	}
 	s.stdinMu.Lock()
-	_, err := s.execSession.Stdin.Write([]byte(text))
+	_, err := s.execSession.Stdin.Write(toWrite)
 	s.stdinMu.Unlock()
 	if err != nil {
 		return err
 	}
-	if s.msgMgr != nil {
-		s.msgMgr.Append(s.ID, api.MsgInput, text)
+	if persist && s.msgMgr != nil {
+		var logged string
+		if pressEnter {
+			if runtime.GOOS == "windows" {
+				logged = string(data) + "\r\n"
+			} else {
+				logged = string(data) + "\n"
+			}
+		} else {
+			logged = string(data)
+		}
+		s.msgMgr.Append(s.ID, api.MsgInput, logged)
 	}
 	return nil
 }
 
-func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, persist bool) (string, error) {
 	data, err := s.buf.Read(ctx, readerID, timeout)
 	if err != nil && err != io.EOF {
 		return "", err
@@ -274,7 +303,7 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 			output = strings.Join(lines[:maxLines], "\n")
 		}
 	}
-	if output != "" && s.msgMgr != nil {
+	if output != "" && persist && s.msgMgr != nil {
 		s.msgMgr.Append(s.ID, api.MsgOutput, output)
 	}
 	return output, nil
@@ -282,12 +311,17 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 
 // ReadOutput reads new output using the default reader.
 func (s *Session) ReadOutput(ctx context.Context, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines)
+	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines, true)
 }
 
 // ReadOutputForReader reads new output for a specific reader ID.
 func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines)
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, true)
+}
+
+// ReadTerminalStream reads PTY output for a reader without appending to the message log (high-frequency UI streaming).
+func (s *Session) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, false)
 }
 
 // Terminate gracefully or forcefully stops the process.
@@ -322,6 +356,9 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 				s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated (no exit code)")
 			}
 			slog.Debug("session terminated", "session_id", s.ID, "forced", force)
+			if fn := s.onExit; fn != nil {
+				fn()
+			}
 		})
 	})
 }
@@ -354,6 +391,19 @@ func (s *Session) Info() api.Session {
 		cp.ExitCode = &v
 	}
 	return cp
+}
+
+// DefaultOutputReaderID is the first ring-buffer reader created with the session.
+// MCP read_output defaults to this ID. Multiple consumers on the same reader ID share one read cursor;
+// the web UI SSE stream uses RegisterReaderSeededFromDefault for an independent cursor plus backlog.
+func (s *Session) DefaultOutputReaderID() int {
+	return s.readerID
+}
+
+// RegisterReaderSeededFromDefault registers a new output reader seeded from the default reader
+// (atomic under buffer lock) so the web stream does not compete with MCP read_output on reader 0.
+func (s *Session) RegisterReaderSeededFromDefault() (int, error) {
+	return s.buf.NewReaderSeededFrom(s.readerID)
 }
 
 // RegisterReader creates a new independent reader and returns its ID.

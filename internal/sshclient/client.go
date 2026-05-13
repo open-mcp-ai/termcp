@@ -3,6 +3,7 @@ package sshclient
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -77,6 +78,14 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 	}
 
 	if pty {
+		// 远端 tmux/UTF-8 画线字符依赖 LC_CTYPE；多数 sshd 会忽略 Setenv，失败不影响建连。
+		lang := strings.TrimSpace(os.Getenv("LANG"))
+		if lang == "" {
+			lang = "C.UTF-8"
+		}
+		_ = session.Setenv("LANG", lang)
+		_ = session.Setenv("LC_CTYPE", lang)
+
 		modes := ssh.TerminalModes{
 			ssh.ECHO:          1,
 			ssh.TTY_OP_ISPEED: 14400,

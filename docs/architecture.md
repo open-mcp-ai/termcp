@@ -162,19 +162,18 @@ AI Agent                    Session                    sshclient              ss
   │                                                                                 ▲
   │ 每个 4096 字节 chunk                                                             │
   ▼                                                                                 │
-  pipeToBuffer goroutine ── 读取 ──> buffer.Buffer ── 广播 ──> 所有 ringbuffer       │
+  pipeToBuffer goroutine ── 读取 ──> buffer.Buffer ── 追加 master ──> 每 reader 独立 readPos │
   (每 stdout/stderr 各一个)           │                                                │
                                      │  ┌─────────┬─────────┬─────────┐              │
                                      │  │reader 0 │reader 3 │reader 7 │ ...          │
-                                     │  │ 1024KB  │ 1024KB  │ 1024KB  │              │
-                                     │  │pos:1582 │pos:337  │pos:985  │              │
+                                     │  │readPos │readPos │readPos │              │
                                      │  └────┬────┘────┬────┘─────────┘              │
                                      │       │         │                              │
                                      ▼       ▼         ▼                              │
                                     read_output 被调用时:                              │
                                      │                                                 │
                                      │  buf.Read(ctx, readerID, timeout)               │
-                                     │  ┌─ drain(rb): 读取所有可用字节                 │
+                                     │  ┌─ drain: 拷贝 master[readPos:] 并推进 readPos   │
                                      │  ├─ 无数据且未关闭: Cond.Wait(timeout)          │
                                      │  └─ closed: 返回 io.EOF                        │
                                      │                                                 │
@@ -201,8 +200,8 @@ AI Agent                    Session                    sshclient              ss
 
 | 特性 | 实现 |
 |------|------|
-| 多读者 | 每个 `register_reader` 创建独立 ringbuffer，独立游标 |
-| 慢读者不阻塞 | ringbuffer `SetOverwrite(true)`，满时覆盖旧数据 |
+| 多读者 | 每个 `register_reader` 独立 readPos；共享一条 append-only master |
+| 内存 | 全员已读过的前缀可整体丢弃；无固定容量环、不按读者覆盖旧数据 |
 | 阻塞等待 | `sync.Cond.Wait()` + 超时 goroutine，支持 context 取消 |
 | 输出清洗 | 两次处理：Strip(去ANSI) → Compact(压缩噪音) |
 
@@ -298,7 +297,7 @@ Agent A (reader 0)           Session              Agent B (新加入)
   │  ← 新输出                  │                     │
 ```
 
-**关键**：两个 Agent 各自有独立游标，互不干扰。Agent B 注册时获得一个新的空 ringbuffer，但从那一刻起的输出都能看到。
+**关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标在当时的 master 尾（或从默认 reader 种子对齐），之后的新输出都能看到；历史不再因单读者环形容量被截断。
 
 ## 八、SFTP 文件传输流程
 

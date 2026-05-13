@@ -87,7 +87,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 │   ├── session/
 │   │   ├── session.go           # Session lifecycle (goroutine-safe)
 │   │   └── manager.go           # Thread-safe session registry
-│   ├── buffer/buffer.go         # Multi-reader ring buffer (1MB per reader)
+│   ├── buffer/buffer.go         # Multi-reader append-only output log (shared master + per-reader cursor)
 │   ├── storage/store.go         # Atomic JSON file persistence
 │   ├── message/message.go       # Message management (per-session mutex)
 │   └── ansi/strip.go            # ANSI escape code removal
@@ -98,7 +98,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 ### Key Design Decisions
 
-1. **Multi-Reader Ring Buffer**: Each agent registers as an independent reader with its own `ringbuffer.RingBuffer` instance. Writes broadcast to all readers. Slow readers lose oldest data (overwrite mode) rather than blocking the writer.
+1. **Multi-Reader Output Buffer**: One append-only byte log; each reader has an independent read cursor (`NewReader` / `NewReaderSeededFrom`). Prefixes fully consumed by every reader can be trimmed to bound memory; there is no fixed per-reader cap or ring overwrite.
 
 2. **Internal SSH Architecture**: The server starts a charmbracelet/ssh server on localhost. Each `start_session` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY is used for native pseudo-terminal support.
 
