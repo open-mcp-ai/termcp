@@ -49,7 +49,10 @@ func getFloat64(args map[string]any, key string, def float64) float64 {
 }
 
 func validateStartParams(args map[string]any) (*mcpgo.CallToolResult, error) {
-	mode := getString(args, "mode", "pty")
+	mode := strings.TrimSpace(getString(args, "mode", "pty"))
+	if mode == "" {
+		mode = "pty"
+	}
 	if mode != "pty" && mode != "pipe" {
 		return mcpgo.NewToolResultError(fmt.Sprintf("mode must be 'pty' or 'pipe', got %q", mode)), nil
 	}
@@ -126,10 +129,10 @@ func remoteFromEntry(e *sshconfig.Entry) (*session.RemoteSSH, error) {
 	}, nil
 }
 
-// resolveSSHFromArgs returns the ssh_config name and remote dial settings (nil Remote = built-in loopback).
-func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *session.RemoteSSH, error) {
+// resolveSSHFromArgs returns the ssh_config name, loaded entry, and remote dial settings (nil Remote = built-in loopback).
+func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *sshconfig.Entry, *session.RemoteSSH, error) {
 	if s.sshConfigs == nil {
-		return "", nil, fmt.Errorf("ssh config store not configured")
+		return "", nil, nil, fmt.Errorf("ssh config store not configured")
 	}
 	name := strings.TrimSpace(getString(args, "ssh_config", ""))
 	if name == "" {
@@ -137,37 +140,45 @@ func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *session.Remot
 	}
 	ent, err := s.sshConfigs.Load(name)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if ent.Kind == sshconfig.KindInternal {
-		return name, nil, nil
+		return name, ent, nil, nil
 	}
 	r, err := remoteFromEntry(ent)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return name, r, nil
+	return name, ent, r, nil
 }
 
 func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	command := getString(args, "command", "")
-	if command == "" {
-		return mcpgo.NewToolResultError("command is required"), nil
+	toolArgs := getStringSlice(args, "args")
+	if strings.TrimSpace(command) == "" && len(toolArgs) > 0 {
+		return mcpgo.NewToolResultError("command is required when args are provided"), nil
 	}
 	if bad, _ := validateStartParams(args); bad != nil {
 		return bad, nil
 	}
 
-	cfgName, remote, err := s.resolveSSHFromArgs(args)
+	cfgName, ent, remote, err := s.resolveSSHFromArgs(args)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
+	cmd, execArgs := sshconfig.EffectiveCommand(ent, command, toolArgs)
+	if strings.TrimSpace(cmd) == "" && len(execArgs) > 0 {
+		return mcpgo.NewToolResultError("command is required when args are provided"), nil
+	}
+
+	mode := sshconfig.EffectiveMode(ent, getString(args, "mode", ""))
+
 	sess, err := s.sessMgr.Create(session.Config{
-		Command: command,
-		Args:    getStringSlice(args, "args"),
-		Mode:    api.SessionMode(getString(args, "mode", "pty")),
+		Command: cmd,
+		Args:    execArgs,
+		Mode:    api.SessionMode(mode),
 		Name:    getString(args, "name", ""),
 		Rows:    int(getFloat64(args, "rows", 24)),
 		Cols:    int(getFloat64(args, "cols", 80)),

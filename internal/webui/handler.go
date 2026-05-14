@@ -52,6 +52,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/stream", h.handleSessionListStream)
+	mux.HandleFunc("GET /api/ui/ws", h.handleWebUIWS)
 	mux.HandleFunc("POST /api/sessions/start", h.handleStartSession)
 	mux.HandleFunc("GET /api/sessions/{id}/stream", h.handleStream)
 	mux.HandleFunc("POST /api/sessions/{id}/input", h.handleInput)
@@ -182,14 +183,23 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.Command) == "" {
-		http.Error(w, "command is required", http.StatusBadRequest)
+	if strings.TrimSpace(body.Command) == "" && len(body.Args) > 0 {
+		http.Error(w, "command is required when args are provided", http.StatusBadRequest)
 		return
 	}
-	mode := strings.TrimSpace(body.Mode)
-	if mode == "" {
-		mode = "pty"
+	cfgName, ent, remote, err := h.resolveSSH(body.SSHConfig)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+
+	cmd, args := sshconfig.EffectiveCommand(ent, body.Command, body.Args)
+	if strings.TrimSpace(cmd) == "" && len(args) > 0 {
+		http.Error(w, "command is required when args are provided", http.StatusBadRequest)
+		return
+	}
+
+	mode := sshconfig.EffectiveMode(ent, body.Mode)
 	if mode != "pty" && mode != "pipe" {
 		http.Error(w, "mode must be pty or pipe", http.StatusBadRequest)
 		return
@@ -211,15 +221,9 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfgName, remote, err := h.resolveSSH(body.SSHConfig)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	sess, err := h.Sessions.Create(session.Config{
-		Command: body.Command,
-		Args:    body.Args,
+		Command: cmd,
+		Args:    args,
 		Mode:    api.SessionMode(mode),
 		Name:    body.Name,
 		Rows:    rows,
@@ -366,26 +370,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func (h *Handler) resolveSSH(name string) (cfgName string, remote *session.RemoteSSH, err error) {
+func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry, remote *session.RemoteSSH, err error) {
 	if h.SSH == nil {
-		return "", nil, fmt.Errorf("ssh config store not configured")
+		return "", nil, nil, fmt.Errorf("ssh config store not configured")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "internal"
 	}
-	ent, err := h.SSH.Load(name)
+	ent, err = h.SSH.Load(name)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if ent.Kind == sshconfig.KindInternal {
-		return name, nil, nil
+		return name, ent, nil, nil
 	}
 	r, err := remoteFromEntry(ent)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return name, r, nil
+	return name, ent, r, nil
 }
 
 func remoteFromEntry(e *sshconfig.Entry) (*session.RemoteSSH, error) {

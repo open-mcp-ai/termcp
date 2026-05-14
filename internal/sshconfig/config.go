@@ -28,6 +28,10 @@ type Entry struct {
 	KnownHosts         string `json:"known_hosts,omitempty"`
 	DialTimeoutSeconds int    `json:"dial_timeout_seconds,omitempty"`
 	Description        string `json:"description,omitempty"`
+	// DefaultShell: when the client omits command+args, split with strings.Fields and use as argv (optional).
+	DefaultShell string `json:"default_shell,omitempty"`
+	// DefaultMode: when the client omits mode, use "pty" or "pipe" (optional; empty = pty).
+	DefaultMode string `json:"default_mode,omitempty"`
 }
 
 // ValidateName checks directory/config id (reserved: internal is allowed as id).
@@ -55,6 +59,9 @@ func ParseAndValidate(data []byte) (*Entry, error) {
 	e.Kind = k
 	switch k {
 	case KindInternal:
+		if err := validateDefaultMode(&e); err != nil {
+			return nil, err
+		}
 		return &e, nil
 	case KindRemote:
 		e.Host = strings.TrimSpace(e.Host)
@@ -71,10 +78,60 @@ func ParseAndValidate(data []byte) (*Entry, error) {
 		if e.Port < 0 || e.Port > 65535 {
 			return nil, fmt.Errorf("invalid port %d", e.Port)
 		}
+		if err := validateDefaultMode(&e); err != nil {
+			return nil, err
+		}
 		return &e, nil
 	default:
 		return nil, fmt.Errorf("unknown kind %q (use %q or %q)", e.Kind, KindInternal, KindRemote)
 	}
+}
+
+func validateDefaultMode(e *Entry) error {
+	dm := strings.TrimSpace(strings.ToLower(e.DefaultMode))
+	if dm == "" {
+		e.DefaultMode = ""
+		return nil
+	}
+	if dm != "pty" && dm != "pipe" {
+		return fmt.Errorf("default_mode must be \"pty\" or \"pipe\"")
+	}
+	e.DefaultMode = dm
+	return nil
+}
+
+// EffectiveCommand resolves command+args when the client sends nothing.
+// If the client provides a non-empty command or any args, ent is ignored for the command.
+func EffectiveCommand(ent *Entry, cmd string, args []string) (string, []string) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd != "" || len(args) > 0 {
+		return cmd, args
+	}
+	if ent != nil {
+		ds := strings.TrimSpace(ent.DefaultShell)
+		if ds != "" {
+			f := strings.Fields(ds)
+			if len(f) > 0 {
+				return f[0], f[1:]
+			}
+		}
+	}
+	return "", nil
+}
+
+// EffectiveMode returns pty or pipe; default is pty unless ent.DefaultMode overrides when mode is empty.
+func EffectiveMode(ent *Entry, mode string) string {
+	m := strings.TrimSpace(strings.ToLower(mode))
+	if m != "" {
+		return m
+	}
+	if ent != nil {
+		dm := strings.TrimSpace(strings.ToLower(ent.DefaultMode))
+		if dm == "pty" || dm == "pipe" {
+			return dm
+		}
+	}
+	return "pty"
 }
 
 // RemoteTemplate returns default JSON for a new remote config directory.

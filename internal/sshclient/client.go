@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -101,14 +102,28 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		}
 	}
 
-	cmdStr := shellQuote(command, args)
-	if err := session.Start(cmdStr); err != nil {
+	var startErr error
+	if trimmed := strings.TrimSpace(command); trimmed == "" && len(args) == 0 {
+		switch {
+		case pty:
+			if err := session.Shell(); err != nil {
+				sh, shArgs := defaultShellExecArgv()
+				startErr = session.Start(shellQuote(sh, shArgs))
+			}
+		default:
+			sh, shArgs := defaultShellExecArgv()
+			startErr = session.Start(shellQuote(sh, shArgs))
+		}
+	} else {
+		startErr = session.Start(shellQuote(trimmed, args))
+	}
+	if startErr != nil {
 		closeIfCloser(stderr)
 		closeIfCloser(stdout)
 		stdin.Close()
 		session.Close()
 		client.Close()
-		return nil, fmt.Errorf("start command: %w", err)
+		return nil, fmt.Errorf("start command: %w", startErr)
 	}
 
 	es := &ExecSession{
@@ -167,6 +182,25 @@ func (es *ExecSession) Close() error {
 }
 
 // shellQuote builds a shell-safe command string.
+func defaultShellExecArgv() (string, []string) {
+	if runtime.GOOS == "windows" {
+		c := strings.TrimSpace(os.Getenv("ComSpec"))
+		if c == "" {
+			c = "cmd.exe"
+		}
+		return c, nil
+	}
+	sh := strings.TrimSpace(os.Getenv("SHELL"))
+	if sh == "" {
+		return "/bin/sh", nil
+	}
+	f := strings.Fields(sh)
+	if len(f) == 0 {
+		return "/bin/sh", nil
+	}
+	return f[0], f[1:]
+}
+
 func shellQuote(command string, args []string) string {
 	parts := []string{quoteIfNeeded(command)}
 	for _, a := range args {
