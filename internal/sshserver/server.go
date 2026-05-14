@@ -11,6 +11,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -123,9 +125,20 @@ func sshSignalToOSSig(sig ssh.Signal) os.Signal {
 func (s *Server) handleSession(sess ssh.Session) {
 	cmdArgs := sess.Command()
 	if len(cmdArgs) == 0 {
-		io.WriteString(sess, "no command\n")
-		sess.Exit(1)
-		return
+		if runtime.GOOS == "windows" {
+			com := strings.TrimSpace(os.Getenv("ComSpec"))
+			if com == "" {
+				com = "cmd.exe"
+			}
+			cmdArgs = []string{com}
+		} else {
+			sh := strings.TrimSpace(os.Getenv("SHELL"))
+			if sh == "" {
+				cmdArgs = []string{"/bin/sh"}
+			} else {
+				cmdArgs = strings.Fields(sh)
+			}
+		}
 	}
 
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)

@@ -148,15 +148,33 @@ func TestHandleDetectShell_Auto(t *testing.T) {
 	}
 }
 
-func TestHandleStartSession_MissingCommand(t *testing.T) {
+func TestHandleStartSession_EmptyCommandOK(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{})
 	result, err := s.handleStartSession(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(mcpgo.TextContent).Text)
+	}
+	m := parseResult(t, result)
+	if m["session_id"] == nil {
+		t.Fatal("expected session_id in result")
+	}
+}
+
+func TestHandleStartSession_CommandRequiredWhenArgs(t *testing.T) {
+	s := newTestServer(t)
+	req := makeRequest(map[string]any{
+		"args": []any{"-c", "echo hi"},
+	})
+	result, err := s.handleStartSession(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !result.IsError {
-		t.Fatal("expected error result for missing command")
+		t.Fatal("expected error when args without command")
 	}
 }
 
@@ -485,7 +503,7 @@ func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 
 func TestHandleStartSession_InvalidMode(t *testing.T) {
 	s := newTestServer(t)
-	for _, mode := range []string{"websocket", "", "PIPE"} {
+	for _, mode := range []string{"websocket", "x"} {
 		req := makeRequest(map[string]any{
 			"command": "echo",
 			"mode":    mode,

@@ -34,8 +34,8 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0")
 
 	mcpServer.AddTool(mcpgo.NewTool("start_session",
-		mcpgo.WithDescription("Start an interactive session. SSH uses server-side JSON under data-dir/ssh_configs/<name>/config.json; pass only the profile name as ssh_config (see list_ssh_configs). Omit ssh_config or use \"internal\" for the built-in loopback. Remote profiles need kind \"remote\" and SFTP for file tools. Create profiles with: server binary ssh-config init <name> -data-dir <dir>; list with ssh-config list. On success: session_id, pid, ssh_config, initial_output (always empty) — use read_output for terminal text."),
-		mcpgo.WithString("command", mcpgo.Required(), mcpgo.Description("Command to execute")),
+		mcpgo.WithDescription("Start an interactive session. SSH uses server-side JSON under data-dir/ssh_configs/<name>/config.json; pass only the profile name as ssh_config (see list_ssh_configs). Omit ssh_config or use \"internal\" for the built-in loopback. Remote profiles need kind \"remote\" and SFTP for file tools. Create profiles with: server binary ssh-config init <name> -data-dir <dir>; list with ssh-config list. On success: session_id, pid, ssh_config, initial_output (always empty) — use read_output for terminal text. Omit command (and args) to use the remote user's login shell (SSH) or the server process default shell (internal); optional per-profile default_shell / default_mode in config.json."),
+		mcpgo.WithString("command", mcpgo.Description("Command to execute; omit or empty for login shell / profile default_shell")),
 		mcpgo.WithArray("args", mcpgo.Description("Command arguments"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("I/O mode: pty or pipe"), mcpgo.DefaultString("pty")),
 		mcpgo.WithString("name", mcpgo.Description("Session name")),

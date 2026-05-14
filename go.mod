@@ -5,6 +5,7 @@ go 1.25.9
 require (
 	github.com/charmbracelet/ssh v0.0.0-20250826160808-ebfa259c7309
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/mark3labs/mcp-go v0.50.0
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.50.0
