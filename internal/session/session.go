@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,12 +70,14 @@ type Session struct {
 	readerID      int
 	msgMgr        *message.Manager
 	sshAddr       string
+	sshBacking    *ssh.Client // internal single-dial path: close after SFTP is torn down
 	done          chan struct{}
 	onExit        func()
 }
 
 // New creates and starts a new Session.
-func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) {
+// internal must be the built-in sshserver.Server (after Start) when cfg.Remote is nil; it may be nil for remote-only callers.
+func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
 	id := uuid.New().String()[:12]
 	name := cfg.Name
 	if name == "" {
@@ -84,7 +87,8 @@ func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, 
 	usePty := cfg.Mode == api.ModePTY
 
 	var dialAddr string
-	var clientCfg *ssh.ClientConfig
+	var execSession *sshclient.ExecSession
+	var sftpClient *sshclient.SFTPConn
 	var sshEndpointPublic string // "internal" | "remote" for MCP / JSON (no host or credentials)
 
 	if cfg.Remote != nil && strings.TrimSpace(cfg.Remote.Host) != "" {
@@ -109,7 +113,7 @@ func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, 
 		dialTimeout := time.Duration(toSec) * time.Second
 
 		var err error
-		clientCfg, err = sshclient.BuildClientConfig(sshclient.DialAuth{
+		clientCfg, err := sshclient.BuildClientConfig(sshclient.DialAuth{
 			User:              strings.TrimSpace(r.User),
 			Password:          r.Password,
 			PrivateKeyPEM:     r.PrivateKeyPEM,
@@ -122,19 +126,39 @@ func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, 
 			return nil, err
 		}
 		sshEndpointPublic = "remote"
+
+		execSession, err = sshclient.StartWithConfig(dialAddr, clientCfg, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		if err != nil {
+			return nil, err
+		}
+		sftpClient, err = sshclient.NewSFTPClientWithConfig(dialAddr, clientCfg)
+		if err != nil {
+			execSession.Close()
+			return nil, fmt.Errorf("sftp client: %w", err)
+		}
 	} else {
 		dialAddr = defaultSSHAddr
-		clientCfg = sshserver.ClientConfig()
+		if internal == nil {
+			return nil, errors.New("internal ssh server is not configured")
+		}
+		minted, err := internal.MintClientConfig()
+		if err != nil {
+			return nil, err
+		}
 		sshEndpointPublic = "internal"
-	}
-
-	execSession, err := sshclient.StartWithConfig(dialAddr, clientCfg, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
-	if err != nil {
-		return nil, err
+		execSession, sftpClient, err = sshclient.DialExecAndSFTP(dialAddr, minted, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	buf := buffer.New(1024 * 1024)
 	rid, _ := buf.NewReader()
+
+	var sshBacking *ssh.Client
+	if sshEndpointPublic == "internal" {
+		sshBacking = execSession.SharedSSH()
+	}
 
 	s := &Session{
 		Session: api.Session{
@@ -158,16 +182,11 @@ func New(defaultSSHAddr string, cfg Config, msgMgr *message.Manager) (*Session, 
 		done:        make(chan struct{}),
 		sftpClose:   make(chan struct{}),
 		onExit:      cfg.OnExit,
+		sftpConn:    sftpClient,
+		sshBacking:  sshBacking,
 	}
 
 	s.startReaders()
-
-	sftpClient, err := sshclient.NewSFTPClientWithConfig(dialAddr, clientCfg)
-	if err != nil {
-		execSession.Close()
-		return nil, fmt.Errorf("sftp client: %w", err)
-	}
-	s.sftpConn = sftpClient
 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
@@ -232,6 +251,10 @@ func (s *Session) startReaders() {
 			if s.sftpConn != nil {
 				s.sftpConn.Close()
 				s.sftpConn = nil
+			}
+			if s.sshBacking != nil {
+				_ = s.sshBacking.Close()
+				s.sshBacking = nil
 			}
 			s.mu.Unlock()
 		}()

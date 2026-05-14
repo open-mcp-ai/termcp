@@ -16,6 +16,14 @@ func testShell() string {
 	return "/bin/bash"
 }
 
+// ptyShellLine returns the shell command line for PTY tests (suppress Windows profile / slow startup).
+func ptyShellLine() string {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe -NoLogo -NoProfile"
+	}
+	return testShell()
+}
+
 func testShellInput(s string) string {
 	if runtime.GOOS == "windows" {
 		return s + "\r\n"
@@ -30,6 +38,37 @@ func testShellEchoCommand(s string) string {
 	return "echo " + s
 }
 
+func mintCfg(t *testing.T, srv *Server) *ssh.ClientConfig {
+	t.Helper()
+	c, err := srv.MintClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestMint_OneTimePassword(t *testing.T) {
+	srv := New("127.0.0.1:0")
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	cfg, err := srv.MintClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1, err := ssh.Dial("tcp", srv.Addr(), cfg)
+	if err != nil {
+		t.Fatalf("first dial: %v", err)
+	}
+	_ = c1.Close()
+
+	if _, err := ssh.Dial("tcp", srv.Addr(), cfg); err == nil {
+		t.Fatal("expected second dial with same one-time config to fail")
+	}
+}
+
 func TestServer_StartAndStop(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
@@ -41,7 +80,7 @@ func TestServer_StartAndStop(t *testing.T) {
 	}
 
 	// Verify we can connect
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
@@ -60,7 +99,7 @@ func TestServer_PipeSession(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", srv.Addr(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +131,7 @@ func TestServer_SignalTerm(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", srv.Addr(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +184,7 @@ func TestServer_SignalInterrupt(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", srv.Addr(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +227,7 @@ func TestServer_ProcessStateNil(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", srv.Addr(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +252,7 @@ func TestServer_PtySession(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	config := ClientConfig()
+	config := mintCfg(t, srv)
 	client, err := ssh.Dial("tcp", srv.Addr(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +277,7 @@ func TestServer_PtySession(t *testing.T) {
 	stdin, _ := session.StdinPipe()
 	stdout, _ := session.StdoutPipe()
 
-	if err := session.Start(testShell()); err != nil {
+	if err := session.Start(ptyShellLine()); err != nil {
 		t.Fatal(err)
 	}
 

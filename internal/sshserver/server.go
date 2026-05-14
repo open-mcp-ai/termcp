@@ -3,7 +3,10 @@ package sshserver
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/subtle"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -13,15 +16,15 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/ssh"
 	"github.com/pkg/sftp"
 	sshstd "golang.org/x/crypto/ssh"
 )
-
-const internalPassword = "interactive-process-internal"
 
 // Server wraps an internal SSH server.
 type Server struct {
@@ -29,6 +32,9 @@ type Server struct {
 	server   *ssh.Server
 	listener net.Listener
 	started  atomic.Bool
+	mu       sync.Mutex
+	// pending maps one-time username -> password. A successful password auth removes the entry.
+	pending map[string]string
 }
 
 // New creates an internal SSH server listening on addr.
@@ -37,14 +43,17 @@ func New(addr string) *Server {
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
-	s := &Server{addr: addr}
+	s := &Server{
+		addr:    addr,
+		pending: make(map[string]string),
+	}
 	srv := &ssh.Server{
 		Addr: addr,
 		Handler: func(sess ssh.Session) {
 			s.handleSession(sess)
 		},
 		PasswordHandler: func(ctx ssh.Context, password string) bool {
-			return password == internalPassword
+			return s.passwordOK(ctx.User(), password)
 		},
 		SubsystemHandlers: map[string]ssh.SubsystemHandler{
 			"sftp": func(sess ssh.Session) {
@@ -64,6 +73,56 @@ func New(addr string) *Server {
 	_ = srv.SetOption(ssh.AllocatePty())
 	s.server = srv
 	return s
+}
+
+func (s *Server) passwordOK(user, password string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	expPass, ok := s.pending[user]
+	if !ok {
+		return false
+	}
+	if len(password) != len(expPass) {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(password), []byte(expPass)) != 1 {
+		return false
+	}
+	delete(s.pending, user)
+	return true
+}
+
+func (s *Server) mintCreds() (user, pass string, err error) {
+	userRand := make([]byte, 10)
+	if _, err := rand.Read(userRand); err != nil {
+		return "", "", err
+	}
+	passRand := make([]byte, 32)
+	if _, err := rand.Read(passRand); err != nil {
+		return "", "", err
+	}
+	user = "t" + hex.EncodeToString(userRand)
+	pass = base64.RawURLEncoding.EncodeToString(passRand)
+	return user, pass, nil
+}
+
+// MintClientConfig registers a new one-time username/password and returns a dial config.
+// The entry is removed on the first successful SSH password authentication (single use).
+// Call only after Start().
+func (s *Server) MintClientConfig() (*sshstd.ClientConfig, error) {
+	user, pass, err := s.mintCreds()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.pending[user] = pass
+	s.mu.Unlock()
+	return &sshstd.ClientConfig{
+		User:            user,
+		Auth:            []sshstd.AuthMethod{sshstd.Password(pass)},
+		HostKeyCallback: sshstd.InsecureIgnoreHostKey(),
+		Timeout:         15 * time.Second,
+	}, nil
 }
 
 // Addr returns the actual listener address after Start.
@@ -104,6 +163,9 @@ func (s *Server) Stop() error {
 	if !s.started.Load() {
 		return nil
 	}
+	s.mu.Lock()
+	s.pending = make(map[string]string)
+	s.mu.Unlock()
 	return s.server.Close()
 }
 
@@ -199,20 +261,4 @@ func generateHostKeyPEM() ([]byte, error) {
 		Bytes: b,
 	}
 	return pem.EncodeToMemory(block), nil
-}
-
-// InternalPassword returns the hardcoded password used for client auth.
-func InternalPassword() string {
-	return internalPassword
-}
-
-// ClientConfig returns a pre-configured ssh.ClientConfig for connecting to the internal server.
-func ClientConfig() *sshstd.ClientConfig {
-	return &sshstd.ClientConfig{
-		User: "internal",
-		Auth: []sshstd.AuthMethod{
-			sshstd.Password(internalPassword),
-		},
-		HostKeyCallback: sshstd.InsecureIgnoreHostKey(),
-	}
 }

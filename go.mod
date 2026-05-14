@@ -9,6 +9,7 @@ require (
 	github.com/mark3labs/mcp-go v0.50.0
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.50.0
+	golang.org/x/term v0.42.0
 )
 
 require (

@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 	if err := sshconfig.EnsureInternal(dir); err != nil {
 		t.Fatal(err)
 	}
-	sessMgr := session.NewManager(srv.Addr(), msgMgr, store)
+	sessMgr := session.NewManager(srv.Addr(), msgMgr, store, srv)
 	return New(sessMgr, msgMgr, sshconfig.NewStore(dir))
 }
 

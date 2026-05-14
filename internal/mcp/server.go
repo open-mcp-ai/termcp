@@ -12,13 +12,14 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 )
 
-// Server wraps the MCP SSE server and tool handlers.
+// Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
 type Server struct {
-	mcpServer  *mcpserver.MCPServer
-	sseServer  *mcpserver.SSEServer
-	sessMgr    *session.Manager
-	msgMgr     *message.Manager
-	sshConfigs *sshconfig.Store
+	mcpServer    *mcpserver.MCPServer
+	sseServer    *mcpserver.SSEServer
+	streamServer *mcpserver.StreamableHTTPServer
+	sessMgr      *session.Manager
+	msgMgr       *message.Manager
+	sshConfigs   *sshconfig.Store
 }
 
 // New creates and configures the MCP server with all tools registered.
@@ -157,6 +158,9 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)
+	// Streamable HTTP (MCP spec): mount at /stream for clients such as Open WebUI.
+	// Do not use WithStreamableHTTPServer(mainSrv) here — Shutdown must not close the shared listener.
+	s.streamServer = mcpserver.NewStreamableHTTPServer(mcpServer)
 	return s
 }
 
@@ -170,6 +174,12 @@ func (s *Server) MessageHandler() http.Handler {
 	return s.sseServer.MessageHandler()
 }
 
+// StreamableHTTPHandler exposes the MCP streamable-HTTP endpoint (POST/GET/DELETE on one path).
+// Mount at "/stream" (or another path with a matching wrapper); clients use e.g. http://host:port/stream.
+func (s *Server) StreamableHTTPHandler() http.Handler {
+	return s.streamServer
+}
+
 // Start begins serving MCP over SSE on the given address.
 func (s *Server) Start(addr string) error {
 	return s.sseServer.Start(addr)
@@ -179,5 +189,8 @@ func (s *Server) Start(addr string) error {
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if s.streamServer != nil {
+		_ = s.streamServer.Shutdown(ctx)
+	}
 	return s.sseServer.Shutdown(ctx)
 }
