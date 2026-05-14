@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -33,7 +33,7 @@
     .dock-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #656d76; margin-bottom: 10px; }
     .conn-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
     .conn-tile { position: relative; text-align: center; user-select: none; }
-    /* Entry：横向卡片，左图标右标题（地址仅在图标 title） */
+    /* Entry card: horizontal layout; address only in icon title */
     .conn-tile.entry-card {
       width: auto;
       min-width: 188px;
@@ -86,7 +86,7 @@
     .conn-tile.entry-card:hover .conn-tile-stack > .icon-wrap {
       transform: none;
     }
-    /* 图标与角标（红×）共用定位上下文 */
+    /* Icon and dismiss (×) share positioning context */
     .conn-tile-stack { position: relative; width: 72px; margin: 0 auto 8px; }
     .conn-tile .conn-tile-stack > .icon-wrap {
       width: 72px; height: 72px; margin: 0; border-radius: 0; display: flex; align-items: center; justify-content: center;
@@ -233,7 +233,7 @@
     .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 8px; }
     .err { color: #cf222e; font-size: 0.85rem; margin: 0 0 8px; }
 
-    /* 浮动终端：深色（与原先一致）；主页仍为浅色 */
+    /* Floating terminal: dark theme; main page stays light */
     .shell-windows-container { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
     .shell-windows-container > * { pointer-events: auto; }
     .shell-window { position: fixed; width: 640px; height: 480px; min-width: 320px; min-height: 240px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); border: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; z-index: 10001; }
@@ -371,10 +371,10 @@
     <div class="entries-toolbar">
       <div class="dock-title">Entries</div>
       <div class="entries-toolbar-actions">
-        <button type="button" class="icon-btn icon-btn-primary" id="btn-add-conn" title="添加连接" aria-label="添加连接">
+        <button type="button" class="icon-btn icon-btn-primary" id="btn-add-conn" title="Add connection" aria-label="Add connection">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="btn-refresh-conn" title="刷新列表" aria-label="刷新列表">
+        <button type="button" class="icon-btn" id="btn-refresh-conn" title="Refresh list" aria-label="Refresh list">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M1 20v-6h6"/><path d="M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/></svg>
         </button>
       </div>
@@ -391,21 +391,21 @@
   <div id="modal-conn" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal">
       <div class="modal-h">
-        <h2 id="modal-conn-title">添加连接</h2>
-        <button type="button" class="btn" id="modal-conn-close">关闭</button>
+        <h2 id="modal-conn-title">Add connection</h2>
+        <button type="button" class="btn" id="modal-conn-close">Close</button>
       </div>
       <div class="modal-body">
         <p id="modal-conn-err" class="err" style="display:none"></p>
-        <p style="margin:0 0 8px;font-size:0.85rem;line-height:1.5">填写<strong>配置名称</strong>（仅字母、数字、下划线、连字符），按需修改下方 JSON，点<strong>保存</strong>写入服务器。<strong>保存时服务器会校验</strong>（JSON 语法、<code>kind</code>、必填字段等），不通过会在此显示错误。</p>
-        <p style="margin:0 0 8px;font-size:0.8rem;line-height:1.45;color:#57606a">保存后出现连接卡片：<strong>单击卡片</strong>即可连接（默认 <strong>PTY</strong> 与登录 shell）。仅单击卡片上的<strong>齿轮（设置）</strong>图标打开本编辑界面。</p>
-        <p style="margin:0 0 12px;font-size:0.78rem;line-height:1.45;color:#57606a">远程认证：填 <code>password</code>，或 <code>private_key_pem</code>（<strong>OpenSSH PEM 私钥整段</strong>，含 <code>-----BEGIN … PRIVATE KEY-----</code> 与 <code>-----END…</code> 行；JSON 字符串里多行请写成 <code>\n</code>），或 <code>private_key_file</code>（<strong>termcp 进程所在机器</strong>上可读的文件路径）。</p>
-        <label for="conn-name">配置名称（目录名）</label>
+        <p style="margin:0 0 8px;font-size:0.85rem;line-height:1.5">Set a <strong>profile name</strong> (letters, digits, <code>_</code>, <code>-</code> only), edit the JSON below, then <strong>Save</strong>. The server validates JSON, <code>kind</code>, and required fields; errors appear here.</p>
+        <p style="margin:0 0 8px;font-size:0.8rem;line-height:1.45;color:#57606a"><strong>Click the card</strong> to connect (default <strong>PTY</strong> + login shell). Use the <strong>gear</strong> icon only to edit this profile.</p>
+        <p style="margin:0 0 12px;font-size:0.78rem;line-height:1.45;color:#57606a">Auth: <code>password</code>, or <code>private_key_pem</code> (full PEM including <code>BEGIN…/END…</code>; use <code>\n</code> in JSON for newlines), or <code>private_key_file</code> (path readable by the termcp process).</p>
+        <label for="conn-name">Profile name (directory)</label>
         <input type="text" id="conn-name" placeholder="my-server" autocomplete="off">
-        <label for="conn-json">config.json 内容</label>
+        <label for="conn-json">config.json</label>
         <textarea id="conn-json" spellcheck="false"></textarea>
         <div class="modal-actions">
-          <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">删除</button>
-          <button type="button" class="btn btn-primary" id="conn-save">保存</button>
+          <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
+          <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
       </div>
           </div>
@@ -414,18 +414,18 @@
   <div id="modal-start" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal" style="max-width:420px">
       <div class="modal-h">
-        <h2 id="start-title">启动会话</h2>
-        <button type="button" class="btn" id="modal-start-close">关闭</button>
+        <h2 id="start-title">Start session</h2>
+        <button type="button" class="btn" id="modal-start-close">Close</button>
           </div>
       <div class="modal-body">
         <p id="modal-start-err" class="err" style="display:none"></p>
         <input type="hidden" id="start-ssh-config">
-        <label for="start-cmd">命令（可留空）</label>
-        <input type="text" id="start-cmd" placeholder="留空=SSH 登录 shell；或填 bash / powershell …" autocomplete="off">
-        <label for="start-mode">模式</label>
+        <label for="start-cmd">Command (optional)</label>
+        <input type="text" id="start-cmd" placeholder="Empty = SSH login shell; or bash, powershell, …" autocomplete="off">
+        <label for="start-mode">Mode</label>
         <select id="start-mode"><option value="pty">pty</option><option value="pipe">pipe</option></select>
         <div class="modal-actions">
-          <button type="button" class="btn btn-primary" id="start-run">连接</button>
+          <button type="button" class="btn btn-primary" id="start-run">Connect</button>
         </div>
       </div>
     </div>
@@ -482,7 +482,7 @@
 
   var _copyToastTimer;
   function showCopyToast(msg) {
-    msg = msg || '已复制';
+    msg = msg || 'Copied';
     var el = document.getElementById('ui-copy-toast');
     if (!el) {
       el = document.createElement('div');
@@ -499,7 +499,7 @@
     }, 1600);
   }
 
-  /** 展示用：去掉 name 的 session- 前缀，否则用 id */
+  /** Display: strip leading session- from name, else use id */
   function displaySessionShort(s) {
     var id = String((s && s.id) || '').trim();
     var name = String((s && s.name) || '').trim();
@@ -530,12 +530,12 @@
     }
   }
 
-  /** /api/sessions/{id}{suffix} — 如 /terminate；输入与 resize 走 WebSocket */
+  /** /api/sessions/{id}{suffix} — e.g. /terminate; input and resize use WebSocket */
   function sessionAPI(sessionId, suffix) {
     return '/api/sessions/' + encodeURIComponent(sessionId) + suffix;
   }
 
-  /** SSE 断线重连：当前等待秒数 prev → 下一次等待上限 */
+  /** SSE reconnect: backoff from prev to next cap (seconds) */
   function sseBackoffNext(prev) {
     var d = prev || 1000;
     return Math.min(30000, Math.max(2000, Math.floor(d * 1.5)));
@@ -548,9 +548,7 @@
 
   function bringShellWindowToFront(win) {
     var c = shellWindowsEl();
-    if (!c || win.parentNode !== c) return;
-    // 已在最前则勿 appendChild：重复移动节点会让 xterm 视口 scrollTop 被浏览器重置到顶部。
-    if (c.lastElementChild !== win) c.appendChild(win);
+    if (c && win.parentNode === c) c.appendChild(win);
   }
 
   function getShellWindowBySid(sessionId) {
@@ -589,7 +587,7 @@
     if (running.length === 0) {
       var empty = document.createElement('div');
       empty.style.cssText = 'padding:8px 4px;font-size:0.85rem;color:#656d76';
-      empty.textContent = '暂无运行中的会话。';
+      empty.textContent = 'No running sessions.';
       grid.appendChild(empty);
       return;
     }
@@ -601,19 +599,19 @@
       var entryLine = nm && nm.indexOf('session-') !== 0 ? nm : displaySessionShort(s);
       tile.innerHTML =
         '<div class="conn-tile-stack">' +
-        '<button type="button" class="sess-x" title="结束会话（立即断开远端）" aria-label="结束会话">' +
+        '<button type="button" class="sess-x" title="End session (disconnect)" aria-label="End session">' +
           '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
         '</button>' +
-        '<div class="icon-wrap" title="打开终端"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
+        '<div class="icon-wrap" title="Open terminal"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
         '</div>' +
         '<div class="sess-tile-body">' +
         '<div class="sess-entry-line" title="' + escapeHtml(entryLine) + '">' + escapeHtml(entryLine) + '</div>' +
         '<div class="sess-meta-row">' +
         '<span class="sess-sid-line" title="' + escapeHtml(sid) + '">' + escapeHtml(sid) + '</span>' +
-        '<button type="button" class="sess-copy-btn" title="复制 session id" aria-label="复制 session id">' + SVG_COPY_12 + '</button>' +
+        '<button type="button" class="sess-copy-btn" title="Copy session id" aria-label="Copy session id">' + SVG_COPY_12 + '</button>' +
         '</div>' +
         '</div>';
-      tile.title = '打开终端 · ' + sid;
+      tile.title = 'Open terminal · ' + sid;
       var sx = tile.querySelector('.sess-x');
       sx.onclick = function (e) {
         e.preventDefault();
@@ -627,7 +625,7 @@
       copyBtn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        copyTextToClipboard(sid).then(function () { showCopyToast(); }).catch(function () { showCopyToast('复制失败'); });
+        copyTextToClipboard(sid).then(function () { showCopyToast(); }).catch(function () { showCopyToast('Copy failed'); });
       });
       tile.onclick = function (e) {
         if (e.target.closest('.sess-x') || e.target.closest('.sess-copy-btn')) return;
@@ -653,7 +651,50 @@
     }
   }
 
-  /** xterm onData 字符串 → UTF-8 bytes → base64（与 WS 解码一致） */
+  /**
+   * xterm may emit focus-report sequences on attach; forwarding them to tmux/vim causes noise.
+   * Do not forward onData until the user interacts in the terminal (mousedown / keydown / paste / compositionend).
+   */
+  function setupShellOnDataUserGate(win, term) {
+    win._shellUserInputReady = false;
+    var el = term.element;
+    if (!el) return;
+    if (win._shellInputUnlockAC) {
+      try { win._shellInputUnlockAC.abort(); } catch (e0) {}
+      win._shellInputUnlockAC = null;
+    }
+    var ac = new AbortController();
+    win._shellInputUnlockAC = ac;
+    var opts = { capture: true, signal: ac.signal };
+    function unlock() {
+      win._shellUserInputReady = true;
+      try { ac.abort(); } catch (e1) {}
+      if (win._shellInputUnlockAC === ac) win._shellInputUnlockAC = null;
+    }
+    el.addEventListener('mousedown', unlock, opts);
+    el.addEventListener('keydown', unlock, opts);
+    el.addEventListener('paste', unlock, opts);
+    el.addEventListener('compositionend', unlock, opts);
+  }
+
+  /**
+   * Browsers may handle Ctrl+W (close tab) before the terminal; we preventDefault on keydown then let xterm parse (e.g. vim Ctrl+W).
+   * Some browsers/OS may still intercept; not 100% guaranteed.
+   */
+  function attachTermBrowserChordShield(term) {
+    if (typeof term.attachCustomKeyEventHandler !== 'function') return;
+    term.attachCustomKeyEventHandler(function (event) {
+      if (event.type !== 'keydown') return true;
+      if (!event.ctrlKey || event.altKey || event.metaKey) return true;
+      var k = event.key;
+      if (k === 'w' || k === 'W') {
+        try { event.preventDefault(); } catch (e) {}
+      }
+      return true;
+    });
+  }
+
+  /** xterm onData string → UTF-8 bytes → base64 (matches WS decode) */
   function strToUtf8B64(str) {
     var u8 = new TextEncoder().encode(str);
     var bin = '';
@@ -699,7 +740,7 @@
     }
   }
 
-  /** 单条 WebSocket：会话列表 + 多终端 + 输入；断线指数退避（手动刷新走 startUIWebSocket）。 */
+  /** Single WebSocket: session list + terminals + input; exponential backoff (manual refresh uses startUIWebSocket). */
   function connectUIWebSocket() {
     clearRetryTimer(window._sessionListSSERetryTimer);
     window._sessionListSSERetryTimer = null;
@@ -718,15 +759,29 @@
         else if (j.type === 'terminal') {
           var win = getShellWindowBySid(j.id);
           if (win && win._term && !win._streamDone) {
-            win._term.write(b64ToBytes(j.d));
-            shellTermScrollToBottom(win._term);
+            var bytes = b64ToBytes(j.d);
+            var tm = win._term;
+            tm.write(bytes, function () {
+              requestAnimationFrame(function () {
+                shellTermScrollToBottom(tm, true);
+              });
+            });
           }
         } else if (j.type === 'terminal_done') {
           var win2 = getShellWindowBySid(j.id);
           if (win2 && !win2._streamDone) {
             win2._streamDone = true;
-            try { win2._term.writeln('\r\n\x1b[33m[会话已结束]\x1b[0m'); } catch (e2) {}
-            shellTermScrollToBottom(win2._term, true);
+            try {
+              win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+                shellTermScrollToBottom(win2._term, true);
+              });
+            } catch (e2) {
+              try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
+              shellTermScrollToBottom(win2._term, true);
+            }
+            requestAnimationFrame(function () {
+              shellTermScrollToBottom(win2._term, true);
+            });
           }
         }
       } catch (e) { console.error(e); }
@@ -734,9 +789,9 @@
 
     ws.onopen = function () {
       window._sessionListSSEBackoff = 1000;
-      // 不要用旧快照重绘：首次 _lastSessionsSnapshot 常为 undefined→[]，会把磁贴清空，
-      // 若首条 sessions 帧稍晚到达，看起来像「建了连但没有 session」。
-      setLoadBanner(document.getElementById('session-load-banner'), '正在同步会话列表…');
+      // Avoid redrawing from a stale snapshot: first _lastSessionsSnapshot may be undefined→[] and clear tiles
+      // before the first sessions frame arrives.
+      setLoadBanner(document.getElementById('session-load-banner'), 'Syncing session list…');
       flushPendingTerminalWatches();
       resubscribeAllTerminalWatches();
     };
@@ -749,7 +804,7 @@
       if (window._sessionListSSERetryTimer) return;
       var delay = window._sessionListSSEBackoff || 1000;
       window._sessionListSSEBackoff = sseBackoffNext(delay);
-      renderSessionGrid(window._lastSessionsSnapshot || [], '连接断开，约 ' + Math.ceil(delay / 1000) + ' 秒后自动重连…');
+      renderSessionGrid(window._lastSessionsSnapshot || [], 'Disconnected. Reconnecting in ~' + Math.ceil(delay / 1000) + 's…');
       window._sessionListSSERetryTimer = setTimeout(function () {
         window._sessionListSSERetryTimer = null;
         connectUIWebSocket();
@@ -777,6 +832,10 @@
     if (win._shellResizeSyncTimer) {
       clearRetryTimer(win._shellResizeSyncTimer);
       win._shellResizeSyncTimer = null;
+    }
+    if (win._shellInputUnlockAC) {
+      try { win._shellInputUnlockAC.abort(); } catch (e) {}
+      win._shellInputUnlockAC = null;
     }
     if (win._fitRo && win._shellTermEl) {
       try { win._fitRo.unobserve(win._shellTermEl); } catch (e) {}
@@ -825,6 +884,7 @@
       win.style.width = w + 'px';
       win.style.height = h + 'px';
       if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
+      if (win._term) shellTermScrollToBottom(win._term, false);
     }
     function onUp() {
       if (!resizing) return;
@@ -838,6 +898,7 @@
         win._shellResizeSyncTimer = null;
       }
       if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, true);
+      if (win._term) shellTermScrollToBottom(win._term, true);
     }
     handle.addEventListener('mousedown', function (e) {
       e.preventDefault();
@@ -857,7 +918,7 @@
     wsUiSend({ type: 'resize', id: win._sid, rows: win._term.rows, cols: win._term.cols });
   }
 
-  /** 容器尺寸变化后防抖同步 PTY（mr-robot 对 WebSocket 用纯本地 fit；SSH resize 便宜，这里补一层防抖） */
+  /** Debounced PTY sync on container resize (local fit + optional remote resize via WebSocket). */
   function scheduleShellRemoteResize(win) {
     if (!win || !win._sid || win._streamDone) return;
     if (win._shellResizeSyncTimer) clearRetryTimer(win._shellResizeSyncTimer);
@@ -868,8 +929,7 @@
   }
 
   /**
-   * mr-robot 风格适配：列宽按 .xterm-viewport 可见宽度（避免纵向滚动条吃掉列数），
-   * 再用 .xterm-screen 与当前行列校准单元格尺寸；syncRemote 为真时经 WebSocket 同步 PTY。
+   * Fit columns to .xterm-viewport width (scrollbar-aware), align cell size with .xterm-screen; when syncRemote, resize PTY over WebSocket.
    */
   function fitShellTerminal(term, container, win, syncRemote) {
     if (!container || !container.isConnected || !term) return;
@@ -909,26 +969,27 @@
     return u;
   }
 
-  /** 将视口滚到缓冲区底部；flush=true 时多帧强同步（开窗/再聚焦），否则合并到下一帧（WS 高频 write）。 */
+  /** Scroll to buffer bottom using xterm APIs only (do not set viewport scrollTop — it desyncs from the renderer). */
   function shellTermScrollToBottom(term, flush) {
     if (!term) return;
     function apply() {
-      try {
-        if (typeof term.scrollToBottom === 'function') term.scrollToBottom();
-      } catch (e) {}
       try {
         var core = term._core;
         if (core && core.viewport && typeof core.viewport.syncScrollArea === 'function') {
           core.viewport.syncScrollArea();
         }
-      } catch (e1) {}
+      } catch (e0) {}
       try {
-        var vp = term.element && term.element.querySelector('.xterm-viewport');
-        if (vp) {
-          var top = Math.max(0, vp.scrollHeight - vp.clientHeight);
-          vp.scrollTop = top;
+        if (typeof term.scrollToBottom === 'function') {
+          term.scrollToBottom();
         }
-      } catch (e2) {}
+      } catch (e) {}
+      try {
+        var core2 = term._core;
+        if (core2 && core2.viewport && typeof core2.viewport.syncScrollArea === 'function') {
+          core2.viewport.syncScrollArea();
+        }
+      } catch (e1) {}
     }
     function applyTwice() {
       apply();
@@ -959,7 +1020,7 @@
     return null;
   }
 
-  /** 在已有 shell DOM 上挂载 xterm、watch、事件（与 openShellWindow 后半段一致）。 */
+  /** Mount xterm, observers, and events on existing shell DOM (same as openShellWindow tail). */
   function mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent) {
     var header = win.querySelector('.shell-window-header');
     var collapseBtn = win.querySelector('.shell-window-collapse-btn');
@@ -972,7 +1033,7 @@
       titleCopyBtn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        copyTextToClipboard(sessionId).then(function () { showCopyToast(); }).catch(function () { showCopyToast('复制失败'); });
+        copyTextToClipboard(sessionId).then(function () { showCopyToast(); }).catch(function () { showCopyToast('Copy failed'); });
       });
     }
 
@@ -981,6 +1042,9 @@
       if (!win._term) return;
       if (e.target.closest('.shell-window-header')) return;
       try { win._term.focus(); } catch (e2) {}
+      requestAnimationFrame(function () {
+        shellTermScrollToBottom(win._term, true);
+      });
     });
 
     var term = new Terminal({
@@ -997,10 +1061,15 @@
       scrollback: 3000
     });
     term.open(termEl);
+    attachTermBrowserChordShield(term);
     win._term = term;
     win._shellTermEl = termEl;
+    setupShellOnDataUserGate(win, term);
     termEl.addEventListener('click', function () { term.focus(); });
-    termEl.addEventListener('mousedown', function () { term.focus(); });
+    termEl.addEventListener('mousedown', function () {
+      term.focus();
+      requestAnimationFrame(function () { shellTermScrollToBottom(term, true); });
+    });
 
     fitShellTerminal(term, termEl, win, true);
     shellTermScrollToBottom(term, true);
@@ -1019,6 +1088,7 @@
       if (win.classList.contains('shell-window-collapsed')) return;
       fitShellTerminal(term, termEl, win, false);
       scheduleShellRemoteResize(win);
+      shellTermScrollToBottom(term, false);
     });
     ro.observe(termEl);
     win._fitRo = ro;
@@ -1029,6 +1099,13 @@
     win._inputClosed = false;
     term.onData(function (data) {
       if (win._inputClosed) return;
+      if (win._streamDone) {
+        if (data === '\r' || data === '\n' || data === '\r\n') {
+          closeShellWindow(win);
+        }
+        return;
+      }
+      if (!win._shellUserInputReady) return;
       if (!window._uiWS || window._uiWS.readyState !== 1) return;
       try {
         window._uiWS.send(JSON.stringify({ type: 'input', id: sessionId, d: strToUtf8B64(data), nl: false }));
@@ -1054,7 +1131,7 @@
         icD.style.display = win.classList.contains('shell-window-collapsed') ? 'none' : '';
         icU.style.display = win.classList.contains('shell-window-collapsed') ? '' : 'none';
       }
-      collapseBtn.title = win.classList.contains('shell-window-collapsed') ? '展开' : '收起';
+      collapseBtn.title = win.classList.contains('shell-window-collapsed') ? 'Expand' : 'Collapse';
       if (!win.classList.contains('shell-window-collapsed')) {
         fitShellTerminal(term, termEl, win, true);
         try { term.focus(); } catch (e3) {}
@@ -1081,9 +1158,9 @@
     }, 50);
   }
 
-  /** 点击 Entry 后立即弹出：占位窗口 +「正在连接」，避免连点重复建连。 */
+  /** After clicking an entry: show placeholder + spinner immediately to prevent double-connect. */
   function openPendingShellWindow(connName, clickEvent, abortCtl) {
-    if (typeof Terminal === 'undefined') { alert('xterm 未加载'); return null; }
+    if (typeof Terminal === 'undefined') { alert('xterm failed to load'); return null; }
     var container = shellWindowsEl();
     if (!container) return null;
     shellWindowCount += 1;
@@ -1103,25 +1180,25 @@
         '<span class="shell-title-id-group">' +
         '<span class="shell-sid-copy">' +
         '<span class="sid">…</span>' +
-        '<button type="button" class="title-copy-btn" style="display:none" title="复制 session id" aria-label="复制 session id">' + SVG_COPY_12 + '</button>' +
+        '<button type="button" class="title-copy-btn" style="display:none" title="Copy session id" aria-label="Copy session id">' + SVG_COPY_12 + '</button>' +
         '</span>' +
         '</span>' +
         '</h3>' +
         '</div>' +
         '<div class="shell-window-header-btns">' +
-          '<button type="button" class="shell-window-collapse-btn" style="display:none" title="收起">' +
+          '<button type="button" class="shell-window-collapse-btn" style="display:none" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
             '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
           '</button>' +
-          '<button type="button" class="close-btn" title="关闭（取消连接）">' +
+          '<button type="button" class="close-btn" title="Close (cancel connect)">' +
             '<svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
           '</button>' +
         '</div>' +
       '</div>' +
       '<div class="shell-window-content"><div class="shell-terminal-wrap">' +
-        '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>正在连接 <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
+        '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>Connecting <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
       '</div></div>' +
-      '<div class="shell-window-resize-handle" title="拖动调整大小"></div>';
+      '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
     var termEl = win.querySelector('.shell-terminal-wrap');
     var header = win.querySelector('.shell-window-header');
@@ -1167,7 +1244,7 @@
   }
 
   function openShellWindow(connLabel, sessionId, clickEvent) {
-    if (typeof Terminal === 'undefined') { alert('xterm 未加载'); return; }
+    if (typeof Terminal === 'undefined') { alert('xterm failed to load'); return; }
     if (getShellWindowBySid(sessionId)) {
       openOrFocusShellWindow(connLabel, sessionId, clickEvent);
       return;
@@ -1188,23 +1265,23 @@
         '<span class="shell-title-id-group">' +
         '<span class="shell-sid-copy">' +
         '<span class="sid">' + escapeHtml(stripSessionPrefix(sessionId)) + '</span>' +
-        '<button type="button" class="title-copy-btn" title="复制 session id" aria-label="复制 session id">' + SVG_COPY_12 + '</button>' +
+        '<button type="button" class="title-copy-btn" title="Copy session id" aria-label="Copy session id">' + SVG_COPY_12 + '</button>' +
         '</span>' +
         '</span>' +
         '</h3>' +
         '</div>' +
         '<div class="shell-window-header-btns">' +
-          '<button type="button" class="shell-window-collapse-btn" title="收起">' +
+          '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
             '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
           '</button>' +
-          '<button type="button" class="close-btn" title="关闭窗口（不结束会话）">' +
+          '<button type="button" class="close-btn" title="Close window (session keeps running)">' +
             '<svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
           '</button>' +
         '</div>' +
       '</div>' +
       '<div class="shell-window-content"><div class="shell-terminal-wrap"></div></div>' +
-      '<div class="shell-window-resize-handle" title="拖动调整大小"></div>';
+      '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
     var termEl = win.querySelector('.shell-terminal-wrap');
     var winW = 640, winH = 480, th = 21;
@@ -1235,7 +1312,7 @@
     var ac = new AbortController();
     var pendingWin = openPendingShellWindow(connName, clickEvt, ac);
     if (!pendingWin) {
-      return Promise.reject(new Error('无法打开终端窗口'));
+      return Promise.reject(new Error('Could not open terminal window'));
     }
     var body = {
       command: opt.command != null ? opt.command : '',
@@ -1254,7 +1331,7 @@
       })
       .then(function (j) {
         var sid = j && j.session_id;
-        if (!sid) throw new Error('未返回 session_id');
+        if (!sid) throw new Error('No session_id in response');
         pendingWin._connectAbort = null;
         if (pendingWin.parentNode) {
           finalizePendingShellWindow(pendingWin, connName || 'session', sid, clickEvt);
@@ -1290,15 +1367,15 @@
         '</div>' +
         '<div class="entry-card-main">' +
         '<div class="conn-nm-row">' +
-        '<span class="conn-nm" title="点击连接">' + escapeHtml(c.name) + '</span>' +
-        '<button type="button" class="conn-edit-btn" title="编辑配置" aria-label="编辑配置">' + SVG_CONN_EDIT + '</button>' +
+        '<span class="conn-nm" title="Click to connect">' + escapeHtml(c.name) + '</span>' +
+        '<button type="button" class="conn-edit-btn" title="Edit profile" aria-label="Edit profile">' + SVG_CONN_EDIT + '</button>' +
         '</div>' +
         '</div>' +
         '</div>';
       var inner = tile.querySelector('.entry-card-inner');
-      var tipConnect = '点击连接；Alt+点击自定义命令';
+      var tipConnect = 'Click to connect; Alt+click for custom command';
       if (c.kind === 'internal') {
-        inner.title = tipConnect + '（内置 loopback）';
+        inner.title = tipConnect + ' (built-in loopback)';
       } else {
         var hostLine = ((c.user || '') + '@' + (c.host || '') + (c.port && c.port !== 22 ? ':' + c.port : '')).trim();
         inner.title = hostLine ? (tipConnect + ' — ' + hostLine) : tipConnect;
@@ -1318,7 +1395,7 @@
             if (err && err.name === 'AbortError') return;
             console.error(err);
             var msg = (err && err.message) ? err.message : String(err);
-            if (b) setLoadBanner(b, '连接失败：' + msg);
+            if (b) setLoadBanner(b, 'Connection failed: ' + msg);
           })
           .finally(function () {
             tile.classList.remove('entry-connecting');
@@ -1344,7 +1421,7 @@
           try {
             return JSON.parse(t);
           } catch (e) {
-            throw new Error('服务器返回的不是 JSON');
+            throw new Error('Server response was not JSON');
           }
         });
       })
@@ -1354,14 +1431,14 @@
       .catch(function (e) {
         console.error(e);
         var msg = (e && e.message) ? e.message : String(e);
-        renderConnGrid([], '加载 Entries 列表失败：' + msg + '。请检查是否已启动 termcp 主服务、或从正确端口访问。仍可通过右上角添加按钮新建连接。');
+        renderConnGrid([], 'Failed to load entries: ' + msg + '. Ensure termcp is running and you use the correct port. You can still add a profile with +.');
       });
   }
 
   function openConnModal(edit, name) {
     editingConnName = edit ? name : '';
     document.getElementById('modal-conn-err').style.display = 'none';
-    document.getElementById('modal-conn-title').textContent = edit ? '编辑连接' : '添加连接';
+    document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
     document.getElementById('conn-delete').style.display = edit && name !== 'internal' ? 'inline-block' : 'none';
     var nameEl = document.getElementById('conn-name');
     nameEl.value = edit ? name : '';
@@ -1389,7 +1466,7 @@
     err.style.display = 'none';
     var name = document.getElementById('conn-name').value.trim();
     var body = document.getElementById('conn-json').value;
-    if (!name) { err.textContent = '请填写配置名称'; err.style.display = 'block'; return; }
+    if (!name) { err.textContent = 'Profile name is required'; err.style.display = 'block'; return; }
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
@@ -1401,7 +1478,7 @@
   document.getElementById('conn-delete').onclick = function () {
     var name = document.getElementById('conn-name').value.trim();
     if (!name || name === 'internal') return;
-    if (!confirm('删除连接 ' + name + ' ?')) return;
+    if (!confirm('Delete connection ' + name + '?')) return;
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
@@ -1419,7 +1496,7 @@
     startConnName = connName;
     document.getElementById('modal-start-err').style.display = 'none';
     document.getElementById('start-ssh-config').value = connName;
-    document.getElementById('start-title').textContent = '连接 · ' + connName;
+    document.getElementById('start-title').textContent = 'Connect · ' + connName;
     document.getElementById('start-cmd').value = '';
     document.getElementById('start-mode').value = 'pty';
     showModal('modal-start');
@@ -1435,10 +1512,7 @@
       mode: document.getElementById('start-mode').value
     })
       .then(function () { hideModal('modal-start'); })
-      .catch(function (e) {
-        if (e && e.name === 'AbortError') return;
-        err.textContent = String(e.message || e); err.style.display = 'block';
-      });
+      .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
   };
 
   document.getElementById('btn-add-conn').onclick = function () { openConnModal(false, ''); };

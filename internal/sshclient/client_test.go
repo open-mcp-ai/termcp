@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
+	"golang.org/x/crypto/ssh"
 )
 
 func testShell() string {
@@ -14,6 +15,13 @@ func testShell() string {
 		return "powershell.exe"
 	}
 	return "bash"
+}
+
+func ptyShellCmd() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoLogo", "-NoProfile"}
+	}
+	return testShell(), nil
 }
 
 func testShellInput(s string) string {
@@ -54,11 +62,21 @@ func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
 	return srv, srv.Addr()
 }
 
+func mintClientConfig(t *testing.T, srv *sshserver.Server) *ssh.ClientConfig {
+	t.Helper()
+	cfg, err := srv.MintClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
 func TestStart_PipeMode(t *testing.T) {
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
 	command, args, input := pipeEchoCommand()
-	es, err := Start(addr, command, args, false, 24, 80)
+	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +92,11 @@ func TestStart_PipeMode(t *testing.T) {
 }
 
 func TestStart_PtyMode(t *testing.T) {
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
-	es, err := Start(addr, testShell(), nil, true, 24, 80)
+	sh, shArgs := ptyShellCmd()
+	es, err := StartWithConfig(addr, cfg, sh, shArgs, true, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +124,11 @@ func TestStart_ResizePty(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("interactive PTY tests not stable on Windows ConPTY")
 	}
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
-	es, err := Start(addr, testShell(), nil, true, 24, 80)
+	sh, shArgs := ptyShellCmd()
+	es, err := StartWithConfig(addr, cfg, sh, shArgs, true, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,10 +146,11 @@ func TestStart_Signal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX signals not supported on Windows")
 	}
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
 	command, args := longRunningCommand()
-	es, err := Start(addr, command, args, false, 24, 80)
+	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,10 +173,11 @@ func TestStart_Close(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("session close is reported as EOF on Windows ConPTY")
 	}
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
 	command, args := longRunningCommand()
-	es, err := Start(addr, command, args, false, 24, 80)
+	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,10 +214,11 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestStart_CommandFailure(t *testing.T) {
-	_, addr := startTestSSHServer(t)
+	srv, addr := startTestSSHServer(t)
+	cfg := mintClientConfig(t, srv)
 
 	command, args := failingCommand()
-	es, err := Start(addr, command, args, false, 24, 80)
+	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}

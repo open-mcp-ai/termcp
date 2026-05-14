@@ -372,15 +372,17 @@ go build -o server ./cmd/server
 ### 运行
 
 ```bash
-./server --host 127.0.0.1 --port 8080 --data-dir ./data
+./server --data-dir ./data
 ```
+
+默认在 **本机回环**（`127.0.0.1`）上监听端口 **18765**（Web UI、MCP SSE、MCP 流式 HTTP 共用同一端口）。若需局域网或公网访问，请加 `--host 0.0.0.0`。监听 `0.0.0.0` 时，能访问该端口的客户端均可使用界面与 MCP；生产环境请前置反向代理并做鉴权。
 
 启动参数：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--host` | `127.0.0.1` | HTTP server 监听地址 |
-| `--port` | `8080` | HTTP server 端口 |
+| `--host` | `127.0.0.1` | HTTP 监听地址（`0.0.0.0` 表示所有网卡） |
+| `--port` | `18765` | HTTP 端口 |
 | `--data-dir` | `./data` | JSON 存储目录 |
 | `--ssh-host` | `127.0.0.1` | 内部 SSH server 监听地址 |
 | `--ssh-port` | `0`（随机） | 内部 SSH server 端口 |
@@ -396,7 +398,7 @@ go build -o server ./cmd/server
   "mcpServers": {
     "interactive-process": {
       "type": "sse",
-      "url": "http://your-server:8080/sse"
+      "url": "http://your-server:18765/sse"
     }
   }
 }
@@ -405,12 +407,20 @@ go build -o server ./cmd/server
 或通过 CLI：
 
 ```bash
-claude mcp add --transport sse interactive-process http://localhost:8080/sse
+claude mcp add --transport sse interactive-process http://localhost:18765/sse
 ```
+
+### Open WebUI（流式 HTTP MCP）
+
+Open WebUI 可使用 **streamable HTTP** 接入 MCP，填写基础 URL：
+
+`http://<主机>:18765/stream`
+
+本机示例：`http://127.0.0.1:18765/stream`。若 Open WebUI 在 Docker 内、termcp 在宿主机，可用 `http://host.docker.internal:18765/stream`（Docker Desktop）或宿主机局域网 IP。
 
 ### 其他 MCP 客户端
 
-任何支持 SSE transport 的 MCP 客户端均可连接 `http://<host>:<port>/sse`。
+支持 **SSE** 的客户端连接 `http://<host>:<port>/sse`；支持 **streamable HTTP** 的客户端连接 `http://<host>:<port>/stream`。
 
 ---
 
