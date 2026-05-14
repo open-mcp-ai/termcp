@@ -36,6 +36,12 @@ func (h *sessionListHub) broadcast() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, ch := range h.clients {
+		// Buffered(1): if a wake is already pending, a second default would drop this notify
+		// and the client might never pull ListAll() again — drain then enqueue one coalesced wake.
+		select {
+		case <-ch:
+		default:
+		}
 		select {
 		case ch <- struct{}{}:
 		default:
