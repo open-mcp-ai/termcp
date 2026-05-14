@@ -6,29 +6,32 @@ import (
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/message"
+	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
 // Manager is a thread-safe registry of sessions with persistence.
 type Manager struct {
-	sessions map[string]*Session
-	mu       sync.RWMutex
-	sshAddr  string
-	msgMgr   *message.Manager
-	store    *storage.Store
+	sessions    map[string]*Session
+	mu          sync.RWMutex
+	sshAddr     string
+	internalSSH *sshserver.Server // built-in server for Mint + internal sessions; nil in some tests
+	msgMgr      *message.Manager
+	store       *storage.Store
 
 	listChangeMu sync.RWMutex
 	onListChange func()
 }
 
-// NewManager creates a Manager.
-func NewManager(sshAddr string, msgMgr *message.Manager, store *storage.Store) *Manager {
+// NewManager creates a Manager. internalSSH must be the built-in sshserver.Server (after Start) when using internal profiles; may be nil if only remote sessions are used in tests.
+func NewManager(sshAddr string, msgMgr *message.Manager, store *storage.Store, internalSSH *sshserver.Server) *Manager {
 	return &Manager{
-		sessions: make(map[string]*Session),
-		sshAddr:  sshAddr,
-		msgMgr:   msgMgr,
-		store:    store,
+		sessions:    make(map[string]*Session),
+		sshAddr:     sshAddr,
+		internalSSH: internalSSH,
+		msgMgr:      msgMgr,
+		store:       store,
 	}
 }
 
@@ -55,7 +58,7 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 		m.persist()
 		m.notifyListChange()
 	}
-	s, err := New(m.sshAddr, cfg, m.msgMgr)
+	s, err := New(m.sshAddr, m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
 		return nil, err
 	}

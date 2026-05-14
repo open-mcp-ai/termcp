@@ -6,17 +6,23 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/open-mcp-ai/termcp/internal/config"
+	"github.com/open-mcp-ai/termcp/internal/logansi"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
@@ -25,6 +31,78 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/storage"
 	"github.com/open-mcp-ai/termcp/internal/webui"
 )
+
+func bindHostIsAll(bind string) bool {
+	switch strings.TrimSpace(bind) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
+	}
+}
+
+// nonLoopbackUnicastIPv4s lists unique IPv4 addresses on up, non-loopback interfaces.
+func nonLoopbackUnicastIPv4s() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			default:
+				continue
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			v4 := ip.To4()
+			if v4 == nil {
+				continue
+			}
+			s := v4.String()
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sshURLFromListenAddr turns "host:port" into ssh://host:port (IPv6 host gets brackets).
+func sshURLFromListenAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "ssh://" + addr
+	}
+	if strings.Contains(host, ":") {
+		return fmt.Sprintf("ssh://[%s]:%s", host, port)
+	}
+	return fmt.Sprintf("ssh://%s:%s", host, port)
+}
+
+func logHTTPMain(base string, port int, lanIPv4 []string) {
+	slog.Info(base + "/")
+	for _, ip := range lanIPv4 {
+		slog.Info(fmt.Sprintf("http://%s:%d/", ip, port))
+	}
+}
 
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
@@ -50,13 +128,12 @@ func main() {
 	}
 
 	cfg := config.Default()
-	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP server host")
+	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
 	flag.StringVar(&cfg.SSHHost, "ssh-host", cfg.SSHHost, "Internal SSH server host")
 	flag.IntVar(&cfg.SSHPort, "ssh-port", cfg.SSHPort, "Internal SSH server port (0 = random)")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
-	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log output format: text|json")
 	flag.StringVar(&cfg.AdminHost, "admin-host", cfg.AdminHost, "SSH config admin API bind host")
 	flag.IntVar(&cfg.AdminPort, "admin-port", cfg.AdminPort, "SSH config admin HTTP port (0 = disabled; requires admin-token)")
 	flag.StringVar(&cfg.AdminToken, "admin-token", cfg.AdminToken, "Bearer / X-Admin-Token for PUT/GET/DELETE /api/ssh-configs")
@@ -68,6 +145,7 @@ func main() {
 	}
 
 	slog.SetDefault(slog.New(buildLogHandler(cfg)))
+	slog.Info("termcp server started")
 
 	// Start internal SSH server
 	sshAddr := fmt.Sprintf("%s:%d", cfg.SSHHost, cfg.SSHPort)
@@ -77,12 +155,20 @@ func main() {
 		os.Exit(1)
 	}
 	actualSSHAddr := sshSrv.Addr()
-	slog.Info("internal SSH server listening", "addr", actualSSHAddr)
+	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
+	slog.Info("SSH local server:")
+	slog.Info("    " + sshURLFromListenAddr(actualSSHAddr))
+	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
+
+	slog.Info("MCP HTTP:")
+	slog.Info("    /sse SSE transport")
+	slog.Info("    /stream (streamable HTTP per MCP spec, e.g. Open WebUI)")
+	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
 
 	// Initialize storage and managers
 	store := storage.New(cfg.DataDir)
 	msgMgr := message.NewManager(store)
-	sessMgr := session.NewManager(actualSSHAddr, msgMgr, store)
+	sessMgr := session.NewManager(actualSSHAddr, msgMgr, store, sshSrv)
 
 	if err := sshconfig.EnsureInternal(cfg.DataDir); err != nil {
 		slog.Error("failed to ensure internal ssh config", "err", err)
@@ -96,6 +182,7 @@ func main() {
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, mcpserver.WithHTTPServer(mainSrv))
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
+	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
 	(&webui.Handler{Sessions: sessMgr, SSH: sshStore}).Register(mux)
 
 	var adminSrv *http.Server
@@ -107,15 +194,20 @@ func main() {
 		adminAddr := fmt.Sprintf("%s:%d", cfg.AdminHost, cfg.AdminPort)
 		adminSrv = &http.Server{Addr: adminAddr, Handler: adminMux}
 		go func() {
-			slog.Info("SSH config admin API listening", "addr", adminAddr)
+			slog.Info("http admin", "listen", adminAddr, "paths", "/api/ssh-configs")
 			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("admin API server stopped", "err", err)
 			}
 		}()
 	}
 
-	slog.Info("MCP SSE server listening", "addr", addr)
-	slog.Info("web UI", "url", fmt.Sprintf("http://%s/", addr))
+	host := strings.TrimSpace(cfg.Host)
+	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)
+	var lan []string
+	if bindHostIsAll(host) {
+		lan = nonLoopbackUnicastIPv4s()
+	}
+	logHTTPMain(base, cfg.Port, lan)
 
 	var shuttingDown atomic.Bool
 
@@ -147,22 +239,19 @@ func main() {
 }
 
 func buildLogHandler(cfg *config.Config) slog.Handler {
-	var level slog.Level
+	var minLevel slog.Level
 	switch cfg.LogLevel {
 	case "debug":
-		level = slog.LevelDebug
+		minLevel = slog.LevelDebug
 	case "warn":
-		level = slog.LevelWarn
+		minLevel = slog.LevelWarn
 	case "error":
-		level = slog.LevelError
+		minLevel = slog.LevelError
 	default:
-		level = slog.LevelInfo
+		minLevel = slog.LevelInfo
 	}
-	opts := &slog.HandlerOptions{Level: level}
-	if cfg.LogFormat == "json" {
-		return slog.NewJSONHandler(os.Stderr, opts)
-	}
-	return slog.NewTextHandler(os.Stderr, opts)
+	color := term.IsTerminal(int(os.Stderr.Fd()))
+	return logansi.NewTextHandler(os.Stderr, logansi.Options{MinLevel: minLevel, Color: color})
 }
 
 func printSSHConfigUsage(program string) {

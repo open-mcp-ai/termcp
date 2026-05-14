@@ -371,15 +371,17 @@ go build -o server ./cmd/server
 ### Run
 
 ```bash
-./server --host 127.0.0.1 --port 8080 --data-dir ./data
+./server --data-dir ./data
 ```
+
+By default the process listens on **loopback** (`127.0.0.1`) and port **18765** (Web UI, MCP SSE, and MCP streamable HTTP share this listener). Use `--host 0.0.0.0` to listen on all interfaces (LAN/WAN); anyone who can reach the port can use the UI and MCP—place a reverse proxy with authentication in front for production.
 
 Options:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host` | `127.0.0.1` | HTTP server host |
-| `--port` | `8080` | HTTP server port |
+| `--host` | `127.0.0.1` | HTTP bind address (`0.0.0.0` = all interfaces) |
+| `--port` | `18765` | HTTP server port |
 | `--data-dir` | `./data` | JSON storage directory |
 | `--ssh-host` | `127.0.0.1` | Internal SSH server host |
 | `--ssh-port` | `0` (random) | Internal SSH server port |
@@ -395,7 +397,7 @@ In `.claude/settings.json` or `.mcp.json`:
   "mcpServers": {
     "termcp": {
       "type": "sse",
-      "url": "http://your-server:8080/sse"
+      "url": "http://your-server:18765/sse"
     }
   }
 }
@@ -404,12 +406,20 @@ In `.claude/settings.json` or `.mcp.json`:
 Or via CLI:
 
 ```bash
-claude mcp add --transport sse termcp http://localhost:8080/sse
+claude mcp add --transport sse termcp http://localhost:18765/sse
 ```
+
+### Open WebUI (streamable HTTP)
+
+Open WebUI can use MCP over **streamable HTTP**. Point it at the base URL (no trailing slash required in most UIs):
+
+`http://<host>:18765/stream`
+
+Example when termcp runs on the same machine as Open WebUI: `http://127.0.0.1:18765/stream`. When Open WebUI runs in Docker and termcp on the host, use `http://host.docker.internal:18765/stream` (macOS/Windows Docker Desktop) or the host LAN IP.
 
 ### Other MCP Clients
 
-Any MCP client that supports SSE transport can connect to `http://<host>:<port>/sse`.
+Any MCP client that supports **SSE** can connect to `http://<host>:<port>/sse`. Clients that support **streamable HTTP** can use `http://<host>:<port>/stream`.
 
 ---
 
