@@ -18,6 +18,9 @@ import (
 
 const wsSendBuf = 1024
 
+// terminalOutputChunkBytes caps raw PTY bytes per stream read so full-scrollback replay stays under WS/SSE message limits.
+const terminalOutputChunkBytes = 256 * 1024
+
 var uiUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
@@ -231,7 +234,7 @@ func (c *uiWS) runWatch(ctx context.Context, sess *session.Session, sid string, 
 		if ctx.Err() != nil {
 			return
 		}
-		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0)
+		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0, terminalOutputChunkBytes)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -262,7 +265,7 @@ func (c *uiWS) addWatch(sid string) error {
 	if sess == nil {
 		return errWSSessionNotFound
 	}
-	rid, err := sess.RegisterReaderSeededFromDefault()
+	rid, err := sess.RegisterReader()
 	if err != nil {
 		return err
 	}

@@ -16,7 +16,7 @@ func TestBuffer_WriteAndRead(t *testing.T) {
 	b.Write([]byte("hello"))
 	b.Write([]byte(" world"))
 
-	data, err := b.Read(context.Background(), r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestBuffer_WriteAndRead(t *testing.T) {
 	}
 
 	// Second read with no new data should return empty immediately
-	data, err = b.Read(context.Background(), r, 0)
+	data, err = b.Read(context.Background(), r, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestBuffer_ReadWaitsForData(t *testing.T) {
 		close(done)
 	}()
 
-	data, err := b.Read(context.Background(), r, 2*time.Second)
+	data, err := b.Read(context.Background(), r, 2*time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBuffer_ReadTimeout(t *testing.T) {
 	b := New(1024)
 	r, _ := b.NewReader()
 	start := time.Now()
-	data, err := b.Read(context.Background(), r, 200*time.Millisecond)
+	data, err := b.Read(context.Background(), r, 200*time.Millisecond, 0)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestBuffer_LargeWriteRetainsAll(t *testing.T) {
 	b.Write([]byte(strings.Repeat("b", 16)))
 	b.Write([]byte(strings.Repeat("c", 16)))
 
-	data, err := b.Read(context.Background(), r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestBuffer_CloseWakesReaders(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		data, err := b.Read(context.Background(), r, 10*time.Second)
+		data, err := b.Read(context.Background(), r, 10*time.Second, 0)
 		if len(data) != 0 {
 			t.Errorf("expected empty on close, got %q", string(data))
 		}
@@ -136,7 +136,7 @@ func TestBuffer_WriteAfterClose(t *testing.T) {
 		t.Fatalf("expected ErrClosed, got %v", err)
 	}
 
-	data, err := b.Read(context.Background(), r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		b.Read(context.Background(), r, 2*time.Second)
+		b.Read(context.Background(), r, 2*time.Second, 0)
 	}()
 
 	wg.Wait()
@@ -178,14 +178,14 @@ func TestBuffer_NewReaderSeededFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotSrc, err := b.Read(context.Background(), src, time.Second)
+	gotSrc, err := b.Read(context.Background(), src, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(gotSrc) != "backlog" {
 		t.Fatalf("src expected backlog intact, got %q", string(gotSrc))
 	}
-	gotDst, err := b.Read(context.Background(), dst, time.Second)
+	gotDst, err := b.Read(context.Background(), dst, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,8 +194,8 @@ func TestBuffer_NewReaderSeededFrom(t *testing.T) {
 	}
 
 	b.Write([]byte("more"))
-	g1, _ := b.Read(context.Background(), src, time.Second)
-	g2, _ := b.Read(context.Background(), dst, time.Second)
+	g1, _ := b.Read(context.Background(), src, time.Second, 0)
+	g2, _ := b.Read(context.Background(), dst, time.Second, 0)
 	if string(g1) != "more" || string(g2) != "more" {
 		t.Fatalf("after write both readers: src=%q dst=%q", string(g1), string(g2))
 	}
@@ -208,11 +208,11 @@ func TestBuffer_MultiReaderIndependence(t *testing.T) {
 
 	b.Write([]byte("hello"))
 
-	data1, err := b.Read(context.Background(), r1, time.Second)
+	data1, err := b.Read(context.Background(), r1, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data2, err := b.Read(context.Background(), r2, time.Second)
+	data2, err := b.Read(context.Background(), r2, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,19 +232,19 @@ func TestBuffer_MultiReaderSequentialWrite(t *testing.T) {
 
 	b.Write([]byte("chunk1"))
 	// r1 reads chunk1
-	data1, _ := b.Read(context.Background(), r1, time.Second)
+	data1, _ := b.Read(context.Background(), r1, time.Second, 0)
 	if string(data1) != "chunk1" {
 		t.Fatalf("r1 expected 'chunk1', got %q", string(data1))
 	}
 
 	b.Write([]byte("chunk2"))
 	// r1 reads only chunk2
-	data1, _ = b.Read(context.Background(), r1, time.Second)
+	data1, _ = b.Read(context.Background(), r1, time.Second, 0)
 	if string(data1) != "chunk2" {
 		t.Fatalf("r1 expected 'chunk2', got %q", string(data1))
 	}
 	// r2 reads both chunk1 and chunk2
-	data2, _ := b.Read(context.Background(), r2, time.Second)
+	data2, _ := b.Read(context.Background(), r2, time.Second, 0)
 	s2 := string(data2)
 	if !strings.Contains(s2, "chunk1") || !strings.Contains(s2, "chunk2") {
 		t.Fatalf("r2 expected both chunks, got %q", s2)
@@ -259,7 +259,7 @@ func TestBuffer_Unregister(t *testing.T) {
 	b.Unregister(r)
 
 	// Read from unregistered reader should return error
-	_, err := b.Read(context.Background(), r, 0)
+	_, err := b.Read(context.Background(), r, 0, 0)
 	if err != ErrReader {
 		t.Fatalf("expected ErrReader, got %v", err)
 	}
@@ -271,7 +271,7 @@ func TestBuffer_UnregisterWakesReader(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := b.Read(context.Background(), r, 10*time.Second)
+		_, err := b.Read(context.Background(), r, 10*time.Second, 0)
 		done <- err
 	}()
 
@@ -301,7 +301,7 @@ func TestBuffer_HasMore(t *testing.T) {
 		t.Fatal("expected data after write")
 	}
 
-	b.Read(context.Background(), r, 0)
+	b.Read(context.Background(), r, 0, 0)
 	if b.HasMore(r) {
 		t.Fatal("expected no data after read")
 	}
@@ -309,7 +309,7 @@ func TestBuffer_HasMore(t *testing.T) {
 
 func TestBuffer_InvalidReader(t *testing.T) {
 	b := New(1024)
-	_, err := b.Read(context.Background(), 999, 0)
+	_, err := b.Read(context.Background(), 999, 0, 0)
 	if err != ErrReader {
 		t.Fatalf("expected ErrReader, got %v", err)
 	}
@@ -326,7 +326,7 @@ func TestBuffer_ReadCancelledContext(t *testing.T) {
 	}()
 
 	start := time.Now()
-	data, err := b.Read(ctx, r, 10*time.Second)
+	data, err := b.Read(ctx, r, 10*time.Second, 0)
 	elapsed := time.Since(start)
 
 	if elapsed > 500*time.Millisecond {
@@ -346,9 +346,9 @@ func TestBuffer_ReadCancelledContextWithData(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Write data first, then read with valid ctx — should get data immediately
+	// Write data first, then read with valid ctx; should get data immediately
 	b.Write([]byte("hello"))
-	data, err := b.Read(ctx, r, time.Second)
+	data, err := b.Read(ctx, r, time.Second, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestBuffer_ReadTimeoutReliability(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		done := make(chan struct{})
 		go func() {
-			data, err := b.Read(context.Background(), r, 50*time.Millisecond)
+			data, err := b.Read(context.Background(), r, 50*time.Millisecond, 0)
 			if err != nil && err != io.EOF {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -384,7 +384,7 @@ func TestBuffer_ReadTimeoutReliability(t *testing.T) {
 		}()
 
 		// Concurrent writes create contention: reader wakes, loops,
-		// competes for lock — widens the race window for AfterFunc.
+		// competes for lock; widens the race window for AfterFunc.
 		go func() {
 			for j := 0; j < 50; j++ {
 				b.Write([]byte("x"))
@@ -394,9 +394,9 @@ func TestBuffer_ReadTimeoutReliability(t *testing.T) {
 
 		select {
 		case <-done:
-			// good — Read returned within timeout
+			// good: Read returned within timeout
 		case <-time.After(2 * time.Second):
-			t.Fatalf("Read blocked forever on iteration %d — AfterFunc race", i)
+			t.Fatalf("Read blocked forever on iteration %d (AfterFunc race)", i)
 		}
 	}
 }
@@ -411,7 +411,7 @@ func TestBuffer_StressConcurrentReadCloseUnregister(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			b.Read(context.Background(), r, 100*time.Millisecond)
+			b.Read(context.Background(), r, 100*time.Millisecond, 0)
 		}()
 		go func() {
 			defer wg.Done()
@@ -437,5 +437,25 @@ func TestBuffer_StressConcurrentReadCloseUnregister(t *testing.T) {
 		// Reset buffer for next round
 		b.Close()
 		b = New(1024)
+	}
+}
+
+func TestBuffer_ByteRange(t *testing.T) {
+	b := New(1024)
+	b.Write([]byte("abcd"))
+	if b.Len() != 4 {
+		t.Fatalf("Len: got %d", b.Len())
+	}
+	p, total := b.ByteRange(1, 2)
+	if total != 4 || string(p) != "bc" {
+		t.Fatalf("ByteRange(1,2): got %q total=%d", p, total)
+	}
+	p2, _ := b.ByteRange(0, 100)
+	if string(p2) != "abcd" {
+		t.Fatalf("ByteRange full: %q", p2)
+	}
+	p3, _ := b.ByteRange(10, 1)
+	if p3 != nil {
+		t.Fatalf("expected nil past end")
 	}
 }
