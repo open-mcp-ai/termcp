@@ -175,11 +175,16 @@ func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolReq
 
 	mode := sshconfig.EffectiveMode(ent, getString(args, "mode", ""))
 
+	sessName := strings.TrimSpace(getString(args, "name", ""))
+	if sessName == "" {
+		sessName = cfgName
+	}
+
 	sess, err := s.sessMgr.Create(session.Config{
 		Command: cmd,
 		Args:    execArgs,
 		Mode:    api.SessionMode(mode),
-		Name:    getString(args, "name", ""),
+		Name:    sessName,
 		Rows:    int(getFloat64(args, "rows", 24)),
 		Cols:    int(getFloat64(args, "cols", 80)),
 		Remote:  remote,

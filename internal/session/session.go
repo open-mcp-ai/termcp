@@ -310,8 +310,8 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 	return nil
 }
 
-func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, persist bool) (string, error) {
-	data, err := s.buf.Read(ctx, readerID, timeout)
+func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, persist bool, maxBytes int) (string, error) {
+	data, err := s.buf.Read(ctx, readerID, timeout, maxBytes)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -334,17 +334,39 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 
 // ReadOutput reads new output using the default reader.
 func (s *Session) ReadOutput(ctx context.Context, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines, true)
+	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines, true, 0)
 }
 
 // ReadOutputForReader reads new output for a specific reader ID.
 func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, true)
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, true, 0)
 }
 
 // ReadTerminalStream reads PTY output for a reader without appending to the message log (high-frequency UI streaming).
-func (s *Session) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, false)
+// If maxBytes > 0, each call returns at most that many raw bytes (for WebSocket/SSE chunking); 0 means one full drain to end of buffer.
+func (s *Session) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, false, maxBytes)
+}
+
+// OutputByteRange returns a copy of retained raw output bytes [start, start+max) and total retained length.
+func (s *Session) OutputByteRange(start int64, max int) ([]byte, int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.buf == nil {
+		return nil, 0, fmt.Errorf("output buffer unavailable")
+	}
+	data, total := s.buf.ByteRange(start, max)
+	return data, total, nil
+}
+
+// BufferLen returns retained raw output length in bytes (for tail slicing).
+func (s *Session) BufferLen() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.buf == nil {
+		return 0
+	}
+	return s.buf.Len()
 }
 
 // Terminate gracefully or forcefully stops the process.
@@ -417,8 +439,7 @@ func (s *Session) Info() api.Session {
 }
 
 // DefaultOutputReaderID is the first ring-buffer reader created with the session.
-// MCP read_output defaults to this ID. Multiple consumers on the same reader ID share one read cursor;
-// the web UI SSE stream uses RegisterReaderSeededFromDefault for an independent cursor plus backlog.
+// MCP read_output defaults to this ID. The Web UI loads older bytes via GET /output-range and streams new output with RegisterReader().
 func (s *Session) DefaultOutputReaderID() int {
 	return s.readerID
 }
@@ -427,6 +448,12 @@ func (s *Session) DefaultOutputReaderID() int {
 // (atomic under buffer lock) so the web stream does not compete with MCP read_output on reader 0.
 func (s *Session) RegisterReaderSeededFromDefault() (int, error) {
 	return s.buf.NewReaderSeededFrom(s.readerID)
+}
+
+// RegisterReaderFromBufferStart registers a reader at the start of the retained transcript
+// so Web UI / SSE clients replay full in-memory scrollback after reconnect.
+func (s *Session) RegisterReaderFromBufferStart() (int, error) {
+	return s.buf.NewReaderFromStart()
 }
 
 // RegisterReader creates a new independent reader and returns its ID.
