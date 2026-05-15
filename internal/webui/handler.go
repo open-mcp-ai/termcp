@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,6 +56,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/ui/ws", h.handleWebUIWS)
 	mux.HandleFunc("POST /api/sessions/start", h.handleStartSession)
 	mux.HandleFunc("GET /api/sessions/{id}/stream", h.handleStream)
+	mux.HandleFunc("GET /api/sessions/{id}/output-range", h.handleSessionOutputRange)
 	mux.HandleFunc("POST /api/sessions/{id}/input", h.handleInput)
 	mux.HandleFunc("POST /api/sessions/{id}/resize", h.handleResize)
 	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleTerminate)
@@ -204,6 +206,10 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mode must be pty or pipe", http.StatusBadRequest)
 		return
 	}
+	sessName := strings.TrimSpace(body.Name)
+	if sessName == "" {
+		sessName = cfgName
+	}
 	rows := body.Rows
 	if rows < 1 {
 		rows = 24
@@ -225,7 +231,7 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		Command: cmd,
 		Args:    args,
 		Mode:    api.SessionMode(mode),
-		Name:    body.Name,
+		Name:    sessName,
 		Rows:    rows,
 		Cols:    cols,
 		Remote:  remote,
@@ -242,6 +248,58 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	sess := h.Sessions.Get(id)
+	if sess == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	const hardMax = 512 * 1024
+	max, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("max")))
+	if err != nil || max <= 0 {
+		max = 256 * 1024
+	}
+	if max > hardMax {
+		max = hardMax
+	}
+
+	tail := strings.TrimSpace(r.URL.Query().Get("tail")) == "1"
+	var start int64
+	if tail {
+		total := sess.BufferLen()
+		t := total - int64(max)
+		if t < 0 {
+			t = 0
+		}
+		start = t
+	} else {
+		start, err = strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("start")), 10, 64)
+		if err != nil || start < 0 {
+			http.Error(w, "invalid start", http.StatusBadRequest)
+			return
+		}
+	}
+
+	data, total, err := sess.OutputByteRange(start, max)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	end := start + int64(len(data))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"start": start,
+		"end":   end,
+		"total": total,
+		"d":     base64.StdEncoding.EncodeToString(data),
+	})
+}
+
 func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess := h.Sessions.Get(id)
@@ -250,8 +308,8 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dedicated reader so MCP read_output (default reader) does not share the same drain cursor.
-	rid, err := sess.RegisterReaderSeededFromDefault()
+	// Reader at current buffer end: stream only new bytes (older scrollback via GET output-range).
+	rid, err := sess.RegisterReader()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -276,7 +334,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0)
+		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0, terminalOutputChunkBytes)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

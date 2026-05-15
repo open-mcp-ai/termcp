@@ -341,6 +341,17 @@
       to { transform: rotate(360deg); }
     }
     .shell-terminal-wrap .xterm { height: 100%; min-height: 0; }
+    /* xterm appends .xterm-screen after .xterm-viewport (siblings). The screen layer stacks on top
+       of the viewport and otherwise blocks the native scrollbar. Inset the screen so the gutter
+       receives pointer events (scrollbar drag / track click). */
+    .shell-terminal-wrap .xterm .xterm-screen {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      right: 14px;
+      width: auto;
+    }
     .shell-terminal-wrap .xterm .xterm-viewport {
       background-color: #1e1e1e !important;
       scrollbar-color: #484f58 #1e1e1e;
@@ -548,7 +559,50 @@
 
   function bringShellWindowToFront(win) {
     var c = shellWindowsEl();
-    if (c && win.parentNode === c) c.appendChild(win);
+    if (!c || win.parentNode !== c) return;
+    /* Do not appendChild(win) — re-inserting the subtree reflows and fires ResizeObserver, which disturbs xterm viewport scroll. Use stacking z-index instead. */
+    if (!window._shellZSeq) window._shellZSeq = 10050;
+    window._shellZSeq += 1;
+    win.style.zIndex = String(window._shellZSeq);
+  }
+
+  /** Initial placement for a new .shell-window (caller must have incremented shellWindowCount). */
+  function positionShellWindowFromClick(win, clickEvent) {
+    var winW = 640, winH = 480, th = 21;
+    var left, top;
+    if (clickEvent && typeof clickEvent.clientX === 'number') {
+      left = Math.max(8, Math.min(clickEvent.clientX - winW / 2, window.innerWidth - winW - 8));
+      top = Math.max(8, Math.min(clickEvent.clientY - th, window.innerHeight - winH - 8));
+    } else {
+      var off = (shellWindowCount - 1) % 5;
+      left = 80 + off * 24; top = 60 + off * 24;
+    }
+    win.style.left = left + 'px';
+    win.style.top = top + 'px';
+  }
+
+  /** Idempotent: z-order on mousedown + focus only when clicking wrap padding (not .xterm / not header). */
+  function bindShellWindowMouseToFront(win) {
+    if (win._termcpMouseToFrontBound) return;
+    win._termcpMouseToFrontBound = true;
+    win.addEventListener('mousedown', function (e) {
+      bringShellWindowToFront(win);
+      if (!win._term) return;
+      if (e.target.closest('.shell-window-header')) return;
+      if (!e.target.closest('.xterm')) {
+        try { win._term.focus(); } catch (e2) {}
+      }
+    });
+  }
+
+  function bindShellWindowCloseButton(win, closeBtn) {
+    if (!closeBtn || closeBtn._termcpCloseBound) return;
+    closeBtn._termcpCloseBound = true;
+    closeBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    closeBtn.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      closeShellWindow(win);
+    });
   }
 
   function getShellWindowBySid(sessionId) {
@@ -567,11 +621,6 @@
       bringShellWindowToFront(ex);
       if (ex._term) {
         try { ex._term.focus(); } catch (e) {}
-        shellTermScrollToBottom(ex._term, true);
-        requestAnimationFrame(function () {
-          try { ex._term.focus(); } catch (e2) {}
-          shellTermScrollToBottom(ex._term, true);
-        });
       }
       return;
     }
@@ -678,6 +727,28 @@
   }
 
   /**
+   * xterm registers mousedown on the root .xterm and always calls preventDefault() — that cancels the
+   * browser default for scrollbar thumb/track. Events from the viewport bubble .xterm → stop there in the gutter only.
+   */
+  function attachXtermViewportScrollbarGuard(term) {
+    try {
+      var root = term && term.element;
+      if (!root) return;
+      var vp = root.querySelector('.xterm-viewport');
+      if (!vp || vp._termcpSbGuard) return;
+      vp._termcpSbGuard = true;
+      var gutterPx = 28;
+      vp.addEventListener('mousedown', function (e) {
+        try {
+          var r = vp.getBoundingClientRect();
+          if (r.width <= 0) return;
+          if (e.clientX > r.right - gutterPx) e.stopPropagation();
+        } catch (e0) {}
+      }, false);
+    } catch (e1) {}
+  }
+
+  /**
    * Browsers may handle Ctrl+W (close tab) before the terminal; we preventDefault on keydown then let xterm parse (e.g. vim Ctrl+W).
    * Some browsers/OS may still intercept; not 100% guaranteed.
    */
@@ -702,20 +773,15 @@
     return btoa(bin);
   }
 
-  function sendWatchAdd(sid) {
+  function sendTerminalWatch(sid, add) {
     if (!sid) return;
-    wsUiSend({ type: 'watch_add', id: sid });
-  }
-
-  function sendWatchRemove(sid) {
-    if (!sid) return;
-    wsUiSend({ type: 'watch_remove', id: sid });
+    wsUiSend({ type: add ? 'watch_add' : 'watch_remove', id: sid });
   }
 
   function flushPendingTerminalWatches() {
     if (!window._pendingTerminalWatch) return;
     Object.keys(window._pendingTerminalWatch).forEach(function (sid) {
-      sendWatchAdd(sid);
+      sendTerminalWatch(sid, true);
     });
     window._pendingTerminalWatch = Object.create(null);
   }
@@ -726,7 +792,7 @@
     var wins = c.querySelectorAll('.shell-window');
     for (var i = 0; i < wins.length; i++) {
       var w = wins[i];
-      if (w._sid && !w._streamDone) sendWatchAdd(w._sid);
+      if (w._sid && !w._streamDone) sendTerminalWatch(w._sid, true);
     }
   }
 
@@ -734,7 +800,7 @@
     if (!sid) return;
     if (!window._pendingTerminalWatch) window._pendingTerminalWatch = Object.create(null);
     if (window._uiWS && window._uiWS.readyState === 1) {
-      sendWatchAdd(sid);
+      sendTerminalWatch(sid, true);
     } else {
       window._pendingTerminalWatch[sid] = true;
     }
@@ -763,7 +829,7 @@
             var tm = win._term;
             tm.write(bytes, function () {
               requestAnimationFrame(function () {
-                shellTermScrollToBottom(tm, true);
+                shellTermScrollToBottomIfStuck(tm, true);
               });
             });
           }
@@ -773,15 +839,12 @@
             win2._streamDone = true;
             try {
               win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
-                shellTermScrollToBottom(win2._term, true);
+                shellTermScrollToBottomIfStuck(win2._term, true);
               });
             } catch (e2) {
               try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
-              shellTermScrollToBottom(win2._term, true);
+              shellTermScrollToBottomIfStuck(win2._term, true);
             }
-            requestAnimationFrame(function () {
-              shellTermScrollToBottom(win2._term, true);
-            });
           }
         }
       } catch (e) { console.error(e); }
@@ -824,7 +887,7 @@
       win._connectAbort = null;
     }
     if (win._sid) {
-      sendWatchRemove(win._sid);
+      sendTerminalWatch(win._sid, false);
       if (window._pendingTerminalWatch && window._pendingTerminalWatch[win._sid]) {
         delete window._pendingTerminalWatch[win._sid];
       }
@@ -846,6 +909,8 @@
   }
 
   function setupShellWindowDrag(win, header) {
+    if (!header || win._termcpShellDragBound) return;
+    win._termcpShellDragBound = true;
     var drag = { active: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
     function onMove(e) {
       if (!drag.active) return;
@@ -874,8 +939,10 @@
   }
 
   function setupShellWindowResize(win) {
+    if (win._termcpShellResizeBound) return;
     var handle = win.querySelector('.shell-window-resize-handle');
     if (!handle) return;
+    win._termcpShellResizeBound = true;
     var resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
     function onMove(e) {
       if (!resizing) return;
@@ -884,7 +951,6 @@
       win.style.width = w + 'px';
       win.style.height = h + 'px';
       if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
-      if (win._term) shellTermScrollToBottom(win._term, false);
     }
     function onUp() {
       if (!resizing) return;
@@ -898,7 +964,6 @@
         win._shellResizeSyncTimer = null;
       }
       if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, true);
-      if (win._term) shellTermScrollToBottom(win._term, true);
     }
     handle.addEventListener('mousedown', function (e) {
       e.preventDefault();
@@ -929,15 +994,16 @@
   }
 
   /**
-   * Fit columns to .xterm-viewport width (scrollbar-aware), align cell size with .xterm-screen; when syncRemote, resize PTY over WebSocket.
+   * Fit columns to .xterm-viewport width (scrollbar-aware), align cell size with .xterm-screen; when syncRemote, queue PTY resize over WebSocket.
+   * @returns {boolean} true if term.resize ran (grid changed).
    */
   function fitShellTerminal(term, container, win, syncRemote) {
-    if (!container || !container.isConnected || !term) return;
+    if (!container || !container.isConnected || !term) return false;
     var vp = term.element && term.element.querySelector('.xterm-viewport');
     var w = container.clientWidth;
     if (vp && vp.clientWidth > 0) w = vp.clientWidth;
     var h = container.clientHeight;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) return false;
     var fontSize = (typeof term.getOption === 'function' && term.getOption('fontSize')) || 13;
     var fontFamily = (typeof term.getOption === 'function' && term.getOption('fontFamily')) || 'Consolas, Monaco, monospace';
     var measure = document.createElement('span');
@@ -958,8 +1024,45 @@
     }
     var cols = Math.max(2, Math.floor(w / charWidth));
     var rows = Math.max(2, Math.floor((h - 4) / lineHeight));
-    term.resize(cols, rows);
-    if (syncRemote && win && !win._streamDone) postResize(win);
+    /* Avoid term.resize when grid unchanged — xterm resets viewport scroll on resize; spurious RO/focus jitter was jumping scroll to top. */
+    var changed = cols !== prevCols || rows !== prevRows;
+    if (changed) {
+      term.resize(cols, rows);
+    }
+    /* Drag onMove uses syncRemote false (no PTY spam); onUp may match last grid so term.resize is skipped — still must queue PTY sync. */
+    if (syncRemote && win && !win._streamDone) scheduleShellRemoteResize(win);
+    return changed;
+  }
+
+  /** After history is loaded: observe container resizes (not registered during bootstrap to avoid fit/resize during term.write). */
+  function attachShellTerminalResizeObserver(win, term, termEl) {
+    if (win._fitRo || !termEl) return;
+    var ro = new ResizeObserver(function () {
+      if (win.classList.contains('shell-window-collapsed')) return;
+      if (fitShellTerminal(term, termEl, win, false)) scheduleShellRemoteResize(win);
+    });
+    ro.observe(termEl);
+    win._fitRo = ro;
+  }
+
+  /** First wheel (capture) or first viewport scroll: syncScrollArea — cold start can desync native scroll from buffer. */
+  function attachXtermViewportFirstInteractionSync(term) {
+    try {
+      var el = term && term.element;
+      if (!el || el._termcpFirstInteractionSync) return;
+      el._termcpFirstInteractionSync = true;
+      var kick = function () {
+        try {
+          var c = term._core;
+          if (c && c.viewport && typeof c.viewport.syncScrollArea === 'function') {
+            c.viewport.syncScrollArea();
+          }
+        } catch (e) {}
+      };
+      el.addEventListener('wheel', kick, { passive: true, capture: true, once: true });
+      var vp = el.querySelector('.xterm-viewport');
+      if (vp) vp.addEventListener('scroll', kick, { passive: true, once: true });
+    } catch (e0) {}
   }
 
   function b64ToBytes(b64) {
@@ -967,6 +1070,96 @@
     var u = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
     return u;
+  }
+
+  function bytesToUtf8Lossy(bytes) {
+    if (!bytes || !bytes.length) return '';
+    try {
+      return new TextDecoder('utf-8', { fatal: false, ignoreBOM: true }).decode(bytes);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  var SHELL_HISTORY_CHUNK = 512 * 1024;
+  /**
+   * Soft cap on how much prior output we paint into xterm (protects browser / renderer).
+   * Full retained bytes may be larger on the server; a future dedicated “history viewer” UI
+   * can page through GET /api/sessions/{id}/output-range without this embedded-terminal limit.
+   */
+  var SHELL_HISTORY_DISPLAY_CAP = 32 * 1024 * 1024;
+
+  function fetchShellOutputRange(sessionId, qs) {
+    return fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/output-range?' + qs).then(function (r) {
+      if (!r.ok) throw new Error('output-range ' + r.status);
+      return r.json();
+    });
+  }
+
+  /** Load retained server buffer from byte 0 into xterm in order (chunked HTTP), then live output follows over WS. */
+  function bootstrapShellFullHistory(sessionId, term) {
+    var off = 0;
+    var total = -1;
+    var shown = 0;
+    function one() {
+      var capLeft = SHELL_HISTORY_DISPLAY_CAP - shown;
+      if (capLeft <= 0) {
+        try {
+          term.write('\r\n\x1b[33m[Earlier output not shown (browser cap ~' + Math.round(SHELL_HISTORY_DISPLAY_CAP / (1024 * 1024)) + ' MiB)]\x1b[0m\r\n');
+        } catch (e0) {}
+        return Promise.resolve();
+      }
+      var max = SHELL_HISTORY_CHUNK;
+      if (total >= 0) max = Math.min(max, total - off);
+      max = Math.min(max, capLeft);
+      if (max <= 0) return Promise.resolve();
+      var prevOff = off;
+      return fetchShellOutputRange(sessionId, 'start=' + off + '&max=' + max).then(function (j) {
+        var T = Number(j.total);
+        if (isFinite(T) && T >= 0) total = T;
+        var d = j.d || '';
+        if (d) {
+          var u = b64ToBytes(d);
+          try { term.write(bytesToUtf8Lossy(u)); } catch (e1) {}
+          shown += u.length;
+        }
+        var end = Number(j.end);
+        if (!isFinite(end)) end = off;
+        off = end;
+        if (off === prevOff) return Promise.resolve();
+        if (total === 0) return Promise.resolve();
+        if (off >= total) return Promise.resolve();
+        if (shown >= SHELL_HISTORY_DISPLAY_CAP) {
+          try { term.write('\r\n\x1b[33m[Earlier output omitted (size cap)]\x1b[0m\r\n'); } catch (e2) {}
+          return Promise.resolve();
+        }
+        return one();
+      });
+    }
+    return one().catch(function () { return Promise.resolve(); });
+  }
+
+  /** True if xterm viewport is at/near bottom — used only before following new output with scrollToBottom. */
+  function xtermViewportNearBottom(term, marginPx) {
+    marginPx = marginPx == null ? 48 : marginPx;
+    try {
+      var el = term && term.element && term.element.querySelector('.xterm-viewport');
+      if (!el) return true;
+      var sh = el.scrollHeight;
+      var ch = el.clientHeight;
+      var st = el.scrollTop;
+      if (sh <= ch + 2) return true;
+      return st + ch >= sh - marginPx;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  /** After remote writes: scroll to bottom only if user was already at bottom (sticky tail). */
+  function shellTermScrollToBottomIfStuck(term, flush) {
+    if (!term) return;
+    if (!xtermViewportNearBottom(term, 64)) return;
+    shellTermScrollToBottom(term, flush);
   }
 
   /** Scroll to buffer bottom using xterm APIs only (do not set viewport scrollTop — it desyncs from the renderer). */
@@ -1009,6 +1202,33 @@
     });
   }
 
+  /**
+   * After chunked history paint: align viewport scroll metrics + one PTY sync.
+   * ResizeObserver is not active during bootstrap — registering fit/resize while term.write streams history desyncs native scroll from xterm's buffer.
+   */
+  function shellTermSyncViewportAfterBufferChange(term, termEl, win) {
+    if (!term) return;
+    try { fitShellTerminal(term, termEl, win, false); } catch (e0) {}
+    try { shellTermScrollToBottom(term, true); } catch (e1) {}
+    requestAnimationFrame(function () {
+      try {
+        var c = term._core;
+        if (c && c.viewport && typeof c.viewport.syncScrollArea === 'function') c.viewport.syncScrollArea();
+      } catch (e2) {}
+      try {
+        if (typeof term.refresh === 'function') term.refresh(0, term.rows - 1);
+      } catch (e3) {}
+      requestAnimationFrame(function () {
+        try {
+          var c2 = term._core;
+          if (c2 && c2.viewport && typeof c2.viewport.syncScrollArea === 'function') c2.viewport.syncScrollArea();
+        } catch (e4) {}
+        try { fitShellTerminal(term, termEl, win, true); } catch (e5) {}
+        attachXtermViewportFirstInteractionSync(term);
+      });
+    });
+  }
+
   function getPendingShellWindowForConn(connName) {
     var c = shellWindowsEl();
     if (!c || !connName) return null;
@@ -1025,6 +1245,7 @@
     var header = win.querySelector('.shell-window-header');
     var collapseBtn = win.querySelector('.shell-window-collapse-btn');
     var closeBtn = win.querySelector('.close-btn');
+    bindShellWindowMouseToFront(win);
     if (collapseBtn) collapseBtn.style.display = '';
     var titleCopyBtn = win.querySelector('.title-copy-btn');
     if (titleCopyBtn) {
@@ -1037,15 +1258,7 @@
       });
     }
 
-    win.addEventListener('mousedown', function (e) {
-      bringShellWindowToFront(win);
-      if (!win._term) return;
-      if (e.target.closest('.shell-window-header')) return;
-      try { win._term.focus(); } catch (e2) {}
-      requestAnimationFrame(function () {
-        shellTermScrollToBottom(win._term, true);
-      });
-    });
+    bindShellWindowCloseButton(win, closeBtn);
 
     var term = new Terminal({
       cursorBlink: true,
@@ -1058,43 +1271,24 @@
         cursorAccent: '#1e1e1e',
         selectionBackground: '#264f7844'
       },
-      scrollback: 3000
+      scrollback: 100000
     });
     term.open(termEl);
+    attachXtermViewportScrollbarGuard(term);
     attachTermBrowserChordShield(term);
     win._term = term;
     win._shellTermEl = termEl;
     setupShellOnDataUserGate(win, term);
-    termEl.addEventListener('click', function () { term.focus(); });
-    termEl.addEventListener('mousedown', function () {
-      term.focus();
-      requestAnimationFrame(function () { shellTermScrollToBottom(term, true); });
-    });
-
-    fitShellTerminal(term, termEl, win, true);
-    shellTermScrollToBottom(term, true);
-    requestAnimationFrame(function () {
-      fitShellTerminal(term, termEl, win, true);
-      shellTermScrollToBottom(term, true);
-      requestAnimationFrame(function () {
-        fitShellTerminal(term, termEl, win, true);
-        if (typeof term.refresh === 'function') {
-          try { term.refresh(0, term.rows - 1); } catch (e) {}
-        }
-        shellTermScrollToBottom(term, true);
-      });
-    });
-    var ro = new ResizeObserver(function () {
-      if (win.classList.contains('shell-window-collapsed')) return;
-      fitShellTerminal(term, termEl, win, false);
-      scheduleShellRemoteResize(win);
-      shellTermScrollToBottom(term, false);
-    });
-    ro.observe(termEl);
-    win._fitRo = ro;
 
     win._streamDone = false;
-    queueTerminalWatch(sessionId);
+    try { fitShellTerminal(term, termEl, win, false); } catch (eFit0) {}
+    bootstrapShellFullHistory(sessionId, term).finally(function () {
+      queueTerminalWatch(sessionId);
+      try {
+        attachShellTerminalResizeObserver(win, term, termEl);
+        shellTermSyncViewportAfterBufferChange(term, termEl, win);
+      } catch (eBoot) {}
+    });
 
     win._inputClosed = false;
     term.onData(function (data) {
@@ -1135,27 +1329,14 @@
       if (!win.classList.contains('shell-window-collapsed')) {
         fitShellTerminal(term, termEl, win, true);
         try { term.focus(); } catch (e3) {}
-        shellTermScrollToBottom(term, true);
       }
-    });
-
-    closeBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
-    closeBtn.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      closeShellWindow(win);
     });
 
     setupShellWindowDrag(win, header);
     setupShellWindowResize(win);
-    try { term.focus(); } catch (e) {}
     requestAnimationFrame(function () {
       try { term.focus(); } catch (e1) {}
-      shellTermScrollToBottom(term, true);
     });
-    setTimeout(function () {
-      try { term.focus(); } catch (e2) {}
-      shellTermScrollToBottom(term, true);
-    }, 50);
   }
 
   /** After clicking an entry: show placeholder + spinner immediately to prevent double-connect. */
@@ -1203,27 +1384,12 @@
     var termEl = win.querySelector('.shell-terminal-wrap');
     var header = win.querySelector('.shell-window-header');
     var closeBtn = win.querySelector('.close-btn');
-    var winW = 640, winH = 480, th = 21;
-    var left, top;
-    if (clickEvent && typeof clickEvent.clientX === 'number') {
-      left = Math.max(8, Math.min(clickEvent.clientX - winW / 2, window.innerWidth - winW - 8));
-      top = Math.max(8, Math.min(clickEvent.clientY - th, window.innerHeight - winH - 8));
-    } else {
-      var off = (shellWindowCount - 1) % 5;
-      left = 80 + off * 24; top = 60 + off * 24;
-    }
-    win.style.left = left + 'px';
-    win.style.top = top + 'px';
+    positionShellWindowFromClick(win, clickEvent);
+    /* First mount only — never re-append this node to reorder; use bringShellWindowToFront (z-index). */
     container.appendChild(win);
 
-    win.addEventListener('mousedown', function (e) {
-      bringShellWindowToFront(win);
-    });
-    closeBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
-    closeBtn.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      closeShellWindow(win);
-    });
+    bindShellWindowMouseToFront(win);
+    bindShellWindowCloseButton(win, closeBtn);
     setupShellWindowDrag(win, header);
     setupShellWindowResize(win);
     bringShellWindowToFront(win);
@@ -1284,20 +1450,11 @@
       '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
     var termEl = win.querySelector('.shell-terminal-wrap');
-    var winW = 640, winH = 480, th = 21;
-    var left, top;
-    if (clickEvent && typeof clickEvent.clientX === 'number') {
-      left = Math.max(8, Math.min(clickEvent.clientX - winW / 2, window.innerWidth - winW - 8));
-      top = Math.max(8, Math.min(clickEvent.clientY - th, window.innerHeight - winH - 8));
-    } else {
-      var off = (shellWindowCount - 1) % 5;
-      left = 80 + off * 24; top = 60 + off * 24;
-    }
-    win.style.left = left + 'px';
-    win.style.top = top + 'px';
+    positionShellWindowFromClick(win, clickEvent);
 
+    /* First mount only — never re-append this node to reorder; use bringShellWindowToFront (z-index). */
     container.appendChild(win);
-
+    bringShellWindowToFront(win);
     mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent);
   }
 

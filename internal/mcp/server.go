@@ -35,125 +35,125 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0")
 
 	mcpServer.AddTool(mcpgo.NewTool("start_session",
-		mcpgo.WithDescription("Start an interactive session. SSH uses server-side JSON under data-dir/ssh_configs/<name>/config.json; pass only the profile name as ssh_config (see list_ssh_configs). Omit ssh_config or use \"internal\" for the built-in loopback. Remote profiles need kind \"remote\" and SFTP for file tools. Create profiles with: server binary ssh-config init <name> -data-dir <dir>; list with ssh-config list. On success: session_id, pid, ssh_config, initial_output (always empty) — use read_output for terminal text. Omit command (and args) to use the remote user's login shell (SSH) or the server process default shell (internal); optional per-profile default_shell / default_mode in config.json."),
-		mcpgo.WithString("command", mcpgo.Description("Command to execute; omit or empty for login shell / profile default_shell")),
-		mcpgo.WithArray("args", mcpgo.Description("Command arguments"), mcpgo.WithStringItems()),
-		mcpgo.WithString("mode", mcpgo.Description("I/O mode: pty or pipe"), mcpgo.DefaultString("pty")),
-		mcpgo.WithString("name", mcpgo.Description("Session name")),
-		mcpgo.WithNumber("rows", mcpgo.Description("PTY rows"), mcpgo.DefaultNumber(24)),
-		mcpgo.WithNumber("cols", mcpgo.Description("PTY columns"), mcpgo.DefaultNumber(80)),
-		mcpgo.WithString("ssh_config", mcpgo.Description("SSH config name (subfolder under data-dir/ssh_configs). Default internal if omitted or empty")),
+		mcpgo.WithDescription("Start a long-lived interactive shell or command on the termcp server. Connection profiles are stored server-side as data-dir/ssh_configs/<ssh_config>/config.json (no file paths in this tool—only the profile folder name). Call list_ssh_configs first to see valid names. Use ssh_config \"internal\" (or omit/empty) for the built-in loopback session on the machine running termcp; use any other name for SSH to a remote host (kind \"remote\" in JSON). Remote file tools (upload_file, download_file, list_files) reuse the same SSH connection and require SFTP to be available on that host. If name is omitted or blank, the session’s display name defaults to ssh_config so lists match the Web UI when a user clicks a connection tile. Returns JSON keys: session_id (opaque id for all later calls), pid, ssh_config; initial_output is always empty—read terminal text with read_output. Leave command and args empty for the remote user’s login shell (SSH) or the server default shell (internal); optional default_shell / default_mode in the profile JSON override defaults."),
+		mcpgo.WithString("command", mcpgo.Description("Executable or shell builtin line; leave empty with no args for login shell / profile default_shell")),
+		mcpgo.WithArray("args", mcpgo.Description("Argv after command; only valid when command is non-empty"), mcpgo.WithStringItems()),
+		mcpgo.WithString("mode", mcpgo.Description("pty: pseudo-terminal (interactive TUI); pipe: no TTY, line-oriented"), mcpgo.DefaultString("pty")),
+		mcpgo.WithString("name", mcpgo.Description("Optional label shown in session lists. If omitted, defaults to ssh_config (same behavior as the Web UI). Set only when you need multiple concurrent sessions per profile with distinct labels.")),
+		mcpgo.WithNumber("rows", mcpgo.Description("Initial PTY height (also sent to remote SSH PTY)"), mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.Description("Initial PTY width"), mcpgo.DefaultNumber(80)),
+		mcpgo.WithString("ssh_config", mcpgo.Description("Profile name: subdirectory under data-dir/ssh_configs. Empty or omitted means \"internal\" (loopback on termcp host).")),
 	), withLogging("start_session", s.handleStartSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
-		mcpgo.WithDescription("Send text input to a running interactive process without reading output. Pair with read_output to check the result."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
-		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
+		mcpgo.WithDescription("Write bytes to the session’s stdin only; does not wait for or return output. Use read_output (same reader_id) afterward. For PTY sessions, press_enter appends a newline so the shell executes the line."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to write (not base64)")),
+		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text (common for shell commands)"), mcpgo.DefaultBool(false)),
 	), withLogging("send_input", s.handleSendInput))
 
 	mcpServer.AddTool(mcpgo.NewTool("read_output",
-		mcpgo.WithDescription("Read new output from an interactive process since last read. Use timeout ≤ 3 seconds when managing multiple sessions — poll each in rotation."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
-		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for new output (max 60)"), mcpgo.DefaultNumber(5)),
-		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
-		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithDescription("Return newly produced stdout/stderr since the last read on the given reader_id. Each reader_id maintains its own cursor so multiple agents can observe the same session without stealing each other’s data (register_reader for ids > 0). When juggling several sessions, use timeout ≤ 3s and poll sessions in round-robin so one slow session does not block others. Response JSON: output (string), has_more (bool), lines_returned, bytes_returned."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes for plain-text logs"), mcpgo.DefaultBool(true)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output, in seconds (0.1–60)"), mcpgo.DefaultNumber(5)),
+		mcpgo.WithNumber("max_lines", mcpgo.Description("Truncate after N newline-delimited lines; 0 = no line limit"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("reader_id", mcpgo.Description("0 = default reader shared with Web UI stream unless you registered another reader"), mcpgo.DefaultNumber(0)),
 	), withLogging("read_output", s.handleReadOutput))
 
 	mcpServer.AddTool(mcpgo.NewTool("background_send",
-		mcpgo.WithDescription("Send input to a process without waiting for output. Returns immediately. Use this instead of send_and_read when you don't need the response right away, especially for long-running commands. Follow up with read_output to check results."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
-		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
+		mcpgo.WithDescription("Same as send_input but explicitly intended for fire-and-forget writes: returns immediately after enqueueing. Prefer this plus read_output over send_and_read for long-running commands (builds, package installs) so the MCP call does not block for the full timeout."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to write")),
+		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text"), mcpgo.DefaultBool(false)),
 	), withLogging("background_send", s.handleBackgroundSend))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_and_read",
-		mcpgo.WithDescription("Send input to a process and immediately read its response. WARNING: blocks until output arrives or timeout. For long-running commands (sleep, builds, installs), use background_send + read_output instead to avoid blocking."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
-		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
-		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
-		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for response (max 60)"), mcpgo.DefaultNumber(5)),
-		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
-		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithDescription("Convenience: send_input then read_output in one tool call. Blocks until the first chunk of new output or timeout—dangerous for slow commands because the model waits the entire timeout. For anything that may run longer than a few seconds, use background_send + read_output with short timeouts instead."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to send before reading")),
+		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text"), mcpgo.DefaultBool(false)),
+		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Passed through to read_output"), mcpgo.DefaultBool(true)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for output after send (0.1–60)"), mcpgo.DefaultNumber(5)),
+		mcpgo.WithNumber("max_lines", mcpgo.Description("Passed through to read_output; 0 = unlimited"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("reader_id", mcpgo.Description("Passed through to read_output"), mcpgo.DefaultNumber(0)),
 	), withLogging("send_and_read", s.handleSendAndRead))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_sessions",
-		mcpgo.WithDescription("List all interactive process sessions"),
+		mcpgo.WithDescription("Return metadata for every session still in the server registry: running sessions and exited ones until delete_session removes them. Each item includes id, display name (defaults to the ssh profile name), status, ssh_config, and timestamps—use this to pick session_id before read_output or terminate_session."),
 	), withLogging("list_sessions", s.handleListSessions))
 
 	mcpServer.AddTool(mcpgo.NewTool("get_session_info",
-		mcpgo.WithDescription("Get detailed information about a session"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithDescription("Return a JSON document with detailed fields for one session: identifiers, command line, mode, PTY size, ssh_config, remote connection metadata, exit state, etc. Use for debugging or before resize_pty / terminate_session."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("get_session_info", s.handleGetSessionInfo))
 
 	mcpServer.AddTool(mcpgo.NewTool("terminate_session",
-		mcpgo.WithDescription("Terminate an interactive session (stops the remote process). Use delete_session afterward to remove exited session metadata."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithBoolean("force", mcpgo.Description("If true, skip SIGTERM grace wait and close the session immediately"), mcpgo.DefaultBool(false)),
-		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to wait after SIGTERM before forcing close (ignored when force is true)"), mcpgo.DefaultNumber(5)),
+		mcpgo.WithDescription("Stop the remote process / close pipes for this session (SIGTERM then optional SIGKILL path). The session row may remain until you call delete_session to drop registry metadata and free the name slot for bookkeeping."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
+		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
 	), withLogging("terminate_session", s.handleTerminateSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("delete_session",
-		mcpgo.WithDescription("Delete an exited session from the registry"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithDescription("Remove a session from the in-memory registry after it has exited (or been terminated). Call terminate_session first if the process is still running. Fails if the session is still active—check get_session_info / list_sessions."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("delete_session", s.handleDeleteSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("resize_pty",
-		mcpgo.WithDescription("Resize the PTY terminal dimensions for a session"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithNumber("rows", mcpgo.Description("Row count"), mcpgo.DefaultNumber(24)),
-		mcpgo.WithNumber("cols", mcpgo.Description("Column count"), mcpgo.DefaultNumber(80)),
+		mcpgo.WithDescription("Update PTY rows/cols for an existing PTY session (propagates to SSH remote PTY when applicable). Call when the agent’s logical terminal size changes; harmless for pipe mode sessions depending on server validation."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithNumber("rows", mcpgo.Description("New row count (typical 24–60)"), mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.Description("New column count (typical 80–200)"), mcpgo.DefaultNumber(80)),
 	), withLogging("resize_pty", s.handleResizePty))
 
 	mcpServer.AddTool(mcpgo.NewTool("detect_shell",
-		mcpgo.WithDescription("Detect the available shell on the target system. Returns shell path, family (unix/powershell/cmd), and a hint for agents. Use this before start_session to choose the correct command and args for the platform."),
+		mcpgo.WithDescription("Probe the termcp host (not an arbitrary ssh_config) for a suitable interactive shell: returns executable path, family enum (unix, powershell, cmd), and a short hint string. Use before crafting start_session command/args when targeting mixed Windows/Linux environments from the same MCP client."),
 	), withLogging("detect_shell", s.handleDetectShell))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_ssh_configs",
-		mcpgo.WithDescription("List SSH config names on the server (data-dir/ssh_configs/*/config.json). Includes the built-in internal entry. No secrets returned."),
+		mcpgo.WithDescription("Return the sorted list of profile names that may be passed as ssh_config to start_session—one entry per directory under data-dir/ssh_configs plus the built-in \"internal\" profile. Does not return JSON bodies, secrets, or hostnames; only safe names for discovery."),
 	), withLogging("list_ssh_configs", s.handleListSSHConfigs))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_messages",
-		mcpgo.WithDescription("List the message index for a session"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithDescription("List stored MCP/chat message index entries associated with a session_id (message persistence feature). Returns message ids and metadata for later get_message calls."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("list_messages", s.handleListMessages))
 
 	mcpServer.AddTool(mcpgo.NewTool("get_message",
-		mcpgo.WithDescription("Get the content of one or more messages"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithArray("message_ids", mcpgo.Description("Message IDs to retrieve"), mcpgo.WithStringItems()),
+		mcpgo.WithDescription("Fetch full message payloads for one or more message_ids under a session. Provide message_ids as a JSON array of strings, or a single message_id if your client maps scalar args."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithArray("message_ids", mcpgo.Description("List of message id strings from list_messages"), mcpgo.WithStringItems()),
 	), withLogging("get_message", s.handleGetMessage))
 
 	mcpServer.AddTool(mcpgo.NewTool("register_reader",
-		mcpgo.WithDescription("Register a new independent reader for a session's output. Each reader has its own cursor."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithDescription("Allocate a new output reader_id for this session. That reader only observes bytes written to the PTY **after** registration (cursor starts at the current end of the buffer—no historical backlog). Use when a second agent must not share reader 0’s cursor with another consumer; pair every read_output(..., reader_id) with the id returned here. The Web UI stream uses a different internal API to also see prior output."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("register_reader", s.handleRegisterReader))
 
 	mcpServer.AddTool(mcpgo.NewTool("unregister_reader",
-		mcpgo.WithDescription("Unregister a reader when it is no longer needed"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Reader ID to unregister")),
+		mcpgo.WithDescription("Release a reader_id previously returned by register_reader. Always unregister when done to avoid leaking buffers/state server-side."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
+		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Non-zero reader id from register_reader")),
 	), withLogging("unregister_reader", s.handleUnregisterReader))
 
 	mcpServer.AddTool(mcpgo.NewTool("upload_file",
-		mcpgo.WithDescription("Upload a file to the process environment via SFTP. Max 1MB. For large files, use send_input with curl/wget instead."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("content_base64", mcpgo.Required(), mcpgo.Description("File content encoded as base64")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Destination path in the process environment")),
+		mcpgo.WithDescription("Write a small file to the remote host of this session using SFTP over the same SSH connection as the shell. Max size 1 MiB; for larger artifacts stream via shell tools (e.g. chunked base64 + shell decode) or external transfer. Requires a remote SSH profile with working SFTP subsystem."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
+		mcpgo.WithString("content_base64", mcpgo.Required(), mcpgo.Description("File bytes as standard base64 (no data: URL prefix)")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Absolute or home-relative path on the remote filesystem")),
 	), withLogging("upload_file", s.handleUploadFile))
 
 	mcpServer.AddTool(mcpgo.NewTool("download_file",
-		mcpgo.WithDescription("Download a file from the process environment via SFTP. Text files returned as plain text, binary files as base64. Max 1MB."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Path of the file to download")),
+		mcpgo.WithDescription("Read a small remote file via SFTP (same constraints as upload_file). Server may return UTF-8 text for text-like content or base64 for binary—inspect the tool result structure returned by the implementation. Max 1 MiB."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path to read")),
 	), withLogging("download_file", s.handleDownloadFile))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_files",
-		mcpgo.WithDescription("List files and directories at a path in the process environment via SFTP"),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Directory path to list")),
+		mcpgo.WithDescription("List directory entries at remote_path on the session’s remote host via SFTP (names, types, sizes as provided by the server). For internal (non-SSH) sessions this may be unsupported or limited—prefer remote profiles for filesystem inspection."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote directory path to list")),
 	), withLogging("list_files", s.handleListFiles))
 
 	s.mcpServer = mcpServer
