@@ -12,6 +12,25 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 )
 
+// mcpServerInstructions is returned in initialize (MCP "instructions") so clients may
+// inject it into the model context. This nudges weak models to chain tool calls instead
+// of stopping after narrative plans; compliance still depends on the host client + model.
+const mcpServerInstructions = `termcp agent rules (follow in order until the user's task is done or a tool returns a hard error):
+
+1) Multi-step work: after list_sessions, list_ssh_configs, start_session, or any discovery tool, you MUST continue with concrete tool calls (send_input, read_output, send_and_read, background_send, etc.). Do not end the turn with only a prose "here is what you would run" plan.
+
+2) Never invent session_id. Use session_id from list_sessions or start_session only.
+
+3) Shell output is not visible until you call read_output (or send_and_read). If a command may run longer than a few seconds, use background_send + read_output with a short timeout instead of send_and_read with a long timeout.
+
+4) Do not assert that a remote command succeeded unless tool results contain the terminal output or an explicit success signal.
+
+5) When managing multiple sessions, poll with read_output timeout ≤ 3s in round-robin; terminate_session then delete_session when finished.
+
+6) Passwords and secrets: If read_output shows a password prompt, sudo password, passphrase, MFA/2FA, or SSH keyboard-interactive challenge, do NOT guess, brute-force, or paste secrets you do not have. Stop automated send_input/background_send for that secret and tell the user to type it in the termcp Web UI terminal for that same session (the browser session tied to that session_id). Only continue with non-secret commands after the user confirms they entered it.
+
+7) send_input control bytes (function keys, ESC, arrows, Ctrl): JSON has no \\xNN escapes — never use "\\x1b" in text (invalid JSON or four literal characters). Use JSON \\uXXXX only (e.g. F12 xterm-256color: \\u001b[24~). press_enter must be false for key sequences.`
+
 // Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
 type Server struct {
 	mcpServer    *mcpserver.MCPServer
@@ -32,7 +51,9 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		sshConfigs: sshConfigs,
 	}
 
-	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0")
+	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0",
+		mcpserver.WithInstructions(mcpServerInstructions),
+	)
 
 	mcpServer.AddTool(mcpgo.NewTool("start_session",
 		mcpgo.WithDescription("Start a long-lived interactive shell or command on the termcp server. Connection profiles are stored server-side as data-dir/ssh_configs/<ssh_config>/config.json (no file paths in this tool—only the profile folder name). Call list_ssh_configs first to see valid names. Use ssh_config \"internal\" (or omit/empty) for the built-in loopback session on the machine running termcp; use any other name for SSH to a remote host (kind \"remote\" in JSON). Remote file tools (upload_file, download_file, list_files) reuse the same SSH connection and require SFTP to be available on that host. If name is omitted or blank, the session’s display name defaults to ssh_config so lists match the Web UI when a user clicks a connection tile. Returns JSON keys: session_id (opaque id for all later calls), pid, ssh_config; initial_output is always empty—read terminal text with read_output. Leave command and args empty for the remote user’s login shell (SSH) or the server default shell (internal); optional default_shell / default_mode in the profile JSON override defaults."),
@@ -46,9 +67,9 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("start_session", s.handleStartSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
-		mcpgo.WithDescription("Write bytes to the session’s stdin only; does not wait for or return output. Use read_output (same reader_id) afterward. For PTY sessions, press_enter appends a newline so the shell executes the line."),
+		mcpgo.WithDescription("Write bytes to the session’s stdin only; does not wait for or return output. Use read_output (same reader_id) afterward. For PTY sessions, press_enter appends a newline so the shell executes the line. Terminal control bytes: server rule 7."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to write (not base64)")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("UTF-8 text to write")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text (common for shell commands)"), mcpgo.DefaultBool(false)),
 	), withLogging("send_input", s.handleSendInput))
 
@@ -64,14 +85,14 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	mcpServer.AddTool(mcpgo.NewTool("background_send",
 		mcpgo.WithDescription("Same as send_input but explicitly intended for fire-and-forget writes: returns immediately after enqueueing. Prefer this plus read_output over send_and_read for long-running commands (builds, package installs) so the MCP call does not block for the full timeout."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to write")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("UTF-8 text to write")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text"), mcpgo.DefaultBool(false)),
 	), withLogging("background_send", s.handleBackgroundSend))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_and_read",
 		mcpgo.WithDescription("Convenience: send_input then read_output in one tool call. Blocks until the first chunk of new output or timeout—dangerous for slow commands because the model waits the entire timeout. For anything that may run longer than a few seconds, use background_send + read_output with short timeouts instead."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
-		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Raw text to send before reading")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("UTF-8 text to send before reading")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("If true, append \\n after text"), mcpgo.DefaultBool(false)),
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Passed through to read_output"), mcpgo.DefaultBool(true)),
 		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for output after send (0.1–60)"), mcpgo.DefaultNumber(5)),
