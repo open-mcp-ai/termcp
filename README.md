@@ -222,8 +222,6 @@ Start a session. Connection details live in server-side **SSH config** files und
 | `cols` | integer | No | `80` | PTY column count (1–1000) |
 | `ssh_config` | string | No | `internal` | Name of `{data-dir}/ssh_configs/<name>/config.json`. Reserved **`internal`** (`kind: internal`) is the built-in loopback SSH; use `kind: remote` for real hosts |
 
-Remote sessions need **SFTP** on the server for file tools.
-
 Returns: `{ session_id, pid, ssh_config, initial_output }`. Field `ssh_config` is the server-side profile name only (no host or credentials). Field `initial_output` is always an empty string; use `read_output` for terminal text. Session list/detail APIs may still include coarse `ssh_endpoint` (`internal` / `remote`) without host or user.
 
 **Naming**: Prefer **SSH config** (not “SSH host”) because `internal` is not a remote machine. Layout: `{data-dir}/ssh_configs/<name>/config.json`. Create a remote skeleton with `go run ./cmd/server ssh-config init <name> -data-dir <dir>` (same binary as the MCP server), then edit secrets locally. List names on the host with `go run ./cmd/server ssh-config list -data-dir <dir>`. Optional admin HTTP: `-admin-port` + `-admin-token`, then `PUT /api/ssh-configs/<name>` with `Authorization: Bearer …` or `X-Admin-Token`. The model only passes `ssh_config`; use **`list_ssh_configs`** to list names.

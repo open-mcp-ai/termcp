@@ -405,35 +405,6 @@ func TestWithLogging_ExtractsTimeoutAndPressEnter(t *testing.T) {
 	}
 }
 
-func TestWithLogging_ExtractsRemotePathParam(t *testing.T) {
-	cap := withCapturedLogger(t)
-
-	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-		return mcpgo.NewToolResultText("ok"), nil
-	}
-	wrapped := withLogging("upload_file", h)
-
-	req := mcpgo.CallToolRequest{}
-	req.Params.Arguments = map[string]any{
-		"session_id":  "abc",
-		"remote_path": "/tmp/evil.sh",
-	}
-
-	if _, err := wrapped(context.Background(), req); err != nil {
-		t.Fatalf("wrapped returned error: %v", err)
-	}
-
-	records := cap.snapshot()
-	entry := records[0]
-	v, ok := attrValue(entry, "remote_path")
-	if !ok {
-		t.Fatal("entry: expected remote_path attr")
-	}
-	if v.String() != "/tmp/evil.sh" {
-		t.Fatalf("entry: expected remote_path=/tmp/evil.sh, got %q", v.String())
-	}
-}
-
 func TestWithLogging_ExtractsForceAndGracePeriod(t *testing.T) {
 	cap := withCapturedLogger(t)
 
@@ -532,41 +503,6 @@ func TestWithLogging_TruncatesArgsOver10(t *testing.T) {
 	// Should contain "... (15 items total)"
 	if !strings.Contains(v.String(), "15 items total") {
 		t.Fatalf("entry: expected truncated args with item count, got %q", v.String())
-	}
-}
-
-func TestWithLogging_TruncatesContentBase64(t *testing.T) {
-	cap := withCapturedLogger(t)
-
-	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-		return mcpgo.NewToolResultText("ok"), nil
-	}
-	wrapped := withLogging("upload_file", h)
-
-	longB64 := strings.Repeat("x", 500)
-
-	req := mcpgo.CallToolRequest{}
-	req.Params.Arguments = map[string]any{
-		"session_id":     "abc",
-		"content_base64": longB64,
-	}
-
-	if _, err := wrapped(context.Background(), req); err != nil {
-		t.Fatalf("wrapped returned error: %v", err)
-	}
-
-	records := cap.snapshot()
-	entry := records[0]
-	v, ok := attrValue(entry, "content_base64")
-	if !ok {
-		t.Fatal("entry: expected content_base64 attr")
-	}
-	logged := v.String()
-	if len(logged) > 50 || len(logged) < 44 {
-		t.Fatalf("expected truncated length ~47, got %d: %q", len(logged), logged)
-	}
-	if !strings.Contains(logged, "500 bytes") {
-		t.Fatalf("expected size info, got %q", logged)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -22,7 +21,7 @@ type ExecSession struct {
 	done      chan struct{}
 	exitCode  int
 	err       error
-	ownClient bool // if false, Close() does not close client (shared with SFTP on same ssh.Client)
+	ownClient bool // if false, Close() does not close the underlying SSH client
 }
 
 func closeIfCloser(r io.Reader) {
@@ -177,14 +176,6 @@ func (es *ExecSession) Close() error {
 	return firstErr
 }
 
-// SharedSSH returns the underlying client when ownClient is false (internal single-dial path).
-func (es *ExecSession) SharedSSH() *ssh.Client {
-	if es == nil || es.ownClient {
-		return nil
-	}
-	return es.client
-}
-
 // shellQuote builds a shell-safe command string.
 func defaultShellExecArgv() (string, []string) {
 	if runtime.GOOS == "windows" {
@@ -218,156 +209,4 @@ func quoteIfNeeded(s string) string {
 		return strconv.Quote(s)
 	}
 	return s
-}
-
-// SFTPConn wraps an SFTP client and its underlying SSH connection.
-type SFTPConn struct {
-	Client   *sftp.Client
-	conn     *ssh.Client
-	ownsConn bool // if false, Close() only closes the SFTP client (shared ssh.Client closed by caller)
-}
-
-// Close shuts down the SFTP client and optionally the underlying SSH connection.
-func (c *SFTPConn) Close() error {
-	err := c.Client.Close()
-	if c.ownsConn && c.conn != nil {
-		if connErr := c.conn.Close(); connErr != nil && err == nil {
-			err = connErr
-		}
-	}
-	return err
-}
-
-// NewSFTPClientWithConfig dials with the given config and opens SFTP.
-func NewSFTPClientWithConfig(addr string, config *ssh.ClientConfig) (*SFTPConn, error) {
-	if config == nil {
-		return nil, fmt.Errorf("nil ssh ClientConfig")
-	}
-	client, err := ssh.Dial("tcp", addr, config)
-	if err != nil {
-		return nil, fmt.Errorf("ssh dial for sftp: %w", err)
-	}
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		client.Close()
-		return nil, fmt.Errorf("sftp client: %w", err)
-	}
-	return &SFTPConn{Client: sftpClient, conn: client, ownsConn: true}, nil
-}
-
-// DialExecAndSFTP dials once, starts the exec session, then opens SFTP on the same SSH client
-// (one password auth — required for one-time internal credentials).
-func DialExecAndSFTP(addr string, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, *SFTPConn, error) {
-	if config == nil {
-		return nil, nil, fmt.Errorf("nil ssh ClientConfig")
-	}
-	client, err := ssh.Dial("tcp", addr, config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ssh dial: %w", err)
-	}
-
-	session, err := client.NewSession()
-	if err != nil {
-		client.Close()
-		return nil, nil, fmt.Errorf("new session: %w", err)
-	}
-
-	stdin, err := session.StdinPipe()
-	if err != nil {
-		session.Close()
-		client.Close()
-		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-
-	stdout, err := session.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		session.Close()
-		client.Close()
-		return nil, nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-
-	stderr, err := session.StderrPipe()
-	if err != nil {
-		closeIfCloser(stdout)
-		stdin.Close()
-		session.Close()
-		client.Close()
-		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if pty {
-		lang := strings.TrimSpace(os.Getenv("LANG"))
-		if lang == "" {
-			lang = "C.UTF-8"
-		}
-		_ = session.Setenv("LANG", lang)
-		_ = session.Setenv("LC_CTYPE", lang)
-
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          1,
-			ssh.TTY_OP_ISPEED: 14400,
-			ssh.TTY_OP_OSPEED: 14400,
-		}
-		if err := session.RequestPty("xterm-256color", rows, cols, modes); err != nil {
-			closeIfCloser(stderr)
-			closeIfCloser(stdout)
-			stdin.Close()
-			session.Close()
-			client.Close()
-			return nil, nil, fmt.Errorf("request pty: %w", err)
-		}
-	}
-
-	var startErr error
-	if trimmed := strings.TrimSpace(command); trimmed == "" && len(args) == 0 {
-		switch {
-		case pty:
-			if err := session.Shell(); err != nil {
-				sh, shArgs := defaultShellExecArgv()
-				startErr = session.Start(shellQuote(sh, shArgs))
-			}
-		default:
-			sh, shArgs := defaultShellExecArgv()
-			startErr = session.Start(shellQuote(sh, shArgs))
-		}
-	} else {
-		startErr = session.Start(shellQuote(trimmed, args))
-	}
-	if startErr != nil {
-		closeIfCloser(stderr)
-		closeIfCloser(stdout)
-		stdin.Close()
-		session.Close()
-		client.Close()
-		return nil, nil, fmt.Errorf("start command: %w", startErr)
-	}
-
-	es := &ExecSession{
-		client:    client,
-		session:   session,
-		Stdin:     stdin,
-		Stdout:    stdout,
-		Stderr:    stderr,
-		done:      make(chan struct{}),
-		ownClient: false,
-	}
-	go func() {
-		es.err = session.Wait()
-		if es.err != nil {
-			if exitErr, ok := es.err.(*ssh.ExitError); ok {
-				es.exitCode = exitErr.ExitStatus()
-			}
-		}
-		close(es.done)
-	}()
-
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		_ = es.Close()
-		client.Close()
-		return nil, nil, fmt.Errorf("sftp client: %w", err)
-	}
-	sfc := &SFTPConn{Client: sftpClient, conn: client, ownsConn: false}
-	return es, sfc, nil
 }

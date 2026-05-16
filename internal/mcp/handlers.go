@@ -410,63 +410,6 @@ func (s *Server) handleBackgroundSend(ctx context.Context, request mcpgo.CallToo
 	return s.handleSendInput(ctx, request)
 }
 
-func (s *Server) handleUploadFile(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	contentBase64 := getString(args, "content_base64", "")
-	remotePath := getString(args, "remote_path", "")
-
-	if contentBase64 == "" {
-		return mcpgo.NewToolResultError("content_base64 is required"), nil
-	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path is required"), nil
-	}
-
-	sess, bad := s.requireSession(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-
-	n, err := sess.UploadFile(contentBase64, remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
-	result := map[string]any{
-		"status":      "uploaded",
-		"remote_path": remotePath,
-		"size":        n,
-	}
-	return jsonResult(result), nil
-}
-
-func (s *Server) handleDownloadFile(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	remotePath := getString(args, "remote_path", "")
-
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path is required"), nil
-	}
-
-	sess, bad := s.requireSession(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-
-	result, err := sess.DownloadFile(remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]any{
-		"content":  result.Content,
-		"encoding": result.Encoding,
-		"size":     result.Size,
-	}), nil
-}
-
 func (s *Server) handleListSSHConfigs(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	if s.sshConfigs == nil {
 		return jsonResult(map[string]any{"ssh_configs": []any{}}), nil
@@ -493,29 +436,4 @@ func (s *Server) handleDetectShell(ctx context.Context, request mcpgo.CallToolRe
 		"hint":   hint,
 	}
 	return jsonResult(result), nil
-}
-
-func (s *Server) handleListFiles(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	remotePath := getString(args, "remote_path", "")
-
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path is required"), nil
-	}
-
-	sess, bad := s.requireSession(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-
-	entries, err := sess.ListFiles(remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]any{
-		"path":    remotePath,
-		"entries": entries,
-	}), nil
 }

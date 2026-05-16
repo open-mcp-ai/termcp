@@ -51,10 +51,9 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		sshConfigs: sshConfigs,
 	}
 
-	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0",
+	mcpServer := mcpserver.NewMCPServer("termcp", "0.0.4",
 		mcpserver.WithInstructions(mcpServerInstructions),
 	)
-
 	mcpServer.AddTool(mcpgo.NewTool("start_session",
 		mcpgo.WithDescription("Start a long-lived interactive shell or command on the termcp server. Connection profiles are stored server-side as data-dir/ssh_configs/<ssh_config>/config.json (no file paths in this tool—only the profile folder name). Call list_ssh_configs first to see valid names. Use ssh_config \"internal\" (or omit/empty) for the built-in loopback session on the machine running termcp; use any other name for SSH to a remote host (kind \"remote\" in JSON). Remote file tools (upload_file, download_file, list_files) reuse the same SSH connection and require SFTP to be available on that host. If name is omitted or blank, the session’s display name defaults to ssh_config so lists match the Web UI when a user clicks a connection tile. Returns JSON keys: session_id (opaque id for all later calls), pid, ssh_config; initial_output is always empty—read terminal text with read_output. Leave command and args empty for the remote user’s login shell (SSH) or the server default shell (internal); optional default_shell / default_mode in the profile JSON override defaults."),
 		mcpgo.WithString("command", mcpgo.Description("Executable or shell builtin line; leave empty with no args for login shell / profile default_shell")),
@@ -157,25 +156,6 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Non-zero reader id from register_reader")),
 	), withLogging("unregister_reader", s.handleUnregisterReader))
-
-	mcpServer.AddTool(mcpgo.NewTool("upload_file",
-		mcpgo.WithDescription("Write a small file to the remote host of this session using SFTP over the same SSH connection as the shell. Max size 1 MiB; for larger artifacts stream via shell tools (e.g. chunked base64 + shell decode) or external transfer. Requires a remote SSH profile with working SFTP subsystem."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
-		mcpgo.WithString("content_base64", mcpgo.Required(), mcpgo.Description("File bytes as standard base64 (no data: URL prefix)")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Absolute or home-relative path on the remote filesystem")),
-	), withLogging("upload_file", s.handleUploadFile))
-
-	mcpServer.AddTool(mcpgo.NewTool("download_file",
-		mcpgo.WithDescription("Read a small remote file via SFTP (same constraints as upload_file). Server may return UTF-8 text for text-like content or base64 for binary—inspect the tool result structure returned by the implementation. Max 1 MiB."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path to read")),
-	), withLogging("download_file", s.handleDownloadFile))
-
-	mcpServer.AddTool(mcpgo.NewTool("list_files",
-		mcpgo.WithDescription("List directory entries at remote_path on the session’s remote host via SFTP (names, types, sizes as provided by the server). For internal (non-SSH) sessions this may be unsupported or limited—prefer remote profiles for filesystem inspection."),
-		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id for a remote SSH session with SFTP")),
-		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote directory path to list")),
-	), withLogging("list_files", s.handleListFiles))
 
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)
