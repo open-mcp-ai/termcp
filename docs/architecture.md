@@ -11,9 +11,8 @@
     ┌──────────────────────────┼──────────────────────────┐
     │               internal/mcp/ (server.go)               │
     │                                                       │
-    │  19 个工具: start_session, send_input, read_output,    │
+    │  16 个工具: start_session, send_input, read_output,    │
     │  send_and_read, list_ssh_configs, terminate_session, resize_pty,       │
-    │  upload_file, download_file, list_files, ...          │
     │                                                       │
     │  logging.go: 每个 handler 包装结构化日志 (耗时/错误)    │
     └──────┬───────────────────────────────┬────────────────┘
@@ -36,7 +35,6 @@
    ┌─────────────┐ ┌────────────┐ ┌──────────────┐
    │ sshclient/  │ │ buffer/    │ │ storage/     │
    │ ExecSession │ │ Buffer     │ │ Store        │
-   │ SFTPConn    │ │ 多读者环形  │ │ 原子 JSON    │
    └──────┬──────┘ │ 缓冲区     │ │ 持久化       │
           │        └────────────┘ └──────────────┘
           │ SSH (x/crypto/ssh)
@@ -56,7 +54,6 @@
    │  └─────────────────────────────────┘     │
    │                                          │
    │  sshSignalToOSSig: TERM→SIGTERM, ...    │
-   │  SFTP 子系统: pkg/sftp                   │
    └──────────────────┬───────────────────────┘
                       │ exec.Command
                       ▼
@@ -118,7 +115,6 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │                         │  startReaders()       │                     │                     │
   │                            │                         │  pipeToBuffer(stdout)  │                     │                     │
   │                            │                         │  pipeToBuffer(stderr)  │                     │                     │
-  │                            │                         │  SFTP 连接             │                     │                     │
   │                            │                         │  ← 返回 Session        │                     │                     │
   │                            │  ← Session{ID,PID,...}  │                     │                      │                     │
   │                            │                         │                     │                      │                     │
@@ -299,45 +295,6 @@ Agent A (reader 0)           Session              Agent B (新加入)
 
 **关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标在当时的 master 尾（或从默认 reader 种子对齐），之后的新输出都能看到；历史不再因单读者环形容量被截断。
 
-## 八、SFTP 文件传输流程
-
-```
-AI Agent                    Session                     SFTPConn(独立SSH连接)      OS 文件系统
-  │                            │                              │                      │
-  │  upload_file(             │                              │                      │
-  │    session_id,            │                              │                      │
-  │    content_base64,        │                              │                      │
-  │    remote_path)           │                              │                      │
-  │ ─────────────────────────>│                              │                      │
-  │                            │  UploadFile(base64, path)    │                      │
-  │                            │  ┌─ base64 decode            │                      │
-  │                            │  ├─ 大小检查 max 1MB         │                      │
-  │                            │  ├─ MkdirAll(dir) ──────────>│ ── SSH SFTP ───────> │ mkdir -p
-  │                            │  ├─ Create(file) ───────────>│ ── SSH SFTP ───────> │ 创建文件
-  │                            │  └─ Write(data) ────────────>│ ── SSH SFTP ───────> │ 写入
-  │                            │                              │                      │
-  │  ← {status:"uploaded",    │                              │                      │
-  │     remote_path, size}     │                              │                      │
-  │                            │                              │                      │
-  │  download_file(            │                              │                      │
-  │    session_id,             │                              │                      │
-  │    remote_path)            │                              │                      │
-  │ ─────────────────────────>│                              │                      │
-  │                            │  DownloadFile(path)           │                      │
-  │                            │  ┌─ Stat(path) ─────────────>│ ── SSH SFTP ───────> │ stat
-  │                            │  ├─ 大小检查 max 1MB         │                      │
-  │                            │  ├─ Open(path) ─────────────>│ ── SSH SFTP ───────> │ 打开
-  │                            │  ├─ ReadFull(data) ─────────>│ ── SSH SFTP ───────> │ 读取
-  │                            │  └─ 检测 null byte:           │                      │
-  │                            │      无 → text (原样返回)     │                      │
-  │                            │      有 → base64 编码         │                      │
-  │  ← {content, encoding,    │                              │                      │
-  │     size}                  │                              │                      │
-```
-
-**注意**：SFTP 使用**独立的 SSH 连接**（不与命令执行的 session 共享），进程退出后 SFTP 连接延迟 60 秒关闭，以便 Agent 在进程结束后仍能下载文件。
-
-## 九、消息持久化流程
 
 ```
 每次 SendInput / readOutput / 系统事件

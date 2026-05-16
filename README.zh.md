@@ -223,8 +223,6 @@ terminate_session(session_id="d4e5f6")
 | `cols` | integer | 否 | `80` | PTY 列数（1–1000） |
 | `ssh_config` | string | 否 | `internal` | 使用 `{data-dir}/ssh_configs/<名称>/config.json`。内置项 **`internal`**（`kind: internal`）对应本机 loopback SSH；远端为 `kind: remote` |
 
-远端需支持 **SFTP 子系统**（与 OpenSSH 类似），`upload_file` / `download_file` / `list_files` 才可用。
-
 返回：`{ session_id, pid, ssh_config, initial_output }`。`ssh_config` 仅为服务端配置名（不含主机与凭据）。`initial_output` 恒为空字符串；要看终端输出请用 `read_output`。列表/详情类接口里仍可能带有粗粒度 `ssh_endpoint`（`internal` / `remote`，不含主机与用户）。
 
 **SSH 配置（推荐叫「配置」不叫「主机」）**：`internal` 表示内置 SSH，不是一台远程机器；`remote` 才表示远端主机。配置目录：`{data-dir}/ssh_configs/<名称>/config.json`。用命令行生成远端模板：`go run ./cmd/server ssh-config init <名称> -data-dir <数据目录>`（与 MCP 服务端同一二进制），再手工填入真实字段。本机列出现有名称：`go run ./cmd/server ssh-config list -data-dir <数据目录>`。也可用 `-admin-port` + `-admin-token` 启用 `PUT /api/ssh-configs/<名称>` 上传 JSON（Header：`Authorization: Bearer …` 或 `X-Admin-Token`）。模型侧只传 `ssh_config` 名称；用 **`list_ssh_configs`** 列出现有名称。
