@@ -40,7 +40,7 @@ jobs:
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
               -ldflags="-s -w" \
               -o "dist/${BINARY}" \
-              ./cmd/server
+              .
           done
 
       - name: Create Release
