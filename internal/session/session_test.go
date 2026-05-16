@@ -452,7 +452,6 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	s.CloseSFTP()
 	time.Sleep(200 * time.Millisecond)
 
 	after := runtime.NumGoroutine()

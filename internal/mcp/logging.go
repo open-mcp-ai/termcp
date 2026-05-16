@@ -89,12 +89,6 @@ func appendSafeArgs(attrs []any, request mcpgo.CallToolRequest) []any {
 	if v, ok := args["grace_period"].(float64); ok {
 		attrs = append(attrs, "grace_period", int64(v))
 	}
-	if v, ok := args["content_base64"].(string); ok && v != "" {
-		attrs = append(attrs, "content_base64", truncateContent(v))
-	}
-	if v, ok := args["remote_path"].(string); ok && v != "" {
-		attrs = append(attrs, "remote_path", v)
-	}
 	if v, ok := args["text"].(string); ok && v != "" {
 		attrs = append(attrs, "text", truncate(v, 200))
 	}
@@ -106,14 +100,6 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
-}
-
-func truncateContent(s string) string {
-	const previewLen = 32
-	if len(s) <= previewLen {
-		return fmt.Sprintf("%s (%d bytes)", s, len(s))
-	}
-	return fmt.Sprintf("%s... (%d bytes)", s[:previewLen], len(s))
 }
 
 func extractOutputPreview(result *mcpgo.CallToolResult) string {
