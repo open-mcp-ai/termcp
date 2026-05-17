@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"time"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -10,12 +11,13 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/session"
 )
 
-// Server wraps the MCP SSE server and tool handlers.
+// Server wraps the MCP server and tool handlers.
 type Server struct {
-	mcpServer *mcpserver.MCPServer
-	sseServer *mcpserver.SSEServer
-	sessMgr   *session.Manager
-	msgMgr    *message.Manager
+	mcpServer   *mcpserver.MCPServer
+	sseServer   *mcpserver.SSEServer
+	stdioServer *mcpserver.StdioServer
+	sessMgr     *session.Manager
+	msgMgr      *message.Manager
 }
 
 // New creates and configures the MCP server with all tools registered.
@@ -145,18 +147,27 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 	), withLogging("list_files", s.handleListFiles))
 
 	s.mcpServer = mcpServer
-	s.sseServer = mcpserver.NewSSEServer(mcpServer)
 	return s
 }
 
-// Start begins serving MCP over SSE on the given address.
-func (s *Server) Start(addr string) error {
+// StartSSE begins serving MCP over SSE on the given address.
+func (s *Server) StartSSE(addr string) error {
+	s.sseServer = mcpserver.NewSSEServer(s.mcpServer)
 	return s.sseServer.Start(addr)
 }
 
-// Stop gracefully shuts down the SSE server.
+// StartStdio begins serving MCP over stdin/stdout.
+func (s *Server) StartStdio() error {
+	s.stdioServer = mcpserver.NewStdioServer(s.mcpServer)
+	return s.stdioServer.Listen(context.Background(), os.Stdin, os.Stdout)
+}
+
+// Stop gracefully shuts down the server.
 func (s *Server) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return s.sseServer.Shutdown(ctx)
+	if s.sseServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return s.sseServer.Shutdown(ctx)
+	}
+	return nil
 }

@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="macOS / Linux / Windows">
-  <img src="https://img.shields.io/badge/MCP-SSE_Transport-green.svg" alt="MCP SSE">
+  <img src="https://img.shields.io/badge/MCP-SSE_%7C_Stdio-green.svg" alt="MCP SSE | Stdio">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
@@ -43,7 +43,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 |---------|-------------|
 | **Multi-agent session sharing** | Multiple AI agents read from the same session simultaneously, each with an independent cursor — no output stealing |
 | **PTY and Pipe dual mode** | PTY mode emulates a real terminal; Pipe mode for simple stdin/stdout interaction |
-| **Remote deployment** | SSE over HTTP transport — Agent and Server can run on different machines |
+| **Dual transport** | Stdio mode for local MCP clients (Claude Code, Cursor); SSE mode for remote deployment |
 | **Multi-session management** | Manage multiple independent processes simultaneously without interference |
 | **Message persistence** | Session records and I/O messages persisted to local JSON files |
 | **ANSI escape code stripping** | Optional automatic removal of terminal control sequences for clean text output |
@@ -347,10 +347,22 @@ Cross-platform behavior:
 
 ## Installation
 
+### Quick Start (no clone needed)
+
+Run directly from source with `go run` — always fetches the latest version:
+
+```bash
+# SSE mode (default)
+go run github.com/open-mcp-ai/termcp/cmd/server@latest
+
+# Stdio mode
+go run github.com/open-mcp-ai/termcp/cmd/server@latest --transport stdio
+```
+
 ### Build from source
 
 ```bash
-go build -o server ./cmd/server
+go build -o termcp ./cmd/server
 ```
 
 **Requirements:** Go >= 1.21 / macOS, Linux, or Windows
@@ -358,22 +370,50 @@ go build -o server ./cmd/server
 ### Run
 
 ```bash
-./server --host 127.0.0.1 --port 8080 --data-dir ./data
+# SSE mode (default)
+./termcp --host 127.0.0.1 --port 8080 --data-dir ./data
+
+# Stdio mode
+./termcp --transport stdio
 ```
 
 Options:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host` | `127.0.0.1` | HTTP server host |
-| `--port` | `8080` | HTTP server port |
+| `--transport` | `sse` | Transport mode: `stdio` or `sse` |
+| `--host` | `127.0.0.1` | HTTP server host (SSE mode only) |
+| `--port` | `8080` | HTTP server port (SSE mode only) |
 | `--data-dir` | `./data` | JSON storage directory |
 | `--ssh-host` | `127.0.0.1` | Internal SSH server host |
 | `--ssh-port` | `0` (random) | Internal SSH server port |
 
 ## Configuration
 
-### Claude Code
+### Claude Code (Stdio mode — recommended)
+
+In `.claude/settings.json` or `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "termcp": {
+      "command": "go",
+      "args": ["run", "github.com/open-mcp-ai/termcp/cmd/server@latest", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+Or via CLI:
+
+```bash
+claude mcp add termcp -- go run github.com/open-mcp-ai/termcp/cmd/server@latest --transport stdio
+```
+
+> **Note:** The first run downloads and compiles the source (takes a few seconds). Subsequent runs use the Go build cache and start instantly.
+
+### Claude Code (SSE mode — for remote deployment)
 
 In `.claude/settings.json` or `.mcp.json`:
 
@@ -396,7 +436,8 @@ claude mcp add --transport sse termcp http://localhost:8080/sse
 
 ### Other MCP Clients
 
-Any MCP client that supports SSE transport can connect to `http://<host>:<port>/sse`.
+- **Stdio mode:** Any MCP client that supports stdio transport can use `go run github.com/open-mcp-ai/termcp/cmd/server@latest --transport stdio` as the command.
+- **SSE mode:** Any MCP client that supports SSE transport can connect to `http://<host>:<port>/sse`.
 
 ---
 

@@ -21,6 +21,8 @@ import (
 
 func main() {
 	cfg := config.Default()
+	var transport string
+	flag.StringVar(&transport, "transport", "sse", "Transport mode: stdio or sse")
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP server host")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
@@ -35,7 +37,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	slog.SetDefault(slog.New(buildLogHandler(cfg)))
+	// In stdio mode, force logs to stderr with error level only
+	// to avoid polluting stdout (which is the MCP JSON-RPC channel)
+	if transport == "stdio" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	} else {
+		slog.SetDefault(slog.New(buildLogHandler(cfg)))
+	}
 
 	// Start internal SSH server
 	sshAddr := fmt.Sprintf("%s:%d", cfg.SSHHost, cfg.SSHPort)
@@ -52,10 +60,8 @@ func main() {
 	msgMgr := message.NewManager(store)
 	sessMgr := session.NewManager(actualSSHAddr, msgMgr, store)
 
-	// Start MCP SSE server
+	// Create MCP server
 	mcpSrv := mcpmod.New(sessMgr, msgMgr)
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	slog.Info("MCP SSE server listening", "addr", addr)
 
 	var shuttingDown atomic.Bool
 
@@ -71,13 +77,24 @@ func main() {
 		mcpSrv.Stop()
 	}()
 
-	if err := mcpSrv.Start(addr); err != nil {
-		if shuttingDown.Load() && errors.Is(err, http.ErrServerClosed) {
-			slog.Info("server stopped")
-			return
+	if transport == "stdio" {
+		// Stdio mode: MCP over stdin/stdout
+		if err := mcpSrv.StartStdio(); err != nil {
+			slog.Error("stdio server error", "err", err)
+			os.Exit(1)
 		}
-		slog.Error("failed to start MCP server", "err", err)
-		os.Exit(1)
+	} else {
+		// SSE mode: MCP over HTTP
+		addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+		slog.Info("MCP SSE server listening", "addr", addr)
+		if err := mcpSrv.StartSSE(addr); err != nil {
+			if shuttingDown.Load() && errors.Is(err, http.ErrServerClosed) {
+				slog.Info("server stopped")
+				return
+			}
+			slog.Error("failed to start MCP server", "err", err)
+			os.Exit(1)
+		}
 	}
 }
 
