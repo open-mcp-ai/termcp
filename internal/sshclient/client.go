@@ -79,12 +79,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		_ = session.Setenv("LANG", lang)
 		_ = session.Setenv("LC_CTYPE", lang)
 
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          1,
-			ssh.TTY_OP_ISPEED: 14400,
-			ssh.TTY_OP_OSPEED: 14400,
-		}
-		if err := session.RequestPty("xterm-256color", rows, cols, modes); err != nil {
+		if err := session.RequestPty("xterm-256color", rows, cols, defaultPTYModes()); err != nil {
 			closeIfCloser(stderr)
 			closeIfCloser(stdout)
 			stdin.Close()
@@ -209,4 +204,18 @@ func quoteIfNeeded(s string) string {
 		return strconv.Quote(s)
 	}
 	return s
+}
+
+// defaultPTYModes returns standard terminal modes for PTY sessions.
+func defaultPTYModes() ssh.TerminalModes {
+	return ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.ICRNL:         1,
+		ssh.ONLCR:         1,
+		ssh.OPOST:         1,
+		ssh.ISIG:          1,
+		ssh.ICANON:        1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
 }

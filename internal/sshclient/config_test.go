@@ -8,10 +8,10 @@ import (
 
 func TestBuildClientConfig_MissingUser(t *testing.T) {
 	_, err := BuildClientConfig(DialAuth{
-		User:              "",
-		Password:          "x",
-		TrustUnknownHost:  true,
-		DialTimeout:       time.Second,
+		User:             "",
+		Password:         "x",
+		TrustUnknownHost: true,
+		DialTimeout:      time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "ssh_user") {
 		t.Fatalf("expected ssh_user error, got %v", err)
