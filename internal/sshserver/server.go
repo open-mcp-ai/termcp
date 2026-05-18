@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/ssh"
-	"github.com/pkg/sftp"
 	sshstd "golang.org/x/crypto/ssh"
 )
 
@@ -54,20 +53,6 @@ func New(addr string) *Server {
 		},
 		PasswordHandler: func(ctx ssh.Context, password string) bool {
 			return s.passwordOK(ctx.User(), password)
-		},
-		SubsystemHandlers: map[string]ssh.SubsystemHandler{
-			"sftp": func(sess ssh.Session) {
-				server, err := sftp.NewServer(sess)
-				if err != nil {
-					slog.Error("sftp server init failed", "err", err)
-					return
-				}
-				if err := server.Serve(); err == io.EOF {
-					server.Close()
-				} else if err != nil {
-					slog.Error("sftp server failed", "err", err)
-				}
-			},
 		},
 	}
 	_ = srv.SetOption(ssh.AllocatePty())

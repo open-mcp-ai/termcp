@@ -146,7 +146,7 @@ func RemoteTemplate() []byte {
   "private_key_pem": "",
   "private_key_file": "",
   "key_passphrase": "",
-  "trust_unknown_host": true,
+  "trust_unknown_host": false,
   "known_hosts": "",
   "dial_timeout_seconds": 30
 }
