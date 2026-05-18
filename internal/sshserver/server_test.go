@@ -299,3 +299,63 @@ func TestServer_PtySession(t *testing.T) {
 	stdin.Write([]byte(testShellInput("exit")))
 	session.Wait()
 }
+
+func TestServer_PtyEnviron(t *testing.T) {
+	srv := New("127.0.0.1:0")
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	config := mintCfg(t, srv)
+	client, err := ssh.Dial("tcp", srv.Addr(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          0,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+	if err := session.RequestPty("xterm-256color", 24, 80, modes); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := session.Start(ptyShellLine()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	stdin.Write([]byte(testShellInput("echo TERM=$TERM")))
+
+	deadline := time.Now().Add(5 * time.Second)
+	var allOutput string
+	buf := make([]byte, 4096)
+	for time.Now().Before(deadline) && !strings.Contains(allOutput, "TERM=") {
+		n, _ := stdout.Read(buf)
+		allOutput += string(buf[:n])
+	}
+
+	if !strings.Contains(allOutput, "TERM=xterm-256color") {
+		t.Fatalf("expected TERM=xterm-256color in output, got %q", allOutput)
+	}
+
+	stdin.Write([]byte(testShellInput("exit")))
+	session.Wait()
+}

@@ -29,7 +29,9 @@ const mcpServerInstructions = `termcp agent rules (follow in order until the use
 
 6) Passwords and secrets: If read_output shows a password prompt, sudo password, passphrase, MFA/2FA, or SSH keyboard-interactive challenge, do NOT guess, brute-force, or paste secrets you do not have. Stop automated send_input/background_send for that secret and tell the user to type it in the termcp Web UI terminal for that same session (the browser session tied to that session_id). Only continue with non-secret commands after the user confirms they entered it.
 
-7) send_input control bytes (function keys, ESC, arrows, Ctrl): JSON has no \\xNN escapes — never use "\\x1b" in text (invalid JSON or four literal characters). Use JSON \\uXXXX only (e.g. F12 xterm-256color: \\u001b[24~). press_enter must be false for key sequences.`
+7) send_input control bytes (function keys, ESC, arrows, Ctrl): JSON has no \\xNN escapes — never use "\\x1b" in text (invalid JSON or four literal characters). Use JSON \\uXXXX only (e.g. F12 xterm-256color: \\u001b[24~). press_enter must be false for key sequences.
+
+8) Crash-loop detection: if read_output returns a large traceback repeating the same error pattern (e.g. Python _pyrepl / fancy_termios with termios.error or recursion), the process is in an unrecoverable loop. Immediately terminate_session, then retry with PYTHON_BASIC_REPL=1 in the process environment. If a command succeeds but then hangs (output goes silent while session stays running), check get_session_info for status and decide whether to wait or terminate.`
 
 // Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
 type Server struct {

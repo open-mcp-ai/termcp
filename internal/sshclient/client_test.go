@@ -235,3 +235,27 @@ func TestStart_CommandFailure(t *testing.T) {
 		t.Fatalf("expected exit code 1, got %d", es.ExitCode())
 	}
 }
+
+func TestDefaultPTYModes(t *testing.T) {
+	modes := defaultPTYModes()
+
+	required := map[string]uint8{
+		"ECHO":   ssh.ECHO,
+		"ICRNL":  ssh.ICRNL,
+		"ONLCR":  ssh.ONLCR,
+		"OPOST":  ssh.OPOST,
+		"ISIG":   ssh.ISIG,
+		"ICANON": ssh.ICANON,
+	}
+
+	for name, opcode := range required {
+		v, ok := modes[opcode]
+		if !ok {
+			t.Errorf("missing required terminal mode %s (opcode %d)", name, opcode)
+			continue
+		}
+		if v != 1 {
+			t.Errorf("terminal mode %s = %d, want 1 (enabled)", name, v)
+		}
+	}
+}
