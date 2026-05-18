@@ -80,6 +80,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes for plain-text logs"), mcpgo.DefaultBool(true)),
 		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output, in seconds (0.1–60)"), mcpgo.DefaultNumber(5)),
 		mcpgo.WithNumber("max_lines", mcpgo.Description("Truncate after N newline-delimited lines; 0 = no line limit"), mcpgo.DefaultNumber(0)),
+			mcpgo.WithNumber("max_bytes", mcpgo.Description("Max bytes to return per call; 0 = no limit. Use with has_more to paginate large output."), mcpgo.DefaultNumber(8192)),
 		mcpgo.WithNumber("reader_id", mcpgo.Description("0 = default reader shared with Web UI stream unless you registered another reader"), mcpgo.DefaultNumber(0)),
 	), withLogging("read_output", s.handleReadOutput))
 
