@@ -185,7 +185,7 @@ func TestRace_ConcurrentReadWrite(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				s.ReadOutput(context.Background(), 200*time.Millisecond, true, 0)
+				s.ReadOutput(context.Background(), 200*time.Millisecond, true, 0, 0)
 			}
 		}()
 	}

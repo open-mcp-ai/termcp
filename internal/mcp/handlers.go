@@ -228,14 +228,14 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	if timeout < 0.1 || timeout > 60 {
 		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
 	}
-	maxLines := int(getFloat64(args, "max_lines", 0))
+	maxLines := int(getFloat64(args, "max_lines", 0)); maxBytes := int(getFloat64(args, "max_bytes", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
 	sess, bad := s.requireSession(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
-	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines, maxBytes)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -258,7 +258,7 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	if timeout < 0.1 || timeout > 60 {
 		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
 	}
-	maxLines := int(getFloat64(args, "max_lines", 0))
+	maxLines := int(getFloat64(args, "max_lines", 0)); maxBytes := int(getFloat64(args, "max_bytes", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
 	sess, bad := s.requireSession(sessionID)
@@ -268,7 +268,7 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	if err := sess.SendInput(text, pressEnter); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines, maxBytes)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
