@@ -4,26 +4,28 @@ venv/
 build/
 *.Identifier
 
-# Go
-/server
+# Go build artifacts
+/termcp
 *.exe
+*.exe~
+*.test
+*.out
+*.prof
 
 # IDE
 .idea/
+.vscode/
 
-# Data
-data/
-testdata/
+# Data (runtime)
+/data
 
 # Private (author only)
 .claude/
 docs/superpowers/
 
-# MAC
+# OS
 .DS_Store
 
 # other program
 templates/
 .env
-data
-termcp
