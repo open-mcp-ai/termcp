@@ -574,3 +574,55 @@ func TestHandleTerminateSession_InvalidGracePeriod(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleReadOutput_ReturnsSessionStatus(t *testing.T) {
+	s := newTestServer(t)
+
+	startReq := makeRequest(map[string]any{
+		"command": testShell(),
+		"args":    testInteractiveShellArgs(),
+		"mode":    "pty",
+	})
+	startResult, err := s.handleStartSession(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	time.Sleep(300 * time.Millisecond)
+
+	readReq := makeRequest(map[string]any{
+		"session_id": sessionID,
+		"timeout":    1.0,
+	})
+	result, err := s.handleReadOutput(context.Background(), readReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rm := parseResult(t, result)
+
+	status, ok := rm["session_status"].(string)
+	if !ok {
+		t.Fatal("expected session_status in read_output result")
+	}
+	if status != "running" {
+		t.Fatalf("expected session_status=running, got %q", status)
+	}
+
+	uptime, ok := rm["session_uptime_seconds"]
+	if !ok {
+		t.Fatal("expected session_uptime_seconds in read_output result")
+	}
+	// JSON numbers unmarshal as float64
+	sec := uptime.(float64)
+	if sec < 0 {
+		t.Fatalf("expected session_uptime_seconds >= 0, got %v", sec)
+	}
+
+	termReq := makeRequest(map[string]any{
+		"session_id": sessionID,
+		"force":      true,
+	})
+	s.handleTerminateSession(context.Background(), termReq)
+}
