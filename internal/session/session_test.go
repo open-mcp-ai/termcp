@@ -170,7 +170,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 	var output string
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		chunk, _ := s.ReadOutput(context.Background(), 500*time.Millisecond, true, 0)
+		chunk, _ := s.ReadOutput(context.Background(), 500*time.Millisecond, true, 0, 0)
 		output += chunk
 		if strings.Contains(output, "session_test") {
 			break
@@ -458,5 +458,43 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 	leaked := after - before
 	if leaked > 2 {
 		t.Fatalf("leaked %d goroutines after terminate (before=%d, after=%d)", leaked, before, after)
+	}
+}
+
+func TestSession_ReadOutputWithMaxBytes(t *testing.T) {
+	srv := startTestServer(t)
+	addr := srv.Addr()
+
+	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Terminate(true, 0)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Generate predictable output longer than maxBytes
+	longText := strings.Repeat("ABCDEFGHIJ", 100) // 1000 bytes
+	cmd := testInteractiveOutputCommand(longText)
+	if err := s.SendInput(testShellInput(cmd), false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for output to accumulate
+	time.Sleep(500 * time.Millisecond)
+
+	maxBytes := 100
+	output, err := s.ReadOutput(context.Background(), 500*time.Millisecond, true, 0, maxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(output) > maxBytes {
+		t.Fatalf("expected output <= %d bytes, got %d bytes", maxBytes, len(output))
+	}
+
+	// Should still have more data available
+	if !s.HasMoreOutput(s.DefaultOutputReaderID()) {
+		t.Fatal("expected HasMoreOutput=true after partial read")
 	}
 }

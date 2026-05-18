@@ -294,13 +294,15 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 }
 
 // ReadOutput reads new output using the default reader.
-func (s *Session) ReadOutput(ctx context.Context, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines, true, 0)
+// maxBytes limits the returned output in bytes; 0 means no limit.
+func (s *Session) ReadOutput(ctx context.Context, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
+	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines, true, maxBytes)
 }
 
 // ReadOutputForReader reads new output for a specific reader ID.
-func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, true, 0)
+// maxBytes limits the returned output in bytes; 0 means no limit.
+func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, true, maxBytes)
 }
 
 // ReadTerminalStream reads PTY output for a reader without appending to the message log (high-frequency UI streaming).
