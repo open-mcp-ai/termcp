@@ -239,12 +239,15 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	result := map[string]any{
-		"output":         output,
-		"has_more":       sess.HasMoreOutput(readerID),
-		"lines_returned": strings.Count(output, "\n"),
-		"bytes_returned": len(output),
-	}
+		info := sess.Info()
+		result := map[string]any{
+			"output":                output,
+			"has_more":              sess.HasMoreOutput(readerID),
+			"lines_returned":        strings.Count(output, "\n"),
+			"bytes_returned":        len(output),
+			"session_status":        string(info.Status),
+			"session_uptime_seconds": int(time.Since(info.CreatedAt).Seconds()),
+		}
 	return jsonResult(result), nil
 }
 
@@ -272,12 +275,15 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	result := map[string]any{
-		"output":         output,
-		"has_more":       sess.HasMoreOutput(readerID),
-		"lines_returned": strings.Count(output, "\n"),
-		"bytes_returned": len(output),
-	}
+		info := sess.Info()
+		result := map[string]any{
+			"output":                output,
+			"has_more":              sess.HasMoreOutput(readerID),
+			"lines_returned":        strings.Count(output, "\n"),
+			"bytes_returned":        len(output),
+			"session_status":        string(info.Status),
+			"session_uptime_seconds": int(time.Since(info.CreatedAt).Seconds()),
+		}
 	return jsonResult(result), nil
 }
 
