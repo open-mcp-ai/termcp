@@ -210,6 +210,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 			}
 		}()
 		setPtySysProcAttr(cmd)
+		cmd.Env = append(os.Environ(), "TERM="+ppty.Term)
 		if err := ppty.Start(cmd); err != nil {
 			io.WriteString(sess, err.Error()+"\n")
 			sess.Exit(1)

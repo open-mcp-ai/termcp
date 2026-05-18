@@ -7,6 +7,7 @@
 - 邮箱地址、手机号等个人信息
 - .env 文件、私钥文件（PEM、SSH key 等）
 - 禁止出现 `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` 相关字样
+- 只有在人工同意后才能push和commit。在多次commit后，人工要求push再进行push，绝对不要主动push。
 
 ## Agent skills
 
