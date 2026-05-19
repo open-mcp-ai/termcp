@@ -301,6 +301,9 @@ func TestServer_PtySession(t *testing.T) {
 }
 
 func TestServer_PtyEnviron(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("TERM env var is a Unix concept, not meaningful on Windows")
+	}
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
