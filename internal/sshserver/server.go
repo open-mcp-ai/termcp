@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -169,6 +170,21 @@ func sshSignalToOSSig(sig ssh.Signal) os.Signal {
 	}
 }
 
+// disableHistoryExpansion prepends shell-specific flags to suppress ! history expansion.
+func disableHistoryExpansion(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	switch filepath.Base(args[0]) {
+	case "zsh":
+		return append([]string{args[0], "-o", "NO_BANG_HIST"}, args[1:]...)
+	case "bash", "sh":
+		return append([]string{args[0], "+o", "histexpand"}, args[1:]...)
+	default:
+		return args
+	}
+}
+
 func (s *Server) handleSession(sess ssh.Session) {
 	cmdArgs := sess.Command()
 	if len(cmdArgs) == 0 {
@@ -186,6 +202,11 @@ func (s *Server) handleSession(sess ssh.Session) {
 				cmdArgs = strings.Fields(sh)
 			}
 		}
+	}
+
+
+	if len(sess.Command()) == 0 {
+		cmdArgs = disableHistoryExpansion(cmdArgs)
 	}
 
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
