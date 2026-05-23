@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
+  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="macOS / Linux / Windows">
-  <img src="https://img.shields.io/badge/MCP-SSE_Transport-green.svg" alt="MCP SSE">
+  <img src="https://img.shields.io/badge/MCP-SSE_&_Streamable_HTTP-green.svg" alt="MCP SSE & Streamable HTTP">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
@@ -145,6 +145,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 | **Cross-platform shell detection** | `detect_shell` probes the termcp host for bash/zsh/fish/pwsh/cmd — useful for mixed Windows/Linux environments |
 | **Graceful termination** | SIGTERM first, then SIGKILL after a configurable grace period |
 | **PTY resize** | Dynamically adjust terminal rows and columns at runtime |
+| **Safe shell startup** | History expansion (`!`) disabled automatically; TERM propagated to child processes |
 
 ---
 
@@ -210,6 +211,8 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
    - `data/messages/{session_id}/messages/{msg_id}.json` — Message content
 
 5. **Session Lifecycle Safety**: Exit goroutine is the single authority for `Status`/`ExitCode` (via `sync.Once`). Terminate is idempotent. Stdin writes are serialized via a dedicated mutex.
+
+6. **Safe Shell Environment**: Interactive shells start with history expansion disabled (zsh: `NO_BANG_HIST`, bash: `+o histexpand`) to prevent `!` characters in passwords and URLs from causing errors. PTY-requested `TERM` is propagated to child processes.
 
 ---
 
