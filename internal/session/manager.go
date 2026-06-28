@@ -123,6 +123,24 @@ func (m *Manager) Delete(id string) error {
 }
 
 // CleanupAll terminates all running sessions and waits for them to exit.
+// FindActiveBySSHConfig returns the first running session that matches the given
+// ssh_config name (by session name or ssh_endpoint), or nil if none found.
+func (m *Manager) FindActiveBySSHConfig(sshConfig string) *Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.sessions {
+		info := s.Info()
+		if info.Status != api.SessionRunning {
+			continue
+		}
+		// Match by ssh_endpoint first, then by session name.
+		if info.SSHEndpoint == sshConfig || info.Name == sshConfig {
+			return s
+		}
+	}
+	return nil
+}
+
 func (m *Manager) CleanupAll(force bool) {
 	m.mu.RLock()
 	list := make([]*Session, 0, len(m.sessions))

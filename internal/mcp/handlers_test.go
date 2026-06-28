@@ -31,7 +31,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	sessMgr := session.NewManager(srv.Addr(), msgMgr, store, srv)
-	return New(sessMgr, msgMgr, sshconfig.NewStore(dir))
+	return New(sessMgr, msgMgr, sshconfig.NewStore(dir), nil)
 }
 
 func makeRequest(args map[string]any) mcpgo.CallToolRequest {

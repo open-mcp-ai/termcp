@@ -55,6 +55,13 @@ func New(addr string) *Server {
 		PasswordHandler: func(ctx ssh.Context, password string) bool {
 			return s.passwordOK(ctx.User(), password)
 		},
+			LocalPortForwardingCallback: func(ctx ssh.Context, dHost string, dPort uint32) bool {
+				return true
+			},
+			ChannelHandlers: map[string]ssh.ChannelHandler{
+				"session": ssh.DefaultSessionHandler,
+				"direct-tcpip": ssh.DirectTCPIPHandler,
+			},
 	}
 	_ = srv.SetOption(ssh.AllocatePty())
 	s.server = srv

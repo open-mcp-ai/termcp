@@ -21,6 +21,8 @@ import (
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/open-mcp-ai/termcp/internal/forward"
+
 	"github.com/open-mcp-ai/termcp/internal/config"
 	"github.com/open-mcp-ai/termcp/internal/logansi"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
@@ -105,7 +107,7 @@ func logHTTPMain(base string, port int, lanIPv4 []string) {
 }
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
+if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 		base := filepath.Base(os.Args[0])
 		if len(os.Args) < 3 {
 			printSSHConfigUsage(base)
@@ -179,11 +181,14 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	mux := http.NewServeMux()
 	mainSrv := &http.Server{Addr: addr, Handler: mux}
-	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, mcpserver.WithHTTPServer(mainSrv))
+
+	forwardMgr := forward.NewForwardManager()
+
+	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
-	(&webui.Handler{Sessions: sessMgr, SSH: sshStore}).Register(mux)
+	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr}).Register(mux)
 
 	var adminSrv *http.Server
 	if cfg.AdminPort > 0 {
@@ -298,3 +303,4 @@ func runSSHConfigList(args []string) {
 		fmt.Println(n)
 	}
 }
+

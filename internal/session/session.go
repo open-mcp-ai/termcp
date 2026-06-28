@@ -430,6 +430,16 @@ func (s *Session) UnregisterReader(id int) {
 }
 
 // HasMoreOutput returns whether the given reader has unread data.
+// SSHClient returns the underlying SSH client for remote sessions, or nil for internal/loopback.
+func (s *Session) SSHClient() *ssh.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.execSession == nil {
+		return nil
+	}
+	return s.execSession.SSHClient()
+}
+
 func (s *Session) HasMoreOutput(readerID int) bool {
 	return s.buf.HasMore(readerID)
 }

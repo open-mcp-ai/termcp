@@ -3,8 +3,12 @@ package sshconfig
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/open-mcp-ai/termcp/internal/session"
 )
 
 const maxConfigFileSize = 256 * 1024
@@ -153,6 +157,7 @@ func RemoteTemplate() []byte {
 `)
 }
 
+
 // InternalTemplate is the built-in loopback SSH entry.
 func InternalTemplate() []byte {
 	return []byte(`{
@@ -160,4 +165,35 @@ func InternalTemplate() []byte {
   "description": "Built-in termcp loopback SSH (no host credentials)."
 }
 `)
+}
+
+// RemoteFromEntry converts an sshconfig Entry into session.RemoteSSH dial settings.
+func RemoteFromEntry(e *Entry) (*session.RemoteSSH, error) {
+	pem := strings.TrimSpace(e.PrivateKeyPEM)
+	if fn := strings.TrimSpace(e.PrivateKeyFile); fn != "" {
+		b, err := os.ReadFile(filepath.Clean(fn))
+		if err != nil {
+			return nil, fmt.Errorf("private_key_file %q: %w", fn, err)
+		}
+		pem = string(b)
+	}
+	trust := true
+	if e.TrustUnknownHost != nil {
+		trust = *e.TrustUnknownHost
+	}
+	port := e.Port
+	if port == 0 {
+		port = 22
+	}
+	return &session.RemoteSSH{
+		Host:               e.Host,
+		Port:               port,
+		User:               e.User,
+		Password:           e.Password,
+		PrivateKeyPEM:      pem,
+		KeyPassphrase:      e.KeyPassphrase,
+		TrustUnknownHost:   trust,
+		KnownHosts:         e.KnownHosts,
+		DialTimeoutSeconds: e.DialTimeoutSeconds,
+	}, nil
 }

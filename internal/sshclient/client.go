@@ -157,6 +157,9 @@ func (es *ExecSession) Signal(sig ssh.Signal) error {
 }
 
 // Close forcefully terminates the session and underlying connection.
+// SSHClient returns the underlying SSH client, or nil for internal sessions.
+func (es *ExecSession) SSHClient() *ssh.Client { return es.client }
+
 func (es *ExecSession) Close() error {
 	es.Stdin.Close()
 	var firstErr error

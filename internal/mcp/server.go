@@ -10,6 +10,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
+	"github.com/open-mcp-ai/termcp/internal/forward"
 )
 
 // mcpServerInstructions is returned in initialize (MCP "instructions") so clients may
@@ -41,16 +42,18 @@ type Server struct {
 	sessMgr      *session.Manager
 	msgMgr       *message.Manager
 	sshConfigs   *sshconfig.Store
+	forwardMgr   *forward.ForwardManager
 }
 
 // New creates and configures the MCP server with all tools registered.
 // sshConfigs may be nil (start_session / list_ssh_configs will error or return empty).
 // sseOpts are passed to the underlying mcp-go SSE server (e.g. mcpserver.WithHTTPServer).
-func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store, sseOpts ...mcpserver.SSEOption) *Server {
+func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store, forwardMgr *forward.ForwardManager, sseOpts ...mcpserver.SSEOption) *Server {
 	s := &Server{
 		sessMgr:    sessMgr,
 		msgMgr:     msgMgr,
 		sshConfigs: sshConfigs,
+		forwardMgr: forwardMgr,
 	}
 
 	mcpServer := mcpserver.NewMCPServer("termcp", "0.0.4",
@@ -159,6 +162,87 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Non-zero reader id from register_reader")),
 	), withLogging("unregister_reader", s.handleUnregisterReader))
+
+	// --- Port forwarding tools ---
+	mcpServer.AddTool(mcpgo.NewTool("forward_port",
+		mcpgo.WithDescription("Local port forward (ssh -L). termcp listens on a local port and tunnels traffic through SSH to the remote target. local_port=0 picks a random free port."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_host", mcpgo.Description("Target host (relative to the remote side)"), mcpgo.DefaultString("localhost")),
+		mcpgo.WithNumber("remote_port", mcpgo.Required(), mcpgo.Description("Target port on remote host")),
+		mcpgo.WithNumber("local_port", mcpgo.Description("Local port to listen on (0=random)"), mcpgo.DefaultNumber(0)),
+	), withLogging("forward_port", s.handleForwardPort))
+
+	mcpServer.AddTool(mcpgo.NewTool("local_forward",
+		mcpgo.WithDescription("Remote port forward (ssh -R). The remote side listens on a port and tunnels traffic back to a termcp-side target."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("local_host", mcpgo.Description("Host for the remote side to listen on"), mcpgo.DefaultString("0.0.0.0")),
+		mcpgo.WithNumber("local_port", mcpgo.Required(), mcpgo.Description("Port for the remote side to listen on")),
+		mcpgo.WithString("remote_host", mcpgo.Required(), mcpgo.Description("Target host (relative to termcp)")),
+		mcpgo.WithNumber("remote_port", mcpgo.Required(), mcpgo.Description("Target port (relative to termcp)")),
+	), withLogging("local_forward", s.handleLocalForward))
+
+	mcpServer.AddTool(mcpgo.NewTool("dynamic_forward",
+		mcpgo.WithDescription("Start a SOCKS5 proxy (ssh -D). termcp listens on a local port, proxies TCP connections through the agent/SSH connection."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithNumber("local_port", mcpgo.Description("Local port for SOCKS5 proxy (0=random)"), mcpgo.DefaultNumber(0)),
+	), withLogging("dynamic_forward", s.handleDynamicForward))
+
+	mcpServer.AddTool(mcpgo.NewTool("list_forwards",
+		mcpgo.WithDescription("List all active port forwards (local, remote, and dynamic directions). Returns forward_id, direction, listen_addr, target_addr, status."),
+	), withLogging("list_forwards", s.handleListForwards))
+
+	mcpServer.AddTool(mcpgo.NewTool("close_forward",
+		mcpgo.WithDescription("Close an active port forward by forward_id, releasing the listener."),
+		mcpgo.WithString("forward_id", mcpgo.Required(), mcpgo.Description("Forward ID from list_forwards")),
+	), withLogging("close_forward", s.handleCloseForward))
+
+	// --- File operation tools ---
+	mcpServer.AddTool(mcpgo.NewTool("file_read",
+		mcpgo.WithDescription("Read a remote file or file segment via SSH/SFTP. Mode 'text' returns readable text with \\xHH escapes for non-printable bytes. Mode 'hex' returns hex dump. Mode 'file' writes to a local file on termcp. Omit offset/length for whole file read."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("offset", mcpgo.Description("Start byte offset (0-based)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0=all)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text")),
+		mcpgo.WithString("local_path", mcpgo.Description("Local file path for mode=file")),
+	), withLogging("file_read", s.handleFileRead))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_write",
+		mcpgo.WithDescription("Write to a remote file via SSH/SFTP. Use inline data (text mode with \\xHH escapes, or hex mode) for small writes; use local_path + local_offset + length to stream from a termcp-side file for large/binary writes."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("offset", mcpgo.Description("Write start offset (0=beginning, truncates if 0)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithString("data", mcpgo.Description("Inline data to write (text or hex per mode)")),
+		mcpgo.WithString("mode", mcpgo.Description("Data encoding: text (default, supports \\xHH) or hex"), mcpgo.DefaultString("text")),
+		mcpgo.WithString("local_path", mcpgo.Description("Termcp-side file path to read data from")),
+		mcpgo.WithNumber("local_offset", mcpgo.Description("Read start offset in local file"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read from local file (0=all)"), mcpgo.DefaultNumber(0)),
+	), withLogging("file_write", s.handleFileWrite))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_stat",
+		mcpgo.WithDescription("Get file or directory info from remote via SSH/SFTP. Returns name, size, is_dir, mod_time, and children list for directories."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path")),
+	), withLogging("file_stat", s.handleFileStat))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_delete",
+		mcpgo.WithDescription("Delete a remote file or empty directory via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path to delete")),
+	), withLogging("file_delete", s.handleFileDelete))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_rename",
+		mcpgo.WithDescription("Move or rename a remote file/directory via SSH/SFTP (same filesystem)."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("from_path", mcpgo.Required(), mcpgo.Description("Current remote path")),
+		mcpgo.WithString("to_path", mcpgo.Required(), mcpgo.Description("New remote path")),
+	), withLogging("file_rename", s.handleFileRename))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_mkdir",
+		mcpgo.WithDescription("Create a directory (and parents) on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote directory path to create")),
+	), withLogging("file_mkdir", s.handleFileMakeDir))
 
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)

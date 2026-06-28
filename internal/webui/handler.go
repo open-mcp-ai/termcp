@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -11,10 +12,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"golang.org/x/crypto/ssh"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/open-mcp-ai/termcp/internal/forward"
+	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
@@ -34,8 +38,9 @@ func embeddedStaticServer() http.Handler {
 
 // Handler serves the browser UI and JSON/SSE APIs at / and /api/... .
 type Handler struct {
-	Sessions *session.Manager
-	SSH      *sshconfig.Store
+	Sessions   *session.Manager
+	SSH        *sshconfig.Store
+	ForwardMgr *forward.ForwardManager
 
 	sessHub *sessionListHub
 }
@@ -60,6 +65,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/input", h.handleInput)
 	mux.HandleFunc("POST /api/sessions/{id}/resize", h.handleResize)
 	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleTerminate)
+	mux.HandleFunc("GET /api/forwards", h.handleListForwards)
+	mux.HandleFunc("POST /api/forwards", h.handleCreateForward)
+	mux.HandleFunc("DELETE /api/forwards/{id}", h.handleDeleteForward)
+	mux.HandleFunc("GET /api/sessions/{id}/files", h.handleListFiles)
+	mux.HandleFunc("GET /api/sessions/{id}/files/download", h.handleDownloadFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/upload", h.handleUploadFile)
+	mux.HandleFunc("DELETE /api/sessions/{id}/files/delete", h.handleDeleteFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/rename", h.handleRenameFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/mkdir", h.handleMakeDir)
 	mux.Handle("/", embeddedStaticServer())
 }
 
@@ -443,39 +457,464 @@ func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry,
 	if ent.Kind == sshconfig.KindInternal {
 		return name, ent, nil, nil
 	}
-	r, err := remoteFromEntry(ent)
+	r, err := sshconfig.RemoteFromEntry(ent)
 	if err != nil {
 		return "", nil, nil, err
 	}
 	return name, ent, r, nil
 }
 
-func remoteFromEntry(e *sshconfig.Entry) (*session.RemoteSSH, error) {
-	pem := strings.TrimSpace(e.PrivateKeyPEM)
-	if fn := strings.TrimSpace(e.PrivateKeyFile); fn != "" {
-		b, err := os.ReadFile(filepath.Clean(fn))
-		if err != nil {
-			return nil, fmt.Errorf("private_key_file %q: %w", fn, err)
+
+
+func (h *Handler) handleListForwards(w http.ResponseWriter, r *http.Request) {
+	if h.ForwardMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"forwards": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forwards": h.ForwardMgr.List()})
+}
+
+func (h *Handler) handleDeleteForward(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	slog.Info("handleDeleteForward called", "forward_id", id)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "forward id required"})
+		return
+	}
+	if h.ForwardMgr == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "forward manager not available"})
+		return
+	}
+	if err := h.ForwardMgr.Close(id); err != nil {
+		slog.Error("handleDeleteForward: close failed", "forward_id", id, "err", err)
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	slog.Info("handleDeleteForward: success", "forward_id", id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
+	if h.ForwardMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "forward manager not available"})
+		return
+	}
+	var req struct {
+		SSHConfig  string `json:"ssh_config"`
+		Direction  string `json:"direction"`
+		RemoteHost string `json:"remote_host"`
+		RemotePort int    `json:"remote_port"`
+		LocalHost  string `json:"local_host"`
+		LocalPort  int    `json:"local_port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if req.Direction == "" {
+		req.Direction = "local"
+	}
+	if req.SSHConfig == "" {
+		req.SSHConfig = "internal"
+	}
+
+	var fw *forward.ForwardInfo
+	var fwErr error
+
+	// Find an active session with this ssh_config and reuse its SSH client.
+	if h.Sessions == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no session manager available"})
+		return
+	}
+	slog.Info("create forward", "ssh_config", req.SSHConfig, "direction", req.Direction, "local_port", req.LocalPort)
+	sess := h.Sessions.FindActiveBySSHConfig(req.SSHConfig)
+	if sess == nil {
+		slog.Error("create forward: no active session", "ssh_config", req.SSHConfig)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("no active session for %q — connect first, then add port forward", req.SSHConfig)})
+		return
+	}
+	slog.Info("create forward: found session", "session_id", sess.Info().ID)
+	sshClient := sess.SSHClient()
+	slog.Info("create forward: ssh client", "has_client", sshClient != nil)
+
+	if sshClient == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("no SSH client for %q — session may not be ready", req.SSHConfig)})
+		return
+	}
+
+	if req.Direction == "dynamic" {
+		// For internal sessions, use net.Dial directly (bypasses SSH direct-tcpip)
+		if req.SSHConfig == "internal" {
+			fw, fwErr = h.ForwardMgr.DynamicForwardLocal(req.LocalPort)
+		} else {
+			ctx, cancel := context.WithCancel(context.Background())
+			fw2, ln, err2 := forward.DynamicForwardSSH(ctx, sshClient, req.LocalPort)
+			fw, fwErr = fw2, err2
+			if fwErr == nil && h.ForwardMgr != nil {
+				fw2.SSHConfig = req.SSHConfig
+				h.ForwardMgr.RegisterForwardFull(fw2, ln, cancel)
+			} else if cancel != nil {
+				cancel()
+			}
 		}
-		pem = string(b)
+	} else if req.Direction == "local" {
+		fw, fwErr = h.ForwardMgr.CreateLocal(req.SSHConfig, req.RemoteHost, req.RemotePort, req.LocalPort, sshClient)
+	} else {
+		fw, fwErr = h.ForwardMgr.CreateRemote(req.SSHConfig, req.LocalHost, req.LocalPort, req.RemoteHost, req.RemotePort, sshClient)
 	}
-	trust := true
-	if e.TrustUnknownHost != nil {
-		trust = *e.TrustUnknownHost
+	if fwErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fwErr.Error()})
+		return
 	}
-	port := e.Port
-	if port == 0 {
-		port = 22
+	writeJSON(w, http.StatusCreated, fw)
+}
+
+func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client) {
+	sess := h.Sessions.Get(sessionID)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return nil, nil
 	}
-	return &session.RemoteSSH{
-		Host:               e.Host,
-		Port:               port,
-		User:               e.User,
-		Password:           e.Password,
-		PrivateKeyPEM:      pem,
-		KeyPassphrase:      e.KeyPassphrase,
-		TrustUnknownHost:   trust,
-		KnownHosts:         e.KnownHosts,
-		DialTimeoutSeconds: e.DialTimeoutSeconds,
-	}, nil
+	sshClient := sess.SSHClient()
+	return sess, sshClient
+}
+
+func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	path := r.URL.Query().Get("path")
+	if path == "" { path = "/" }
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		// Internal: use local filesystem
+		fi, err := os.Stat(path)
+		if err != nil { writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()}); return }
+		result := map[string]any{"name": filepath.Base(path), "size": fi.Size(), "is_dir": fi.IsDir()}
+		if fi.IsDir() {
+			entries, _ := os.ReadDir(path)
+			var children []map[string]any
+			for _, e := range entries {
+				info, _ := e.Info()
+				ch := map[string]any{"name": e.Name(), "is_dir": e.IsDir()}
+				if info != nil { ch["size"] = info.Size(); ch["mod_time"] = info.ModTime().UTC().Format(time.RFC3339) }
+				children = append(children, ch)
+			}
+			result["children"] = children
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	// Remote: use SFTP
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()}); return }
+	defer sftpCli.Close()
+	// sftpClient is unexported... we need to call StatFile
+	// Use a simpler approach
+	result, err := sftpCli.StatFile(path)
+	if err != nil { writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()}); return }
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
+		return
+	}
+
+	// Resolve offset/length: Range header takes priority, then ?offset=&length= query params.
+	var offset, length int64
+	var isRange bool
+	if rh := r.Header.Get("Range"); rh != "" {
+		isRange = true
+	} else {
+		offset, _ = strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
+		length, _ = strconv.ParseInt(r.URL.Query().Get("length"), 10, 64)
+	}
+
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		// Internal / local: http.ServeFile handles Range + If-Modified-Since natively.
+		// Only use manual path when explicit ?offset=&length= query params are set.
+		if !isRange && r.URL.Query().Get("offset") == "" {
+			http.ServeFile(w, r, path)
+			return
+		}
+		if isRange {
+			http.ServeFile(w, r, path)
+			return
+		}
+		// Explicit ?offset=&length= for local files — manual partial stream.
+		f, err := os.Open(path)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if length <= 0 || offset+length > fi.Size() {
+			length = fi.Size() - offset
+		}
+		if offset > 0 {
+			f.Seek(offset, io.SeekStart)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(path)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", length))
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.WriteHeader(http.StatusOK)
+		io.CopyN(w, f, length)
+		return
+	}
+
+	// Remote — SFTP streaming.
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sftpCli.Close()
+
+	stat, err := sftpCli.StatFile(path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+	if stat.IsDir {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path is a directory"})
+		return
+	}
+
+	// Resolve Range header for SFTP.
+	if isRange {
+		var ok bool
+		offset, length, ok = parseRange(r.Header.Get("Range"), stat.Size)
+		if !ok {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", stat.Size))
+			http.Error(w, "Requested Range Not Satisfiable", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+	}
+	if length <= 0 || offset+length > stat.Size {
+		length = stat.Size - offset
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(path)))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", length))
+	w.Header().Set("Accept-Ranges", "bytes")
+	if isRange {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, stat.Size))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if _, err := sftpCli.StreamReadTo(w, path, offset, length); err != nil {
+		slog.Error("download stream failed", "path", path, "err", err)
+	}
+}
+
+func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
+		return
+	}
+
+	// Resolve offset: Content-Range header takes priority, then ?offset= query param.
+	var offset int64
+	if cr := r.Header.Get("Content-Range"); cr != "" {
+		var start, end, total int64
+		if _, err := fmt.Sscanf(cr, "bytes %d-%d/%d", &start, &end, &total); err == nil {
+			offset = start
+		}
+	} else {
+		offset, _ = strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
+	}
+
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		// Internal / local filesystem — stream from request body.
+		flag := os.O_RDWR | os.O_CREATE
+		if offset <= 0 {
+			flag |= os.O_TRUNC
+		}
+		f, err := os.OpenFile(path, flag, 0644)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		defer f.Close()
+		if offset > 0 {
+			f.Seek(offset, io.SeekStart)
+		}
+		n, err := io.Copy(f, r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"bytes_written": n})
+		return
+	}
+
+	// Remote — SFTP streaming.
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sftpCli.Close()
+
+	n, err := sftpCli.StreamWriteFrom(r.Body, path, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"bytes_written": n})
+}
+
+func (h *Handler) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
+		return
+	}
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		if err := os.Remove(path); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sftpCli.Close()
+	if err := sftpCli.RemoveFile(path); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) handleRenameFile(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	if from == "" || to == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "from and to query params required"})
+		return
+	}
+	if from == to {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source and destination are the same"})
+		return
+	}
+
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		if err := os.Rename(from, to); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sftpCli.Close()
+	if err := sftpCli.RenameFile(from, to); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) handleMakeDir(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path query param required"})
+		return
+	}
+
+	_, sshClient := h.getFileSession(sid, w)
+	if sshClient == nil {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	sftpCli, err := sftp.NewClient(sshClient)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sftpCli.Close()
+	if err := sftpCli.MakeDir(path); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// parseRange parses an HTTP Range header value (e.g. "bytes=0-1023", "bytes=1024-",
+// "bytes=-512") and returns the start offset and length for a file of the given size.
+// Returns ok=false when the range is unsatisfiable.
+func parseRange(s string, size int64) (start, length int64, ok bool) {
+	const prefix = "bytes="
+	if !strings.HasPrefix(s, prefix) {
+		return 0, 0, false
+	}
+	s = s[len(prefix):]
+
+	if strings.HasPrefix(s, "-") {
+		// Suffix range: "bytes=-N" → last N bytes.
+		n, err := strconv.ParseInt(s[1:], 10, 64)
+		if err != nil || n < 0 {
+			return 0, 0, false
+		}
+		if n > size {
+			n = size
+		}
+		return size - n, n, n > 0
+	}
+
+	// "bytes=start-end" or "bytes=start-"
+	parts := strings.SplitN(s, "-", 2)
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 || start >= size {
+		return 0, 0, false
+	}
+
+	if parts[1] == "" {
+		// Open-ended: from start to end-of-file.
+		return start, size - start, true
+	}
+
+	end, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || end < start || start >= size {
+		return 0, 0, false
+	}
+	if end >= size {
+		end = size - 1
+	}
+	return start, end - start + 1, true
 }
