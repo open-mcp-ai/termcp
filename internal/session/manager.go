@@ -52,6 +52,11 @@ func (m *Manager) notifyListChange() {
 	}
 }
 
+// NotifyChange triggers the session list change callback (for WebSocket/SSE push).
+func (m *Manager) NotifyChange() {
+	m.notifyListChange()
+}
+
 // Create starts a new session and registers it.
 func (m *Manager) Create(cfg Config) (*Session, error) {
 	cfg.OnExit = func() {
@@ -77,6 +82,19 @@ func (m *Manager) Get(id string) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[id]
+}
+
+// GetChildShell searches all sessions for a child shell with the given ID.
+// Returns nil if no matching child shell is found.
+func (m *Manager) GetChildShell(id string) *ChildShell {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.sessions {
+		if cs := s.GetChildShell(id); cs != nil {
+			return cs
+		}
+	}
+	return nil
 }
 
 // ListAll returns metadata for all sessions.

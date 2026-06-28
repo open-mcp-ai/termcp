@@ -16,12 +16,29 @@ import (
 type ForwardManager struct {
 	mu       sync.Mutex
 	forwards map[string]*forwardState
+	onChange func()
 }
 
 // NewForwardManager creates a ForwardManager.
 func NewForwardManager() *ForwardManager {
 	return &ForwardManager{
 		forwards: make(map[string]*forwardState),
+	}
+}
+
+// SetOnChange sets a callback invoked when forwards are added or removed.
+func (fm *ForwardManager) SetOnChange(fn func()) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	fm.onChange = fn
+}
+
+func (fm *ForwardManager) notifyChange() {
+	fm.mu.Lock()
+	fn := fm.onChange
+	fm.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
 }
 
@@ -388,6 +405,7 @@ func (fm *ForwardManager) RegisterForward(fw *ForwardInfo) {
 	fm.mu.Lock()
 	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw}
 	fm.mu.Unlock()
+	fm.notifyChange()
 }
 
 // RegisterForwardFull registers a forward with its listener and cancel function for proper cleanup.
@@ -395,6 +413,7 @@ func (fm *ForwardManager) RegisterForwardFull(fw *ForwardInfo, ln net.Listener, 
 	fm.mu.Lock()
 	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
 	fm.mu.Unlock()
+	fm.notifyChange()
 }
 
 // Close closes a forward by ID and cleans up resources.

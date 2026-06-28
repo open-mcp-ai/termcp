@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -56,6 +57,17 @@ type uiWS struct {
 }
 
 var errWSSessionNotFound = errors.New("session not found")
+
+// getTerminalShell looks up a session or child shell by ID and returns it as a TerminalShell.
+func (c *uiWS) getTerminalShell(sid string) session.TerminalShell {
+	if sess := c.h.Sessions.Get(sid); sess != nil {
+		return sess
+	}
+	if cs := c.h.Sessions.GetChildShell(sid); cs != nil {
+		return cs
+	}
+	return nil
+}
 
 func (h *Handler) handleWebUIWS(w http.ResponseWriter, r *http.Request) {
 	if h.Sessions == nil {
@@ -169,18 +181,18 @@ func (c *uiWS) handleWSInput(msg *wsClientMsg) {
 	if sid == "" {
 		return
 	}
-	sess := c.h.Sessions.Get(sid)
-	if sess == nil {
+	shell := c.getTerminalShell(sid)
+	if shell == nil {
 		return
 	}
-	if sess.Info().Status != api.SessionRunning {
+	if shell.Info().Status != api.SessionRunning {
 		return
 	}
 	raw, err := base64.StdEncoding.DecodeString(msg.D)
 	if err != nil {
 		return
 	}
-	if err := sess.SendTerminalBytes(raw, msg.NL); err != nil {
+	if err := shell.SendTerminalBytes(raw, msg.NL); err != nil {
 		slog.Debug("ws input", "err", err)
 	}
 }
@@ -190,15 +202,14 @@ func (c *uiWS) handleWSResize(msg *wsClientMsg) {
 	if sid == "" || msg.Rows < 1 || msg.Cols < 1 {
 		return
 	}
-	sess := c.h.Sessions.Get(sid)
-	if sess == nil {
+	shell := c.getTerminalShell(sid)
+	if shell == nil {
 		return
 	}
-	// 避免会话已结束或瞬时退出后，前端 fit/防抖仍发 resize 刷 debug 日志
-	if sess.Info().Status != api.SessionRunning {
+	if shell.Info().Status != api.SessionRunning {
 		return
 	}
-	if err := sess.ResizePty(msg.Rows, msg.Cols); err != nil {
+	if err := shell.ResizePty(msg.Rows, msg.Cols); err != nil {
 		slog.Debug("ws resize", "err", err)
 	}
 }
@@ -219,8 +230,8 @@ func (c *uiWS) sendTerminalDonePayload(payload []byte) {
 	}
 }
 
-func (c *uiWS) endWatch(sid string, sess *session.Session, rid int) {
-	sess.UnregisterReader(rid)
+func (c *uiWS) endWatch(sid string, shell session.TerminalShell, rid int) {
+	shell.UnregisterReader(rid)
 	c.mu.Lock()
 	if ent, ok := c.watch[sid]; ok && ent != nil && ent.rid == rid {
 		delete(c.watch, sid)
@@ -228,15 +239,21 @@ func (c *uiWS) endWatch(sid string, sess *session.Session, rid int) {
 	c.mu.Unlock()
 }
 
-func (c *uiWS) runWatch(ctx context.Context, sess *session.Session, sid string, rid int) {
-	defer c.endWatch(sid, sess, rid)
+func (c *uiWS) runWatch(ctx context.Context, shell session.TerminalShell, sid string, rid int) {
+	defer c.endWatch(sid, shell, rid)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0, terminalOutputChunkBytes)
+		out, err := shell.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0, terminalOutputChunkBytes)
 		if err != nil {
 			if ctx.Err() != nil {
+				return
+			}
+			// EOF: buffer closed (shell exited but session kept alive for multiplexing).
+			if err == io.EOF {
+				payload, _ := json.Marshal(map[string]string{"type": "terminal_done", "id": sid})
+				c.sendTerminalDonePayload(payload)
 				return
 			}
 			continue
@@ -249,8 +266,8 @@ func (c *uiWS) runWatch(ctx context.Context, sess *session.Session, sid string, 
 			}
 			c.sendTerminalPayload(payload)
 		}
-		info := sess.Info()
-		if info.Status != api.SessionRunning && !sess.HasMoreOutput(rid) {
+		info := shell.Info()
+		if (info.Status != api.SessionRunning || shell.IsBufferClosed()) && !shell.HasMoreOutput(rid) {
 			payload, err := json.Marshal(map[string]string{"type": "terminal_done", "id": sid})
 			if err == nil {
 				c.sendTerminalDonePayload(payload)
@@ -261,11 +278,11 @@ func (c *uiWS) runWatch(ctx context.Context, sess *session.Session, sid string, 
 }
 
 func (c *uiWS) addWatch(sid string) error {
-	sess := c.h.Sessions.Get(sid)
-	if sess == nil {
+	shell := c.getTerminalShell(sid)
+	if shell == nil {
 		return errWSSessionNotFound
 	}
-	rid, err := sess.RegisterReader()
+	rid, err := shell.RegisterReader()
 	if err != nil {
 		return err
 	}
@@ -276,7 +293,7 @@ func (c *uiWS) addWatch(sid string) error {
 	}
 	c.watch[sid] = &wsWatchEntry{cancel: cancel, rid: rid}
 	c.mu.Unlock()
-	go c.runWatch(ctx, sess, sid, rid)
+	go c.runWatch(ctx, shell, sid, rid)
 	return nil
 }
 

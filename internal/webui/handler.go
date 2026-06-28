@@ -51,6 +51,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	if h.Sessions != nil {
 		h.Sessions.SetSessionListListener(h.sessionHub().broadcast)
 	}
+	if h.ForwardMgr != nil {
+		h.ForwardMgr.SetOnChange(h.sessionHub().broadcast)
+	}
 	mux.HandleFunc("GET /api/connection-templates", h.handleConnectionTemplates)
 	mux.HandleFunc("GET /api/connections", h.handleListConnections)
 	mux.HandleFunc("GET /api/connections/{name}", h.handleGetConnection)
@@ -64,7 +67,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/output-range", h.handleSessionOutputRange)
 	mux.HandleFunc("POST /api/sessions/{id}/input", h.handleInput)
 	mux.HandleFunc("POST /api/sessions/{id}/resize", h.handleResize)
+	mux.HandleFunc("GET /api/sessions/{id}/child-shells", h.handleListChildShells)
 	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleTerminate)
+	mux.HandleFunc("POST /api/sessions/{id}/disconnect", h.handleDisconnect)
 	mux.HandleFunc("GET /api/forwards", h.handleListForwards)
 	mux.HandleFunc("POST /api/forwards", h.handleCreateForward)
 	mux.HandleFunc("DELETE /api/forwards/{id}", h.handleDeleteForward)
@@ -184,13 +189,14 @@ func (h *Handler) handleDeleteConnection(w http.ResponseWriter, r *http.Request)
 }
 
 type startSessionBody struct {
-	Command   string   `json:"command"`
-	Args      []string `json:"args"`
-	Mode      string   `json:"mode"`
-	Name      string   `json:"name"`
-	Rows      int      `json:"rows"`
-	Cols      int      `json:"cols"`
-	SSHConfig string   `json:"ssh_config"`
+	Command         string   `json:"command"`
+	Args            []string `json:"args"`
+	Mode            string   `json:"mode"`
+	Name            string   `json:"name"`
+	Rows            int      `json:"rows"`
+	Cols            int      `json:"cols"`
+	SSHConfig       string   `json:"ssh_config"`
+	ParentSessionID string   `json:"parent_session_id"`
 }
 
 func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +209,40 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "command is required when args are provided", http.StatusBadRequest)
 		return
 	}
+
+	// Child shell path: reuse parent's SSH connection.
+	if pid := strings.TrimSpace(body.ParentSessionID); pid != "" {
+		parent := h.Sessions.Get(pid)
+		if parent == nil {
+			http.Error(w, "parent session not found", http.StatusNotFound)
+			return
+		}
+		rows := body.Rows
+		if rows < 1 {
+			rows = 24
+		}
+		cols := body.Cols
+		if cols < 1 {
+			cols = 80
+		}
+		sessName := strings.TrimSpace(body.Name)
+		mode := body.Mode
+		if mode == "" {
+			mode = "pty"
+		}
+		cs, err := parent.CreateChildShell(body.Command, body.Args, mode == "pty", rows, cols, sessName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"session_id":        cs.ID,
+			"parent_session_id": pid,
+			"name":              cs.Name,
+		})
+		return
+	}
+
 	cfgName, ent, remote, err := h.resolveSSH(body.SSHConfig)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -268,8 +308,13 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
+	var shell session.TerminalShell
+	if sess := h.Sessions.Get(id); sess != nil {
+		shell = sess
+	} else if cs := h.Sessions.GetChildShell(id); cs != nil {
+		shell = cs
+	}
+	if shell == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -286,7 +331,7 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 	tail := strings.TrimSpace(r.URL.Query().Get("tail")) == "1"
 	var start int64
 	if tail {
-		total := sess.BufferLen()
+		total := shell.BufferLen()
 		t := total - int64(max)
 		if t < 0 {
 			t = 0
@@ -300,7 +345,7 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	data, total, err := sess.OutputByteRange(start, max)
+	data, total, err := shell.OutputByteRange(start, max)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -425,15 +470,53 @@ func (h *Handler) handleResize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) handleTerminate(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleListChildShells(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if h.Sessions.Get(id) == nil {
+	sess := h.Sessions.Get(id)
+	if sess == nil {
 		http.NotFound(w, r)
 		return
 	}
-	// Web UI「断开」期望立即结束，不走 SIGTERM 长等待（与 MCP 可配置优雅退出区分）
-	h.Sessions.Terminate(id, true, 0)
+	// Return all shells: the root shell (if alive) + child shells.
+	var shells []api.Session
+	if !sess.IsBufferClosed() {
+		shells = append(shells, sess.Info())
+	}
+	shells = append(shells, sess.ListChildShells()...)
+	if shells == nil {
+		shells = []api.Session{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shells": shells})
+}
+
+func (h *Handler) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess := h.Sessions.Get(id)
+	if sess == nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.Sessions.Terminate(id, true, 0) // close all shell channels
+	sess.Disconnect()                  // close SSH client, mark exited
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleTerminate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	// Check regular session first.
+	if sess := h.Sessions.Get(id); sess != nil {
+		sess.TerminateShellOnly()
+		h.Sessions.NotifyChange()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if cs := h.Sessions.GetChildShell(id); cs != nil {
+		cs.TerminateShell()
+		h.Sessions.NotifyChange()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -738,9 +821,21 @@ func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		offset, _ = strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
 	}
 
+	// Extract file content: parse multipart form if present, otherwise use raw body.
+	var reader io.Reader = r.Body
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err == nil {
+			if f, fh, err := r.FormFile("file"); err == nil {
+				reader = f
+				defer f.Close()
+				_ = fh // suppress unused warning
+			}
+		}
+	}
+
 	_, sshClient := h.getFileSession(sid, w)
 	if sshClient == nil {
-		// Internal / local filesystem — stream from request body.
+		// Internal / local filesystem.
 		flag := os.O_RDWR | os.O_CREATE
 		if offset <= 0 {
 			flag |= os.O_TRUNC
@@ -754,7 +849,7 @@ func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		if offset > 0 {
 			f.Seek(offset, io.SeekStart)
 		}
-		n, err := io.Copy(f, r.Body)
+		n, err := io.Copy(f, reader)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
@@ -771,7 +866,7 @@ func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer sftpCli.Close()
 
-	n, err := sftpCli.StreamWriteFrom(r.Body, path, offset)
+	n, err := sftpCli.StreamWriteFrom(reader, path, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return

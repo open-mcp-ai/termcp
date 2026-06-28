@@ -273,3 +273,9 @@ func (b *Buffer) Close() {
 	b.mu.Unlock()
 	b.cond.Broadcast()
 }
+
+func (b *Buffer) IsClosed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closed
+}

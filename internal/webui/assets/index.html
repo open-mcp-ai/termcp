@@ -238,7 +238,7 @@
     .shell-windows-container > * { pointer-events: auto; }
     .shell-window { position: fixed; width: 640px; height: 480px; min-width: 320px; min-height: 240px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); border: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; z-index: 10001; }
     .shell-window-header { display: flex; justify-content: space-between; align-items: stretch; gap: 0; padding: 0 8px 0 0; border-bottom: 1px solid #333; background: #2d2d2d; cursor: move; user-select: none; flex-shrink: 0; z-index: 2; min-height: 34px; flex-wrap: nowrap; }
-    .shell-window-title-cluster { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding-left: 8px; }
+    .shell-window-title-cluster { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 8px; }
     .shell-window-title {
       margin: 0;
       font-size: 13px;
@@ -263,6 +263,19 @@
       align-items: center;
       gap: 2px;
       min-width: 0;
+    }
+    .shell-header-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      align-self: center;
+      width: 18px;
+      height: 18px;
+      color: #8b949e;
+      margin-left: 6px;
+      margin-right: 2px;
+      line-height: 0;
     }
     .shell-terminal-ic {
       display: flex;
@@ -372,9 +385,132 @@
     .shell-tab-bar { display: flex; align-items: flex-end; gap: 0; flex-shrink: 0; padding-left: 8px; align-self: stretch; }
     .shell-tab-btn { width: 28px; height: 100%; padding: 0 4px; border: 1px solid transparent; border-radius: 4px 4px 0 0; background: transparent; color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color .12s, background .12s, border-color .12s; position: relative; bottom: -1px; }
     .shell-tab-btn:hover { color: #eee; background: rgba(255,255,255,.04); }
-    .shell-tab-btn.active { color: #e6edf3; background: #1e1e1e; border-color: #333; border-bottom-color: transparent; }
-    .shell-tab-btn:hover { color: #eee; background: rgba(255,255,255,.04); }
     .shell-tab-btn.active { color: #e6edf3; background: #1e1e1e; border-color: #333; border-bottom-color: #1e1e1e; }
+    /* Shell channel tabs (bottom of terminal area, one tab per multiplexed shell) */
+    .shell-channel-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-shrink: 0;
+      order: 10;
+      background: #252526;
+      border-top: 1px solid #333;
+      min-height: 28px;
+      max-height: 28px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: #484f58 transparent;
+    }
+    .shell-channel-tabs::-webkit-scrollbar { height: 3px; }
+    .shell-channel-tabs::-webkit-scrollbar-track { background: transparent; }
+    .shell-channel-tabs::-webkit-scrollbar-thumb { background: #484f58; border-radius: 2px; }
+    .shell-channel-tab {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      min-width: 50px;
+      max-width: 140px;
+      height: 24px;
+      border-right: 1px solid #333;
+      background: #2d2d2d;
+      color: #999;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      flex-shrink: 0;
+      user-select: none;
+      transition: background .1s, color .1s;
+    }
+    .shell-channel-tab:hover { background: #373737; color: #ccc; }
+    .shell-channel-tab.active { background: #1e1e1e; color: #e0e0e0; border-top: 2px solid #58a6ff; }
+    .shell-channel-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+    .shell-channel-tab-close {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      padding: 0;
+      border: none;
+      border-radius: 3px;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity .1s, color .1s, background .1s;
+    }
+    .shell-channel-tab:hover .shell-channel-tab-close,
+    .shell-channel-tab.active .shell-channel-tab-close { opacity: 1; }
+    .shell-channel-tab-close:hover { color: #fff; background: rgba(207,34,46,.6); }
+    .shell-channel-tab-add {
+      flex-shrink: 0;
+      width: 26px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      border-left: 1px solid #333;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: color .1s, background .1s;
+    }
+    .shell-channel-tab-add:hover { color: #fff; background: rgba(255,255,255,.06); }
+    .shell-channel-tab-add:active { background: rgba(255,255,255,.1); }
+    /* Channel body fills most of the terminal area */
+    .shell-channel-body {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .shell-channel-instance {
+      position: absolute;
+      inset: 0;
+      display: none;
+    }
+    .shell-channel-instance.active { display: block; }
+    .shell-channel-instance .xterm { height: 100%; }
+    /* Empty state when no shells */
+    .shell-channel-empty {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: #8b949e;
+      font-size: 12px;
+      min-height: 100px;
+    }
+    .shell-channel-empty.show { display: flex; }
+    .shell-channel-empty button {
+      padding: 4px 12px;
+      border: 1px solid #484f58;
+      border-radius: 4px;
+      background: #2d2d2d;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .shell-channel-empty button:hover { background: #3d3d3d; border-color: #666; }
+
     @media (max-width: 768px) {
       .shell-window { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-width: 0; max-height: calc(100dvh - 16px); }
     }
@@ -740,10 +876,12 @@
     win._termcpMouseToFrontBound = true;
     win.addEventListener('mousedown', function (e) {
       bringShellWindowToFront(win);
-      if (!win._term) return;
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      var t = ch ? ch.term : win._term;
+      if (!t) return;
       if (e.target.closest('.shell-window-header')) return;
       if (!e.target.closest('.xterm')) {
-        try { win._term.focus(); } catch (e2) {}
+        try { t.focus(); } catch (e2) {}
       }
     });
   }
@@ -768,13 +906,23 @@
     return null;
   }
 
+  function findShellWindowByChannelSid(sessionId) {
+    var c = shellWindowsEl();
+    if (!c) return null;
+    var wins = c.querySelectorAll('.shell-window');
+    for (var i = 0; i < wins.length; i++) {
+      if (wins[i]._channels && wins[i]._channels[sessionId]) return wins[i];
+    }
+    return null;
+  }
+
   function openOrFocusShellWindow(connLabel, sessionId, clickEvent) {
     var ex = getShellWindowBySid(sessionId);
     if (ex) {
       bringShellWindowToFront(ex);
-      if (ex._term) {
-        try { ex._term.focus(); } catch (e) {}
-      }
+      var ch = ex._activeChannelSid && ex._channels && ex._channels[ex._activeChannelSid];
+      var t = ch ? ch.term : ex._term;
+      if (t) { try { t.focus(); } catch (e) {} }
       return;
     }
     openShellWindow(connLabel, sessionId, clickEvent);
@@ -1130,7 +1278,10 @@
       sx.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
-        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).catch(function () {});
+        // First terminate (close channel), then disconnect (close SSH client).
+        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).then(function() {
+          return fetch(sessionAPI(s.id, '/disconnect'), { method: 'POST' });
+        }).catch(function () {});
         var w = getShellWindowBySid(s.id);
         if (w) closeShellWindow(w);
       };
@@ -1160,6 +1311,38 @@
     window._lastSessionsSnapshot = sessions;
     renderSessionGrid(sessions, '');
     loadForwards();
+    // Refresh tabs in open windows (child shells may have changed).
+    refreshAllWindowTabs();
+  }
+
+  function refreshAllWindowTabs() {
+    var c = shellWindowsEl();
+    if (!c) return;
+    var wins = c.querySelectorAll('.shell-window');
+    for (var i = 0; i < wins.length; i++) {
+      var w = wins[i];
+      if (!w._parentSid) continue;
+      fetch(sessionAPI(w._parentSid, '/child-shells'))
+        .then(function(r) { if (!r.ok) return; return r.json(); })
+        .then(function(j) {
+          if (!j || !j.shells) return;
+          syncWindowTabs(w, j.shells);
+        }).catch(function() {});
+    }
+  }
+
+  function syncWindowTabs(win, shells) {
+    var running = shells.filter(function(s) { return s.status === 'running'; });
+    var existing = win._channels || {};
+    // Add new running shells that don't have a tab yet.
+    running.forEach(function(s) {
+      if (!existing[s.id]) createChannelTab(win, s.id);
+    });
+    // Remove tabs for shells that are no longer running.
+    Object.keys(existing).forEach(function(sid) {
+      var found = running.some(function(s) { return s.id === sid; });
+      if (!found && existing[sid]) closeChannelTab(win, sid);
+    });
   }
 
   function uiWebSocketURL() {
@@ -1178,6 +1361,8 @@
    * Do not forward onData until the user interacts in the terminal (mousedown / keydown / paste / compositionend).
    */
   function setupShellOnDataUserGate(win, term) {
+    // Per-window gate: once any terminal has been interacted with, all are unlocked.
+    if (win._shellUserInputReady) return;
     win._shellUserInputReady = false;
     var el = term.element;
     if (!el) return;
@@ -1265,7 +1450,14 @@
     var wins = c.querySelectorAll('.shell-window');
     for (var i = 0; i < wins.length; i++) {
       var w = wins[i];
-      if (w._sid && !w._streamDone) sendTerminalWatch(w._sid, true);
+      if (w._channels) {
+        Object.keys(w._channels).forEach(function(sid) {
+          var ch = w._channels[sid];
+          if (!ch.streamDone) sendTerminalWatch(sid, true);
+        });
+      } else if (w._sid && !w._streamDone) {
+        sendTerminalWatch(w._sid, true);
+      }
     }
   }
 
@@ -1297,26 +1489,49 @@
         if (j.type === 'sessions') applySessionsSnapshot(j.sessions || []);
         else if (j.type === 'terminal') {
           var win = getShellWindowBySid(j.id);
-          if (win && win._term && !win._streamDone) {
-            var bytes = b64ToBytes(j.d);
-            var tm = win._term;
-            tm.write(bytes, function () {
-              requestAnimationFrame(function () {
-                shellTermScrollToBottomIfStuck(tm, true);
+          if (!win) win = findShellWindowByChannelSid(j.id);
+          if (win) {
+            var ch = win._channels && win._channels[j.id];
+            var tm = ch ? ch.term : win._term;
+            var done = ch ? ch.streamDone : win._streamDone;
+            if (tm && !done) {
+              var bytes = b64ToBytes(j.d);
+              tm.write(bytes, function () {
+                requestAnimationFrame(function () {
+                  shellTermScrollToBottomIfStuck(tm, true);
+                });
               });
-            });
+            }
           }
         } else if (j.type === 'terminal_done') {
           var win2 = getShellWindowBySid(j.id);
-          if (win2 && !win2._streamDone) {
-            win2._streamDone = true;
-            try {
-              win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+          if (!win2) win2 = findShellWindowByChannelSid(j.id);
+          if (win2) {
+            var ch2 = win2._channels && win2._channels[j.id];
+            if (ch2) {
+              if (!ch2.streamDone) {
+                ch2.streamDone = true;
+                try {
+                  ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+                    shellTermScrollToBottomIfStuck(ch2.term, true);
+                    closeChannelTab(win2, j.id);
+                  });
+                } catch (e2) {
+                  try { ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
+                  shellTermScrollToBottomIfStuck(ch2.term, true);
+                  closeChannelTab(win2, j.id);
+                }
+              }
+            } else if (!win2._streamDone) {
+              win2._streamDone = true;
+              try {
+                win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+                  shellTermScrollToBottomIfStuck(win2._term, true);
+                });
+              } catch (e2) {
+                try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
                 shellTermScrollToBottomIfStuck(win2._term, true);
-              });
-            } catch (e2) {
-              try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
-              shellTermScrollToBottomIfStuck(win2._term, true);
+              }
             }
           }
         }
@@ -1354,13 +1569,30 @@
   }
 
   function closeShellWindow(win) {
+    // Remember active tab for reconnect.
+    if (win._parentSid && win._activeChannelSid) {
+      if (!window._shellLastActive) window._shellLastActive = {};
+      window._shellLastActive[win._parentSid] = win._activeChannelSid;
+    }
     win._inputClosed = true;
     if (win._connectAbort) {
       try { win._connectAbort.abort(); } catch (e) {}
       win._connectAbort = null;
     }
+    // Clean up channel tabs
+    var usedChannels = false;
+    if (win._channels) {
+      Object.keys(win._channels).forEach(function(sid) {
+        var ch = win._channels[sid];
+        sendTerminalWatch(sid, false);
+        if (ch.fitRo && ch.instEl) { try { ch.fitRo.unobserve(ch.instEl); } catch(e) {} }
+        if (ch.term) { try { ch.term.dispose(); } catch(e) {} }
+        if (sid === win._sid) usedChannels = true;
+      });
+      win._channels = {};
+    }
     if (win._sid) {
-      sendTerminalWatch(win._sid, false);
+      if (!usedChannels) sendTerminalWatch(win._sid, false);
       if (window._pendingTerminalWatch && window._pendingTerminalWatch[win._sid]) {
         delete window._pendingTerminalWatch[win._sid];
       }
@@ -1373,11 +1605,6 @@
       try { win._shellInputUnlockAC.abort(); } catch (e) {}
       win._shellInputUnlockAC = null;
     }
-    if (win._fitRo && win._shellTermEl) {
-      try { win._fitRo.unobserve(win._shellTermEl); } catch (e) {}
-      win._fitRo = null;
-    }
-    if (win._term) { try { win._term.dispose(); } catch (e) {} win._term = null; }
     win.remove();
   }
 
@@ -1423,7 +1650,9 @@
       var h = Math.max(240, startH + e.clientY - startY);
       win.style.width = w + 'px';
       win.style.height = h + 'px';
-      if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      if (ch && ch.term && ch.instEl) fitShellTerminal(ch.term, ch.instEl, win, false);
+      else if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
     }
     function onUp() {
       if (!resizing) return;
@@ -1451,18 +1680,27 @@
     });
   }
 
-  function postResize(win) {
-    if (!win._sid || !win._term || win._streamDone) return;
-    wsUiSend({ type: 'resize', id: win._sid, rows: win._term.rows, cols: win._term.cols });
+  function postResize(win, optSid) {
+    var sid = optSid || win._activeChannelSid || win._sid;
+    if (!sid) return;
+    var ch = win._channels && win._channels[sid];
+    var term = ch ? ch.term : win._term;
+    var done = ch ? ch.streamDone : win._streamDone;
+    if (!term || done) return;
+    wsUiSend({ type: 'resize', id: sid, rows: term.rows, cols: term.cols });
   }
 
   /** Debounced PTY sync on container resize (local fit + optional remote resize via WebSocket). */
-  function scheduleShellRemoteResize(win) {
-    if (!win || !win._sid || win._streamDone) return;
+  function scheduleShellRemoteResize(win, term, termEl, optSid) {
+    var sid = optSid || win._activeChannelSid || win._sid;
+    if (!win || !sid) return;
+    var ch = win._channels && win._channels[sid];
+    var done = ch ? ch.streamDone : win._streamDone;
+    if (done) return;
     if (win._shellResizeSyncTimer) clearRetryTimer(win._shellResizeSyncTimer);
     win._shellResizeSyncTimer = setTimeout(function () {
       win._shellResizeSyncTimer = null;
-      postResize(win);
+      postResize(win, sid);
     }, 200);
   }
 
@@ -1507,19 +1745,6 @@
     return changed;
   }
 
-  /** After history is loaded: observe container resizes (not registered during bootstrap to avoid fit/resize during term.write). */
-  function attachShellTerminalResizeObserver(win, term, termEl) {
-    if (win._fitRo || !termEl) return;
-    var ro = new ResizeObserver(function () {
-      if (win.classList.contains('shell-window-collapsed')) return;
-      var tw = win.querySelector('.shell-terminal-wrap');
-      // Only fit+sync when terminal is visible; hidden tabs skip resize.
-      if (!tw || tw.style.display === 'none') return;
-      fitShellTerminal(term, termEl, win, true);
-    });
-    ro.observe(termEl);
-    win._fitRo = ro;
-  }
 
   /** First wheel (capture) or first viewport scroll: syncScrollArea — cold start can desync native scroll from buffer. */
   function attachXtermViewportFirstInteractionSync(term) {
@@ -1716,8 +1941,267 @@
     return null;
   }
 
-  /** Mount xterm, observers, and events on existing shell DOM (same as openShellWindow tail). */
-  function mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent) {
+  // ---- Shell channel tabs (SSH multiplexing) ----
+
+  /** Get sibling tab next to the given sessionId after removal (or null). */
+  function _channelNeighbor(win, sid) {
+    var kids = win.querySelector('.shell-channel-tabs').querySelectorAll('.shell-channel-tab');
+    var found = false;
+    var prev = null;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].getAttribute('data-chsid') === sid) { found = true; continue; }
+      if (found) return kids[i].getAttribute('data-chsid');
+      prev = kids[i].getAttribute('data-chsid');
+    }
+    return prev || null;
+  }
+
+  /** Create a channel tab + xterm instance for sessionId. */
+  function createChannelTab(win, sessionId, optLabel) {
+    if (!win._channels) { win._channels = {}; win._channelCount = 0; win._channelSeq = 0; }
+    if (win._channels[sessionId]) { switchChannelTab(win, sessionId); return; }
+    var label = optLabel || ('shell-' + (win._channelSeq + 1));
+
+    var tabsBar = win.querySelector('.shell-channel-tabs');
+    var body = win.querySelector('.shell-channel-body');
+    var addBtn = tabsBar ? tabsBar.querySelector('.shell-channel-tab-add') : null;
+    var emptyEl = win.querySelector('.shell-channel-empty');
+
+    // Hide empty state, restore body
+    if (emptyEl) emptyEl.classList.remove('show');
+    if (body) body.style.display = '';
+
+    // Create tab
+    var tab = document.createElement('div');
+    tab.className = 'shell-channel-tab active';
+    tab.setAttribute('data-chsid', sessionId);
+    tab.innerHTML = '<span class="shell-channel-tab-label">' + escapeHtml(label || 'shell') + '</span>' +
+      '<button type="button" class="shell-channel-tab-close" title="Close shell">&times;</button>';
+    if (addBtn) tabsBar.insertBefore(tab, addBtn);
+
+    // Deactivate all other tabs
+    tabsBar.querySelectorAll('.shell-channel-tab').forEach(function(t) {
+      if (t !== tab) t.classList.remove('active');
+    });
+
+    // Create instance
+    var inst = document.createElement('div');
+    inst.className = 'shell-channel-instance active';
+    inst.setAttribute('data-chsid', sessionId);
+    body.appendChild(inst);
+    // Hide other instances
+    body.querySelectorAll('.shell-channel-instance').forEach(function(el) {
+      if (el !== inst) el.classList.remove('active');
+    });
+
+    // Create xterm
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'Consolas, Monaco, monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        cursorAccent: '#1e1e1e',
+        selectionBackground: '#264f7844'
+      },
+      scrollback: 100000
+    });
+    // Hide until first fit to prevent garbled flash.
+    inst.style.visibility = 'hidden';
+    term.open(inst);
+    attachXtermViewportScrollbarGuard(term);
+    attachTermBrowserChordShield(term);
+
+    // Store channel state
+    win._channels[sessionId] = {
+      term: term,
+      instEl: inst,
+      tabEl: tab,
+      streamDone: false,
+      fitRo: null
+    };
+    win._activeChannelSid = sessionId;
+    win._channelCount += 1;
+    win._channelSeq += 1;
+
+    // Deactivate previous tabs
+    Object.keys(win._channels).forEach(function(sid) {
+      if (sid !== sessionId && win._channels[sid].tabEl) {
+        win._channels[sid].tabEl.classList.remove('active');
+      }
+    });
+
+    // Setup input gate
+    setupShellOnDataUserGate(win, term);
+
+    // onData
+    term.onData(function (data) {
+      if (win._inputClosed) return;
+      var ch = win._channels[sessionId];
+      if (!ch) return;
+      if (ch.streamDone) {
+        if (data === '\r' || data === '\n' || data === '\r\n') { closeChannelTab(win, sessionId); }
+        return;
+      }
+      if (!win._shellUserInputReady) return;
+      if (!window._uiWS || window._uiWS.readyState !== 1) return;
+      try {
+        window._uiWS.send(JSON.stringify({ type: 'input', id: sessionId, d: strToUtf8B64(data), nl: false }));
+      } catch (e) {}
+    });
+
+    // Bootstrap history + watch. Show after first fit to prevent garbled flash.
+    try { fitShellTerminal(term, inst, win, false); } catch (eFit) {}
+    inst.style.visibility = '';
+    bootstrapShellFullHistory(sessionId, term).finally(function () {
+      queueTerminalWatch(sessionId);
+      try {
+        var ro = attachShellTerminalResizeObserverForChannel(win, term, inst, sessionId);
+        win._channels[sessionId].fitRo = ro;
+        shellTermSyncViewportAfterBufferChange(term, inst, win);
+      } catch (eBoot) {}
+    });
+
+    // Tab click → switch
+    tab.addEventListener('click', function(e) {
+      if (e.target.closest('.shell-channel-tab-close')) return;
+      switchChannelTab(win, sessionId);
+    });
+
+    // Close button
+    var closeBtn = tab.querySelector('.shell-channel-tab-close');
+    closeBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeChannelTab(win, sessionId);
+    });
+
+    // Focus
+    requestAnimationFrame(function() { try { term.focus(); } catch(e) {} });
+
+    return term;
+  }
+
+  /** Switch active channel tab. */
+  function switchChannelTab(win, sessionId) {
+    var ch = win._channels && win._channels[sessionId];
+    if (!ch) return;
+    if (win._activeChannelSid === sessionId) return;
+    win._activeChannelSid = sessionId;
+    win._shellUserInputReady = true;  // explicit switch = user intends to type
+
+    // Tabs
+    var tabsBar = win.querySelector('.shell-channel-tabs');
+    if (tabsBar) {
+      tabsBar.querySelectorAll('.shell-channel-tab').forEach(function(t) {
+        t.classList.toggle('active', t.getAttribute('data-chsid') === sessionId);
+      });
+    }
+    // Instances
+    var body = win.querySelector('.shell-channel-body');
+    if (body) {
+      body.querySelectorAll('.shell-channel-instance').forEach(function(el) {
+        el.classList.toggle('active', el.getAttribute('data-chsid') === sessionId);
+      });
+    }
+
+    // Fit + focus
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        fitShellTerminal(ch.term, ch.instEl, win, true);
+        try { ch.term.focus(); } catch(e) {}
+      });
+    });
+  }
+
+  /** Close a channel tab. Terminates the shell process and cleans up. */
+  function closeChannelTab(win, sessionId) {
+    var ch = win._channels && win._channels[sessionId];
+    if (!ch) return;
+
+    ch.streamDone = true;
+
+    // Unsubscribe
+    sendTerminalWatch(sessionId, false);
+
+    // Send terminate request (fire-and-forget) — child shells only close their channel.
+    fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/terminate', { method: 'POST' }).catch(function() {});
+
+    // Dispose xterm
+    try {
+      if (ch.fitRo) { ch.fitRo.unobserve(ch.instEl); }
+    } catch(e) {}
+    try { ch.term.dispose(); } catch(e) {}
+
+    // Remove DOM
+    if (ch.tabEl && ch.tabEl.parentNode) ch.tabEl.parentNode.removeChild(ch.tabEl);
+    if (ch.instEl && ch.instEl.parentNode) ch.instEl.parentNode.removeChild(ch.instEl);
+
+    // Update state
+    delete win._channels[sessionId];
+    win._channelCount = Math.max(0, win._channelCount - 1);
+    if (win._channelCount === 0) win._channelSeq = 0;
+
+    // Switch or show empty
+    if (win._activeChannelSid === sessionId) {
+      var neighbor = _channelNeighbor(win, sessionId);
+      if (neighbor && win._channels[neighbor]) {
+        switchChannelTab(win, neighbor);
+      } else if (win._channelCount === 0) {
+        win._activeChannelSid = null;
+        _showChannelEmpty(win, true);
+      }
+    }
+  }
+
+  function _showChannelEmpty(win, show) {
+    var el = win.querySelector('.shell-channel-empty');
+    if (el) el.classList.toggle('show', !!show);
+    var body = win.querySelector('.shell-channel-body');
+    if (body) body.style.display = show ? 'none' : '';
+  }
+
+  /** "+" button / empty-state click handler. */
+  function addChannelClick(win) {
+    if (!win._parentSid) return;
+    fetch('/api/sessions/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_session_id: win._parentSid, rows: 24, cols: 80 })
+    }).then(function(r) {
+      if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+      return r.json();
+    }).then(function(j) {
+      createChannelTab(win, j.session_id);
+    }).catch(function(err) { console.error('add channel failed', err); });
+  }
+
+  /** Wire up channel tab bar events (called once per window). */
+  function _wireChannelTabBar(win) {
+    var addBtn = win.querySelector('.shell-channel-tab-add');
+    if (addBtn && !addBtn._chWired) {
+      addBtn._chWired = true;
+      addBtn.addEventListener('click', function() { addChannelClick(win); });
+    }
+    var emptyBtn = win.querySelector('.shell-channel-empty-add');
+    if (emptyBtn && !emptyBtn._chWired) {
+      emptyBtn._chWired = true;
+      emptyBtn.addEventListener('click', function() { addChannelClick(win); });
+    }
+  }
+
+  /** ResizeObserver wrapper that tracks which channel SID to resize. */
+  function attachShellTerminalResizeObserverForChannel(win, term, termEl, sessionId) {
+    var ro = new ResizeObserver(function() {
+      scheduleShellRemoteResize(win, term, termEl, sessionId);
+    });
+    ro.observe(termEl);
+    return ro;
+  }
+
+  /** Initialize shell window UI (header buttons, drag, resize, tab switching) — no xterm. */
+  function _initShellWindowUI(win, connLabel, sessionId, clickEvent) {
     var header = win.querySelector('.shell-window-header');
     var collapseBtn = win.querySelector('.shell-window-collapse-btn');
     var closeBtn = win.querySelector('.close-btn');
@@ -1736,51 +2220,7 @@
 
     bindShellWindowCloseButton(win, closeBtn);
 
-    var term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: 'Consolas, Monaco, monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: '#1e1e1e',
-        selectionBackground: '#264f7844'
-      },
-      scrollback: 100000
-    });
-    term.open(termEl);
-    attachXtermViewportScrollbarGuard(term);
-    attachTermBrowserChordShield(term);
-    win._term = term;
-    win._shellTermEl = termEl;
-    setupShellOnDataUserGate(win, term);
-
-    win._streamDone = false;
-    try { fitShellTerminal(term, termEl, win, false); } catch (eFit0) {}
-    bootstrapShellFullHistory(sessionId, term).finally(function () {
-      queueTerminalWatch(sessionId);
-      try {
-        attachShellTerminalResizeObserver(win, term, termEl);
-        shellTermSyncViewportAfterBufferChange(term, termEl, win);
-      } catch (eBoot) {}
-    });
-
     win._inputClosed = false;
-    term.onData(function (data) {
-      if (win._inputClosed) return;
-      if (win._streamDone) {
-        if (data === '\r' || data === '\n' || data === '\r\n') {
-          closeShellWindow(win);
-        }
-        return;
-      }
-      if (!win._shellUserInputReady) return;
-      if (!window._uiWS || window._uiWS.readyState !== 1) return;
-      try {
-        window._uiWS.send(JSON.stringify({ type: 'input', id: sessionId, d: strToUtf8B64(data), nl: false }));
-      } catch (e) {}
-    });
 
     collapseBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     collapseBtn.addEventListener('click', function (e) {
@@ -1803,14 +2243,15 @@
       }
       collapseBtn.title = win.classList.contains('shell-window-collapsed') ? 'Expand' : 'Collapse';
       if (!win.classList.contains('shell-window-collapsed')) {
-        fitShellTerminal(term, termEl, win, true);
+        var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+        if (ch && ch.term && ch.instEl) fitShellTerminal(ch.term, ch.instEl, win, true);
       }
     });
 
     setupShellWindowDrag(win, header);
     setupShellWindowResize(win);
 
-    // --- Shell tab switching ---
+    // --- Header tab switching (term / fw / file panels) ---
     var tabBtns = win.querySelectorAll('.shell-tab-btn');
     var terminalWrap = win.querySelector('.shell-terminal-wrap');
     var tabPanels = win.querySelectorAll('.shell-tab-panel');
@@ -1819,20 +2260,19 @@
         e.preventDefault(); e.stopPropagation();
         var tab = this.getAttribute('data-stab');
         tabBtns.forEach(function(b) { b.classList.toggle('active', b === btn); });
-        // Show/hide terminal
         if (terminalWrap) terminalWrap.style.display = tab === 'term' ? '' : 'none';
-        // Show/hide tab panels
         tabPanels.forEach(function(p) { p.style.display = p.getAttribute('data-stab') === tab ? 'flex' : 'none'; });
-        // Fit terminal when switching back — double rAF ensures layout is complete
-        if (tab === 'term' && term) {
-          requestAnimationFrame(function() {
+        if (tab === 'term') {
+          var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+          if (ch && ch.term && ch.instEl) {
             requestAnimationFrame(function() {
-              fitShellTerminal(term, termEl, win, true);
-              try { term.focus(); } catch(e2) {}
+              requestAnimationFrame(function() {
+                fitShellTerminal(ch.term, ch.instEl, win, true);
+                try { ch.term.focus(); } catch(e2) {}
+              });
             });
-          });
+          }
         }
-        // Refresh forwardings list when switching to it
         if (tab === 'fw') refreshShellFwList(win);
       });
     });
@@ -1853,6 +2293,20 @@
         if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
         document.getElementById('fw-direction').dispatchEvent(new Event('change'));
         showModal('modal-forward');
+      });
+    }
+    var fwRefreshBtn = win.querySelector('.shell-fw-refresh-btn');
+    if (fwRefreshBtn) {
+      fwRefreshBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var svg = this.querySelector('svg');
+        if (svg) {
+          svg.style.transition = 'transform 0.4s ease';
+          svg.style.transform = 'rotate(360deg)';
+          setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 420);
+        }
+        refreshShellFwList(win);
+        loadForwards();
       });
     }
 
@@ -2072,7 +2526,8 @@
     }
 
     requestAnimationFrame(function () {
-      try { term.focus(); } catch (e1) {}
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      if (ch && ch.term) try { ch.term.focus(); } catch (e1) {}
     });
   }
 
@@ -2081,7 +2536,8 @@
     var SHELL_WINDOW_PANELS_HTML =       '<div class="shell-tab-panel" data-stab="fw" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:12px 16px">' +
         '<div style="display:flex;align-items:center;margin-bottom:10px;flex-shrink:0">' +
         '<span style="font-size:0.82rem;font-weight:600;color:#e6edf3">Port Forwardings</span>' +
-        '<button type="button" class="shell-fw-add-btn" title="Add forwarding" style="width:24px;height:24px;margin-left:auto;padding:0;border:1px solid #2ea043;border-radius:4px;background:transparent;color:#3fb950;cursor:pointer;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 3v8M3 7h8"/></svg></button>' +
+        '<button type="button" class="shell-fw-refresh-btn" title="Refresh" style="width:24px;height:24px;margin-left:auto;padding:0;border:1px solid #484f58;border-radius:4px;background:transparent;color:#888;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-right:4px;transition:color .12s,background .12s,border-color .12s" onmouseover="this.style.color=\'#ccc\';this.style.borderColor=\'#666\'" onmouseout="this.style.color=\'#888\';this.style.borderColor=\'#484f58\'" onmousedown="this.style.background=\'rgba(255,255,255,.06)\'" onmouseup="this.style.background=\'transparent\'"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 7A5.5 5.5 0 0111.3 3.8M12.5 7A5.5 5.5 0 012.7 10.2"/><path d="M12.5 1.5v2.5H10M1.5 12.5v-2.5H4"/></svg></button>' +
+        '<button type="button" class="shell-fw-add-btn" title="Add forwarding" style="width:24px;height:24px;padding:0;border:1px solid #2ea043;border-radius:4px;background:transparent;color:#3fb950;cursor:pointer;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 3v8M3 7h8"/></svg></button>' +
         '</div>' +
         '<div class="shell-fw-list" style="flex:1;min-height:0;overflow:auto;font-size:0.78rem;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;background:#0d1117">Loading...</div>' +
       '</div>' +
@@ -2114,11 +2570,7 @@
 
         win.innerHTML =
       '<div class="shell-window-header">' +
-        '<div class="shell-tab-bar">' +
-          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
-          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
-          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
-          '</div>' +
+        '<span class="shell-header-icon"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14.5h6M8 11.5v3"/></svg></span>' +
         '<div class="shell-window-title-cluster">' +
         '<h3 class="shell-window-title">' +
         '<span class="sw-conn">' + escapeHtml(connName) + '</span>' +
@@ -2130,6 +2582,11 @@
         '</span>' +
         '</h3>' +
         '</div>' +
+        '<div class="shell-tab-bar">' +
+          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
+          '</div>' +
         '<div class="shell-window-header-btns">' +
           '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
@@ -2141,12 +2598,21 @@
         '</div>' +
       '</div>' +
       '<div class="shell-window-content"><div class="shell-terminal-wrap">' +
-        '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>Connecting <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
+        '<div class="shell-channel-body">' +
+          '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>Connecting <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
+        '</div>' +
+        '<div class="shell-channel-tabs">' +
+          '<button type="button" class="shell-channel-tab-add" title="New shell channel">+</button>' +
+        '</div>' +
+        '<div class="shell-channel-empty">' +
+          '<span>No shell channels</span>' +
+          '<button type="button" class="shell-channel-empty-add">+ New Shell</button>' +
+        '</div>' +
       '</div>' +
 SHELL_WINDOW_PANELS_HTML +
       '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
-    var termEl = win.querySelector('.shell-terminal-wrap');
+    var termEl = win.querySelector('.shell-channel-body');
     var header = win.querySelector('.shell-window-header');
     var closeBtn = win.querySelector('.close-btn');
     positionShellWindowFromClick(win, clickEvent);
@@ -2168,11 +2634,14 @@ SHELL_WINDOW_PANELS_HTML +
     win._pendingConnName = '';
 
     win._sid = sessionId;
+    win._parentSid = sessionId;
     var sidEl = win.querySelector('.shell-sid-copy .sid');
     if (sidEl) sidEl.textContent = stripSessionPrefix(sessionId);
     var pend = win.querySelector('.shell-pending');
     if (pend) pend.remove();
-    mountXtermInShellWindow(win, win.querySelector('.shell-terminal-wrap'), connLabel, sessionId, clickEvent);
+    _wireChannelTabBar(win);
+    _initShellWindowUI(win, connLabel, sessionId, clickEvent);
+    createChannelTab(win, sessionId);
   }
 
   function openShellWindow(connLabel, sessionId, clickEvent) {
@@ -2191,11 +2660,7 @@ SHELL_WINDOW_PANELS_HTML +
 
         win.innerHTML =
       '<div class="shell-window-header">' +
-        '<div class="shell-tab-bar">' +
-          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
-          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
-          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
-          '</div>' +
+        '<span class="shell-header-icon"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14.5h6M8 11.5v3"/></svg></span>' +
         '<div class="shell-window-title-cluster">' +
         '<h3 class="shell-window-title">' +
         (connLabel ? ('<span class="sw-conn">' + escapeHtml(connLabel) + '</span>') : '') +
@@ -2207,6 +2672,11 @@ SHELL_WINDOW_PANELS_HTML +
         '</span>' +
         '</h3>' +
         '</div>' +
+        '<div class="shell-tab-bar">' +
+          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
+          '</div>' +
         '<div class="shell-window-header-btns">' +
           '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
@@ -2217,16 +2687,41 @@ SHELL_WINDOW_PANELS_HTML +
           '</button>' +
         '</div>' +
       '</div>' +
-      '<div class="shell-window-content"><div class="shell-terminal-wrap"></div>' +
+      '<div class="shell-window-content"><div class="shell-terminal-wrap">' +
+        '<div class="shell-channel-body"></div>' +
+        '<div class="shell-channel-tabs">' +
+          '<button type="button" class="shell-channel-tab-add" title="New shell channel">+</button>' +
+        '</div>' +
+        '<div class="shell-channel-empty">' +
+          '<span>No shell channels</span>' +
+          '<button type="button" class="shell-channel-empty-add">+ New Shell</button>' +
+        '</div>' +
+      '</div>' +
 SHELL_WINDOW_PANELS_HTML +
       '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
-    var termEl = win.querySelector('.shell-terminal-wrap');
     positionShellWindowFromClick(win, clickEvent);
     /* First mount only — never re-append this node to reorder; use bringShellWindowToFront (z-index). */
     container.appendChild(win);
     bringShellWindowToFront(win);
-    mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent);
+    win._parentSid = sessionId;
+    _wireChannelTabBar(win);
+    _initShellWindowUI(win, connLabel, sessionId, clickEvent);
+
+    // Restore all shells (root + children). If none running, auto-create one.
+    fetch(sessionAPI(sessionId, '/child-shells'))
+      .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
+      .then(function(shells) {
+        var running = shells.filter(function(s) { return s.status === 'running'; });
+        if (running.length > 0) {
+          running.forEach(function(s) { createChannelTab(win, s.id); });
+          // Restore last active tab.
+          var lastActive = window._shellLastActive && window._shellLastActive[sessionId];
+          if (lastActive && win._channels[lastActive]) switchChannelTab(win, lastActive);
+        } else {
+          _showChannelEmpty(win, true);
+        }
+      }).catch(function() { addChannelClick(win); });
   }
 
   /** POST /api/sessions/start then open shell window. command/mode may be '' to use server defaults (login shell, profile default_mode). */

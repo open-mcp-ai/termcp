@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -43,6 +44,7 @@ type Server struct {
 	msgMgr       *message.Manager
 	sshConfigs   *sshconfig.Store
 	forwardMgr   *forward.ForwardManager
+	baseURL      string // http://host:port, set from Start()
 }
 
 // New creates and configures the MCP server with all tools registered.
@@ -69,6 +71,16 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithNumber("cols", mcpgo.Description("Initial PTY width"), mcpgo.DefaultNumber(80)),
 		mcpgo.WithString("ssh_config", mcpgo.Description("Profile name: subdirectory under data-dir/ssh_configs. Empty or omitted means \"internal\" (loopback on termcp host).")),
 	), withLogging("start_session", s.handleStartSession))
+
+	mcpServer.AddTool(mcpgo.NewTool("start_subshell",
+		mcpgo.WithDescription("Open a new shell channel on an existing SSH connection. The parent session's SSH transport is reused — no new TCP connection or handshake. Returns the child shell ID which can be used with send_input/read_output/etc. just like a regular session ID."),
+		mcpgo.WithString("parent_session_id", mcpgo.Required(), mcpgo.Description("Parent session ID (must be a remote SSH session)")),
+		mcpgo.WithString("name", mcpgo.Description("Optional display name for this shell tab")),
+		mcpgo.WithString("command", mcpgo.Description("Executable; leave empty for login shell")),
+		mcpgo.WithString("mode", mcpgo.Description("pty (default) or pipe"), mcpgo.DefaultString("pty")),
+		mcpgo.WithNumber("rows", mcpgo.Description("PTY rows"), mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.Description("PTY cols"), mcpgo.DefaultNumber(80)),
+	), withLogging("start_subshell", s.handleStartSubShell))
 
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
 		mcpgo.WithDescription("Write bytes to the session’s stdin only; does not wait for or return output. Use read_output (same reader_id) afterward. For PTY sessions, press_enter appends a newline so the shell executes the line. Terminal control bytes: server rule 7."),
@@ -244,6 +256,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote directory path to create")),
 	), withLogging("file_mkdir", s.handleFileMakeDir))
 
+	mcpServer.AddTool(mcpgo.NewTool("get_file_urls",
+		mcpgo.WithDescription("Get HTTP download/upload URLs for a remote file path under a session. Use these URLs for direct curl/wget/browser access."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+	), withLogging("get_file_urls", s.handleGetFileURLs))
+
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)
 	// Streamable HTTP (MCP spec): mount at /stream for clients such as Open WebUI.
@@ -270,6 +288,14 @@ func (s *Server) StreamableHTTPHandler() http.Handler {
 
 // Start begins serving MCP over SSE on the given address.
 func (s *Server) Start(addr string) error {
+	host, port, _ := net.SplitHostPort(addr)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "8080"
+	}
+	s.baseURL = "http://" + net.JoinHostPort(host, port)
 	return s.sseServer.Start(addr)
 }
 
