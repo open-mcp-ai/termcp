@@ -11,8 +11,13 @@
     ┌──────────────────────────┼──────────────────────────┐
     │               internal/mcp/ (server.go)               │
     │                                                       │
-    │  16 个工具: start_session, send_input, read_output,    │
-    │  send_and_read, list_ssh_configs, terminate_session, resize_pty,       │
+    │  31 个工具: start_session / start_subshell / close_shell, │
+    │  send_input / read_output / send_and_read / background_send, │
+    │  list_sessions / get_session_info / terminate_session / delete_session, │
+    │  resize_pty / register_reader / unregister_reader,    │
+    │  forward_port / local_forward / dynamic_forward / list_forwards / close_forward, │
+    │  file_read / file_write / file_stat / file_delete / file_rename / file_mkdir / get_file_urls, │
+    │  detect_shell / list_ssh_configs / list_messages / get_message │
     │                                                       │
     │  logging.go: 每个 handler 包装结构化日志 (耗时/错误)    │
     └──────┬───────────────────────────────┬────────────────┘
@@ -35,24 +40,27 @@
    ┌─────────────┐ ┌────────────┐ ┌──────────────┐
    │ sshclient/  │ │ buffer/    │ │ storage/     │
    │ ExecSession │ │ Buffer     │ │ Store        │
-   └──────┬──────┘ │ 缓冲区     │ │ 持久化       │
-          │        └────────────┘ └──────────────┘
-          │ SSH (x/crypto/ssh)
+   │ ChildShell  │ │ 缓冲区     │ │ 持久化       │
+   └──────┬──────┘ └────────────┘ └──────────────┘
+          │ SSH (x/crypto/ssh) over in-memory net.Conn
           ▼
    ┌──────────────────────────────────────────┐
    │        internal/sshserver/                │
-   │        gliderlabs/ssh Server              │
+   │        charmbracelet/ssh Server           │
+   │        (in-process, 无 TCP 监听)          │
    │                                          │
    │  ┌─────────────────────────────────┐     │
-   │  │ PTY 分支: creack/pty            │     │
-   │  │   pty.StartWithSize(cmd, size)  │     │
-   │  │   io.Copy(pty_fd, session)      │     │
-   │  │   pty.Setsize() 窗口调整        │     │
+   │  │ PTY 分支: charmbracelet/ssh     │     │
+   │  │   Pty.Start(cmd) (底层 creack/  │     │
+   │  │   pty；Windows 走 ConPTY)       │     │
+   │  │   io.Copy(pty, session)         │     │
+   │  │   WindowChange → pty.Setsize    │     │
    │  ├─────────────────────────────────┤     │
    │  │ Pipe 分支: cmd.Stdin/Out/Err    │     │
    │  │   直接连接 SSH session          │     │
    │  └─────────────────────────────────┘     │
    │                                          │
+   │  sftp subsystem → pkg/sftp (file_*)     │
    │  sshSignalToOSSig: TERM→SIGTERM, ...    │
    └──────────────────┬───────────────────────┘
                       │ exec.Command
@@ -78,8 +86,9 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │  sessMgr.Create(cfg) ──>│                     │                      │                     │
   │                            │                         │  session.New()      │                      │                     │
   │                            │                         │  sshclient.Start()──>│                     │                     │
-  │                            │                         │                     │  ssh.Dial("tcp")     │                     │
-  │                            │                         │                     │ ────────────────────>│ TCP 连接            │
+  │                            │                         │                     │  in-memory Dial      │                     │
+  │                            │                         │                     │  (net.Conn 对，无 TCP)│  Accept() 取得 conn │
+  │                            │                         │                     │ ────────────────────>│                     │
   │                            │                         │                     │  client.NewSession() │                     │
   │                            │                         │                     │  StdinPipe()         │ 打开 stdin 通道      │
   │                            │                         │                     │  StdoutPipe()        │ 打开 stdout 通道     │
@@ -88,7 +97,7 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │                         │                     │  [if pty]             │                     │
   │                            │                         │                     │  RequestPty(          │                     │
   │                            │                         │                     │    "xterm-256color",  │  PTY 请求 →          │
-  │                            │                         │                     │    24, 80, ...)       │  PtyCallback=true    │
+  │                            │                         │                     │    24, 80, ...)       │  AllocatePty 接收    │
   │                            │                         │                     │ ────────────────────>│                     │
   │                            │                         │                     │                      │                     │
   │                            │                         │                     │  session.Start(       │  exec channel        │
@@ -96,8 +105,10 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │                         │                     │ ────────────────────>│                     │
   │                            │                         │                     │                      │                     │
   │                            │                         │                     │                      │  [if pty]            │
-  │                            │                         │                     │                      │  pty.StartWithSize(  │
-  │                            │                         │                     │                      │    cmd, 24x80)       │
+  │                            │                         │                     │                      │  ppty.Start(cmd)     │
+  │                            │                         │                     │                      │  (charmbracelet/ssh │
+  │                            │                         │                     │                      │   → creack/pty /     │
+  │                            │                         │                     │                      │   ConPTY on Windows) │
   │                            │                         │                     │                      │  ───── ioctl ──────> │ 创建 PTY
   │                            │                         │                     │                      │                     │ fork/exec bash
   │                            │                         │                     │                      │                     │
@@ -293,7 +304,7 @@ Agent A (reader 0)           Session              Agent B (新加入)
   │  ← 新输出                  │                     │
 ```
 
-**关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标在当时的 master 尾（或从默认 reader 种子对齐），之后的新输出都能看到；历史不再因单读者环形容量被截断。
+**关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标起点 = 当时的 master 末尾（**无历史 backlog**），只能看到此后产生的新输出；历史不再因单读者环形容量被截断。`start_subshell` 可在同一 SSH 连接上为 Agent B 开独立 shell 通道，彻底避免共用 reader 的游标协调问题。
 
 
 ```

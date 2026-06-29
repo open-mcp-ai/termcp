@@ -52,8 +52,6 @@ termcp ssh-config list -data-dir <dir>          # list all SSH config names
 | `--host` | `127.0.0.1` | HTTP bind address. Use `0.0.0.0` to listen on all interfaces. |
 | `--port` | `18765` | HTTP port. Web UI, MCP SSE, and MCP streamable HTTP share this port. |
 | `--data-dir` | `./data` | Persistent storage (sessions, messages, SSH configs). Created if missing. |
-| `--ssh-host` | `127.0.0.1` | Internal SSH server bind address. |
-| `--ssh-port` | `0` (random) | Internal SSH server port. `0` = random; set a fixed port if firewall rules require it. |
 | `--log-level` | `info` | Log verbosity: `debug`, `info`, `warn`, `error`. Use `debug` to inspect MCP tool calls. |
 | `--admin-host` | `127.0.0.1` | Admin HTTP API bind address. |
 | `--admin-port` | `0` (disabled) | Admin HTTP API port. Requires `--admin-token` when non-zero. |
@@ -139,6 +137,9 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 | **Remote deployment** | SSE over HTTP transport — Agent and Server can run on different machines |
 | **Service-side SSH profiles** | SSH connection details stored server-side as `{data-dir}/ssh_configs/<name>/config.json`; MCP tools only pass the name |
 | **Multi-session management** | Manage multiple independent processes simultaneously without interference |
+| **Shell channel multiplexing** | `start_subshell` opens extra shell channels on one SSH connection — no new TCP handshake; `close_shell` closes one channel without tearing down the session |
+| **Port forwarding** | `ssh -L` / `-R` / `-D` style local, remote, and dynamic (SOCKS5) forwards over an existing SSH session |
+| **SFTP file operations** | `file_read` / `file_write` / `file_stat` / `file_delete` / `file_rename` / `file_mkdir` plus HTTP download/upload URLs via `get_file_urls` |
 | **Message persistence** | Session records and I/O messages persisted to local JSON files |
 | **ANSI escape code stripping** | Optional automatic removal of terminal control sequences for clean text output |
 | **Blocking reads with timeout** | Agents wait for new output up to a configurable timeout; returns promptly via sync.Cond |
@@ -152,9 +153,9 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 ## Architecture
 
 ```
-┌──────┐  SSE/HTTP  ┌──────────────┐  Internal SSH  ┌──────────┐
+┌──────┐  SSE/HTTP  ┌──────────────┐  In-memory SSH  ┌──────────┐
 │Agent │ ──────────> │ Go Server    │ ──────────────> │ PTY/     │
-│(MCP) │             │ - MCP API    │  (localhost)    │ Process  │
+│(MCP) │             │ - MCP API    │  (no TCP port)  │ Process  │
 └──────┘             │ - Web UI     │                 └──────────┘
                      │ - SSH Server │
                      └──────────────┘
@@ -177,20 +178,21 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 │   ├── config/config.go         # Configuration with validation
 │   ├── mcp/
 │   │   ├── server.go            # MCP SSE server & tool registration
-│   │   ├── handlers.go          # 16 tool handlers
+│   │   ├── handlers.go          # 31 tool handlers
 │   │   └── logging.go           # Structured slog logging per tool call
 │   ├── webui/                   # Embedded SPA + WebSocket terminal + REST API
-│   ├── sshserver/server.go      # Internal SSH server (charmbracelet/ssh)
-│   ├── sshclient/client.go      # SSH client (crypto/ssh)
+│   ├── sshserver/server.go      # In-memory SSH server (charmbracelet/ssh)
+│   ├── sshclient/               # SSH client (crypto/ssh) + ChildShell multiplex
 │   ├── sshconfig/               # Server-side SSH profile store
-│   ├── session/
-│   │   ├── session.go           # Session lifecycle (goroutine-safe)
-│   │   └── manager.go           # Thread-safe session registry
+│   ├── session/                 # Session lifecycle + thread-safe registry
 │   ├── buffer/buffer.go         # Multi-reader append-only output log
 │   ├── storage/store.go         # Atomic JSON file persistence
 │   ├── message/message.go       # Message management per session
+│   ├── forward/forward.go       # Port forward manager (-L / -R / -D)
+│   ├── sftp/sftp.go             # SFTP client wrapper for file tools
 │   ├── shell/detect.go          # Cross-platform shell detection
 │   ├── ansi/strip.go            # ANSI escape code removal
+│   ├── encoding/                # \xHH / hex data encoding helpers
 │   └── logansi/handler.go       # Color slog handler
 ├── pkg/api/types.go             # Public types (Session, Message, SessionMode)
 ├── go.mod
@@ -201,7 +203,7 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 1. **Multi-Reader Output Buffer**: One append-only byte log; each reader has an independent read cursor. Prefixes fully consumed by every reader are trimmed to bound memory; there is no fixed per-reader cap or ring overwrite.
 
-2. **Internal SSH Architecture**: The server starts a charmbracelet/ssh server on localhost. Each `start_session` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY is used for native pseudo-terminal support.
+2. **In-Memory SSH Architecture**: The server runs a charmbracelet/ssh server fully in-process — no TCP listener. Each `start_session` dials an in-memory net.Conn pair and creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY (via creack/pty) is used for native pseudo-terminal support. `start_subshell` reuses the same SSH client for additional shell channels with no new handshake.
 
 3. **Single HTTP Mux**: Web UI, MCP SSE (`/sse`), MCP streamable HTTP (`/stream`), and WebSocket terminal (`/api/ui/ws`) share one listener on the configured port. Optional admin HTTP on a separate port.
 
@@ -311,13 +313,16 @@ terminate_session(session_id="d4e5f6")
 
 ## Tool Reference
 
-Full tool reference: [`docs/mcp-tools.md`](docs/mcp-tools.md). 16 tools total.
+Full tool reference: [`docs/mcp-tools.md`](docs/mcp-tools.md). 31 tools total.
 
 | Category | Tools |
 |----------|-------|
 | Session lifecycle | `start_session`, `send_input`, `read_output`, `send_and_read`, `background_send`, `list_sessions`, `get_session_info`, `terminate_session`, `delete_session` |
+| Shell multiplexing | `start_subshell`, `list_subshells`, `close_shell` |
 | Multi-agent reading | `register_reader`, `unregister_reader` |
 | PTY control | `resize_pty` |
+| Port forwarding | `forward_port`, `local_forward`, `dynamic_forward`, `list_forwards`, `close_forward` |
+| File operations (SFTP) | `file_read`, `file_write`, `file_stat`, `file_delete`, `file_rename`, `file_mkdir`, `get_file_urls` |
 | Server discovery | `detect_shell`, `list_ssh_configs` |
 | Message persistence | `list_messages`, `get_message` |
 
