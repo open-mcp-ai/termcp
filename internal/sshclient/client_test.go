@@ -52,14 +52,30 @@ func failingCommand() (string, []string) {
 	return "false", nil
 }
 
-func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {
+func startTestSSHServer(t *testing.T) *sshserver.Server {
 	t.Helper()
-	srv := sshserver.New("127.0.0.1:0")
+	srv := sshserver.New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { srv.Stop() })
-	return srv, srv.Addr()
+	return srv
+}
+
+// dialAndStart creates an in-memory connection to the test server and starts a command.
+func dialAndStart(t *testing.T, srv *sshserver.Server, command string, args []string, pty bool, rows, cols int) *ExecSession {
+	t.Helper()
+	cfg := mintClientConfig(t, srv)
+	conn, err := srv.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	es, err := StartWithConn(conn, cfg, command, args, pty, rows, cols)
+	if err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	return es
 }
 
 func mintClientConfig(t *testing.T, srv *sshserver.Server) *ssh.ClientConfig {
@@ -72,14 +88,10 @@ func mintClientConfig(t *testing.T, srv *sshserver.Server) *ssh.ClientConfig {
 }
 
 func TestStart_PipeMode(t *testing.T) {
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	command, args, input := pipeEchoCommand()
-	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, command, args, false, 24, 80)
 
 	es.Stdin.Write([]byte(input))
 	es.Stdin.Close()
@@ -92,14 +104,10 @@ func TestStart_PipeMode(t *testing.T) {
 }
 
 func TestStart_PtyMode(t *testing.T) {
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	sh, shArgs := ptyShellCmd()
-	es, err := StartWithConfig(addr, cfg, sh, shArgs, true, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, sh, shArgs, true, 24, 80)
 
 	time.Sleep(200 * time.Millisecond)
 	es.Stdin.Write([]byte(testShellInput("echo pty_test")))
@@ -124,14 +132,10 @@ func TestStart_ResizePty(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("interactive PTY tests not stable on Windows ConPTY")
 	}
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	sh, shArgs := ptyShellCmd()
-	es, err := StartWithConfig(addr, cfg, sh, shArgs, true, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, sh, shArgs, true, 24, 80)
 	defer es.Close()
 
 	if err := es.ResizePty(50, 120); err != nil {
@@ -146,14 +150,10 @@ func TestStart_Signal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX signals not supported on Windows")
 	}
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	command, args := longRunningCommand()
-	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, command, args, false, 24, 80)
 
 	time.Sleep(200 * time.Millisecond) // let server process start
 	if err := es.Signal("TERM"); err != nil {
@@ -173,14 +173,10 @@ func TestStart_Close(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("session close is reported as EOF on Windows ConPTY")
 	}
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	command, args := longRunningCommand()
-	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, command, args, false, 24, 80)
 
 	if err := es.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -214,14 +210,10 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestStart_CommandFailure(t *testing.T) {
-	srv, addr := startTestSSHServer(t)
-	cfg := mintClientConfig(t, srv)
+	srv := startTestSSHServer(t)
 
 	command, args := failingCommand()
-	es, err := StartWithConfig(addr, cfg, command, args, false, 24, 80)
-	if err != nil {
-		t.Fatal(err)
-	}
+	es := dialAndStart(t, srv, command, args, false, 24, 80)
 
 	// Close stdin to unblock server's stdin copy goroutine in pipe mode
 	es.Stdin.Close()

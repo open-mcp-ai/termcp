@@ -47,8 +47,23 @@ func mintCfg(t *testing.T, srv *Server) *ssh.ClientConfig {
 	return c
 }
 
+// dialServer creates an in-memory SSH client connected to the test server.
+func dialServer(t *testing.T, srv *Server, config *ssh.ClientConfig) *ssh.Client {
+	t.Helper()
+	conn, err := srv.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, "inmem", config)
+	if err != nil {
+		conn.Close()
+		t.Fatal(err)
+	}
+	return ssh.NewClient(c, chans, reqs)
+}
+
 func TestMint_OneTimePassword(t *testing.T) {
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,33 +73,29 @@ func TestMint_OneTimePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c1, err := ssh.Dial("tcp", srv.Addr(), cfg)
-	if err != nil {
-		t.Fatalf("first dial: %v", err)
-	}
+	c1 := dialServer(t, srv, cfg)
 	_ = c1.Close()
 
-	if _, err := ssh.Dial("tcp", srv.Addr(), cfg); err == nil {
+	// Second dial with same one-time config should fail at SSH handshake.
+	conn2, err := srv.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = ssh.NewClientConn(conn2, "inmem", cfg)
+	if err == nil {
 		t.Fatal("expected second dial with same one-time config to fail")
 	}
+	// ssh.NewClientConn closes conn2 on handshake failure, so no explicit Close needed.
 }
 
 func TestServer_StartAndStop(t *testing.T) {
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
-	addr := srv.Addr()
-	if addr == "" {
-		t.Fatal("expected non-empty address after start")
-	}
-
 	// Verify we can connect
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", addr, config)
-	if err != nil {
-		t.Fatalf("failed to dial: %v", err)
-	}
+	client := dialServer(t, srv, config)
 	client.Close()
 
 	if err := srv.Stop(); err != nil {
@@ -93,17 +104,14 @@ func TestServer_StartAndStop(t *testing.T) {
 }
 
 func TestServer_PipeSession(t *testing.T) {
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -125,17 +133,14 @@ func TestServer_SignalTerm(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX signals not supported on Windows")
 	}
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -178,17 +183,14 @@ func TestServer_SignalInterrupt(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX signals not supported on Windows")
 	}
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -221,17 +223,14 @@ func TestServer_SignalInterrupt(t *testing.T) {
 }
 
 func TestServer_ProcessStateNil(t *testing.T) {
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -246,17 +245,14 @@ func TestServer_ProcessStateNil(t *testing.T) {
 }
 
 func TestServer_PtySession(t *testing.T) {
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -304,17 +300,14 @@ func TestServer_PtyEnviron(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("TERM env var is a Unix concept, not meaningful on Windows")
 	}
-	srv := New("127.0.0.1:0")
+	srv := New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
 
 	config := mintCfg(t, srv)
-	client, err := ssh.Dial("tcp", srv.Addr(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialServer(t, srv, config)
 	defer client.Close()
 
 	session, err := client.NewSession()

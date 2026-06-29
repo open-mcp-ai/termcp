@@ -72,7 +72,7 @@ type Session struct {
 
 // New creates and starts a new Session.
 // internal must be the built-in sshserver.Server (after Start) when cfg.Remote is nil; it may be nil for remote-only callers.
-func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
+func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
 	id := uuid.New().String()[:12]
 	name := cfg.Name
 	if name == "" {
@@ -81,7 +81,6 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 
 	usePty := cfg.Mode == api.ModePTY
 
-	var dialAddr string
 	var execSession *sshclient.ExecSession
 	var sshEndpointPublic string // "internal" | "remote" for MCP / JSON (no host or credentials)
 
@@ -95,7 +94,7 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 			return nil, fmt.Errorf("ssh_port must be between 1 and 65535, got %d", port)
 		}
 		host := strings.TrimSpace(r.Host)
-		dialAddr = net.JoinHostPort(host, strconv.Itoa(port))
+		dialAddr := net.JoinHostPort(host, strconv.Itoa(port))
 
 		toSec := r.DialTimeoutSeconds
 		if toSec <= 0 {
@@ -126,7 +125,6 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 			return nil, err
 		}
 	} else {
-		dialAddr = defaultSSHAddr
 		if internal == nil {
 			return nil, errors.New("internal ssh server is not configured")
 		}
@@ -134,8 +132,12 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 		if err != nil {
 			return nil, err
 		}
+		conn, err := internal.Dial()
+		if err != nil {
+			return nil, err
+		}
 		sshEndpointPublic = "internal"
-		execSession, err = sshclient.StartWithConfig(dialAddr, minted, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		execSession, err = sshclient.StartWithConn(conn, minted, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +185,7 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
-	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic, "dial_addr", dialAddr)
+	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
 	return s, nil
 }
@@ -488,6 +490,7 @@ type ChildShell struct {
 	execSession *sshclient.ExecSession
 	buf         *buffer.Buffer
 	done        chan struct{}
+	closeOnce   sync.Once
 	mu          sync.RWMutex
 	stdinMu     sync.Mutex
 	Status      api.SessionStatus
@@ -647,24 +650,18 @@ func (cs *ChildShell) TerminateShell() {
 	cs.ExitCode = &code
 	cs.mu.Unlock()
 	cs.buf.Close()
-	// Ensure Done() channel is closed for any waiters.
-	select {
-	case <-cs.done:
-	default:
-		close(cs.done)
-	}
+	// Ensure Done() channel is closed for any waiters (closeOnce prevents races with the exit watcher goroutine).
+	cs.closeOnce.Do(func() { close(cs.done) })
 }
 
-// pipeChildToBuffer mirrors Session.pipeToBuffer for child shell output.
+// pipeChildToBuffer pipes child shell output into the buffer.
 func (cs *ChildShell) pipeToBuffer(r io.Reader) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				cs.buf.Write(data)
+				cs.buf.Write(buf[:n])
 			}
 			if err != nil {
 				return
@@ -685,11 +682,7 @@ func (cs *ChildShell) startReaders() {
 
 	go func() {
 		<-cs.execSession.Done()
-		select {
-		case <-cs.done:
-		default:
-			close(cs.done)
-		}
+		cs.closeOnce.Do(func() { close(cs.done) })
 		cs.mu.Lock()
 		cs.Status = api.SessionExited
 		code := cs.execSession.ExitCode()

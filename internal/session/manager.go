@@ -15,7 +15,6 @@ import (
 type Manager struct {
 	sessions    map[string]*Session
 	mu          sync.RWMutex
-	sshAddr     string
 	internalSSH *sshserver.Server // built-in server for Mint + internal sessions; nil in some tests
 	msgMgr      *message.Manager
 	store       *storage.Store
@@ -25,10 +24,9 @@ type Manager struct {
 }
 
 // NewManager creates a Manager. internalSSH must be the built-in sshserver.Server (after Start) when using internal profiles; may be nil if only remote sessions are used in tests.
-func NewManager(sshAddr string, msgMgr *message.Manager, store *storage.Store, internalSSH *sshserver.Server) *Manager {
+func NewManager(msgMgr *message.Manager, store *storage.Store, internalSSH *sshserver.Server) *Manager {
 	return &Manager{
 		sessions:    make(map[string]*Session),
-		sshAddr:     sshAddr,
 		internalSSH: internalSSH,
 		msgMgr:      msgMgr,
 		store:       store,
@@ -63,7 +61,7 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 		m.persist()
 		m.notifyListChange()
 	}
-	s, err := New(m.sshAddr, m.internalSSH, cfg, m.msgMgr)
+	s, err := New(m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
 		return nil, err
 	}

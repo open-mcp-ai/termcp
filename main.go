@@ -87,18 +87,6 @@ func nonLoopbackUnicastIPv4s() []string {
 	return out
 }
 
-// sshURLFromListenAddr turns "host:port" into ssh://host:port (IPv6 host gets brackets).
-func sshURLFromListenAddr(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "ssh://" + addr
-	}
-	if strings.Contains(host, ":") {
-		return fmt.Sprintf("ssh://[%s]:%s", host, port)
-	}
-	return fmt.Sprintf("ssh://%s:%s", host, port)
-}
-
 func logHTTPMain(base string, port int, lanIPv4 []string) {
 	slog.Info(base + "/")
 	for _, ip := range lanIPv4 {
@@ -133,8 +121,6 @@ if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
-	flag.StringVar(&cfg.SSHHost, "ssh-host", cfg.SSHHost, "Internal SSH server host")
-	flag.IntVar(&cfg.SSHPort, "ssh-port", cfg.SSHPort, "Internal SSH server port (0 = random)")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
 	flag.StringVar(&cfg.AdminHost, "admin-host", cfg.AdminHost, "SSH config admin API bind host")
 	flag.IntVar(&cfg.AdminPort, "admin-port", cfg.AdminPort, "SSH config admin HTTP port (0 = disabled; requires admin-token)")
@@ -149,17 +135,14 @@ if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 	slog.SetDefault(slog.New(buildLogHandler(cfg)))
 	slog.Info("termcp server started")
 
-	// Start internal SSH server
-	sshAddr := fmt.Sprintf("%s:%d", cfg.SSHHost, cfg.SSHPort)
-	sshSrv := sshserver.New(sshAddr)
+	// Start internal SSH server (in-process, no TCP port)
+	sshSrv := sshserver.New()
 	if err := sshSrv.Start(); err != nil {
 		slog.Error("failed to start SSH server", "err", err)
 		os.Exit(1)
 	}
-	actualSSHAddr := sshSrv.Addr()
 	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
-	slog.Info("SSH local server:")
-	slog.Info("    " + sshURLFromListenAddr(actualSSHAddr))
+	slog.Info("SSH server: in-memory (no TCP port)")
 	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
 
 	slog.Info("MCP HTTP:")
@@ -170,7 +153,7 @@ if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 	// Initialize storage and managers
 	store := storage.New(cfg.DataDir)
 	msgMgr := message.NewManager(store)
-	sessMgr := session.NewManager(actualSSHAddr, msgMgr, store, sshSrv)
+	sessMgr := session.NewManager(msgMgr, store, sshSrv)
 
 	if err := sshconfig.EnsureInternal(cfg.DataDir); err != nil {
 		slog.Error("failed to ensure internal ssh config", "err", err)

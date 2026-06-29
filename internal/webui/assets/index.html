@@ -1340,19 +1340,26 @@
     refreshAllWindowTabs();
   }
 
+  /** Per-window tab refresh: fetch child shells for win's parent session and sync tabs.
+   *  Each window is independent — no shared loop state, no cross-contamination. */
+  function refreshWindowTabs(win) {
+    if (!win || !win._parentSid) return;
+    fetch(sessionAPI(win._parentSid, '/child-shells'))
+      .then(function(r) { if (!r.ok) return; return r.json(); })
+      .then(function(j) {
+        if (!j || !j.shells) return;
+        syncWindowTabs(win, j.shells);
+      }).catch(function() {});
+  }
+
+  /** Notify all open windows that the global session list changed; each window independently
+   *  decides whether to refresh its own channel tabs. */
   function refreshAllWindowTabs() {
     var c = shellWindowsEl();
     if (!c) return;
     var wins = c.querySelectorAll('.shell-window');
     for (var i = 0; i < wins.length; i++) {
-      var w = wins[i];
-      if (!w._parentSid) continue;
-      fetch(sessionAPI(w._parentSid, '/child-shells'))
-        .then(function(r) { if (!r.ok) return; return r.json(); })
-        .then(function(j) {
-          if (!j || !j.shells) return;
-          syncWindowTabs(w, j.shells);
-        }).catch(function() {});
+      refreshWindowTabs(wins[i]);
     }
   }
 
@@ -2668,6 +2675,7 @@ SHELL_WINDOW_PANELS_HTML +
 
     win._sid = sessionId;
     win._parentSid = sessionId;
+    win._connName = connLabel || '';
     var sidEl = win.querySelector('.shell-sid-copy .sid');
     if (sidEl) sidEl.textContent = stripSessionPrefix(sessionId);
     var pend = win.querySelector('.shell-pending');
@@ -2738,6 +2746,7 @@ SHELL_WINDOW_PANELS_HTML +
     container.appendChild(win);
     bringShellWindowToFront(win);
     win._parentSid = sessionId;
+    win._connName = connLabel || '';
     _wireChannelTabBar(win);
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
 

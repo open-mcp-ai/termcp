@@ -3,6 +3,7 @@ package sshclient
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -39,6 +40,28 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
+
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+
+	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// StartWithConn creates an SSH client over an existing net.Conn (e.g. net.Pipe)
+// and starts a command. Used for in-process connections without TCP.
+func StartWithConn(conn net.Conn, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, "inmem", config)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
 
 	session, err := client.NewSession()
 	if err != nil {

@@ -27,29 +27,154 @@ import (
 	sshstd "golang.org/x/crypto/ssh"
 )
 
+// inMemListener is a net.Listener backed by duplex channel pairs for in-process SSH connections.
+type inMemListener struct {
+	conns     chan net.Conn
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newInMemListener() *inMemListener {
+	return &inMemListener{
+		conns: make(chan net.Conn),
+		done:  make(chan struct{}),
+	}
+}
+
+func (l *inMemListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.conns:
+		return conn, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *inMemListener) Close() error {
+	l.closeOnce.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *inMemListener) Addr() net.Addr { return inMemAddr{} }
+
+// Dial creates a full-duplex in-memory connection pair (using io.Pipe pairs to avoid
+// net.Pipe's synchronous write deadlock during SSH version exchange), enqueues the
+// server side, and returns the client side.
+func (l *inMemListener) Dial() (net.Conn, error) {
+	server, client := duplexPipe()
+	select {
+	case l.conns <- server:
+		return client, nil
+	case <-l.done:
+		server.Close()
+		client.Close()
+		return nil, net.ErrClosed
+	}
+}
+
+// duplexConn is a full-duplex net.Conn backed by buffered byte channels.
+// Buffered channels prevent the write-then-read deadlock that occurs during SSH
+// version exchange when both sides write before either reads (net.Pipe / io.Pipe
+// are synchronous and block writes until the other side reads).
+type duplexConn struct {
+	writeMu   sync.Mutex  // serializes close(writeCh) and sends to writeCh
+	readCh    <-chan []byte
+	writeCh   chan []byte // bidirectional; nil after Close (peer reader gets io.EOF via close)
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	readBuf   []byte
+}
+
+func (c *duplexConn) Read(b []byte) (int, error) {
+	if len(c.readBuf) > 0 {
+		n := copy(b, c.readBuf)
+		c.readBuf = c.readBuf[n:]
+		return n, nil
+	}
+	select {
+	case data, ok := <-c.readCh:
+		if !ok {
+			return 0, io.EOF
+		}
+		n := copy(b, data)
+		if n < len(data) {
+			c.readBuf = data[n:]
+		}
+		return n, nil
+	case <-c.closeCh:
+		return 0, net.ErrClosed
+	}
+}
+
+func (c *duplexConn) Write(b []byte) (int, error) {
+	// Snapshot the write channel under the mutex to avoid racing with Close.
+	c.writeMu.Lock()
+	wch := c.writeCh
+	c.writeMu.Unlock()
+	if wch == nil {
+		return 0, net.ErrClosed
+	}
+
+	data := make([]byte, len(b))
+	copy(data, b)
+	select {
+	case wch <- data:
+		return len(b), nil
+	case <-c.closeCh:
+		return 0, net.ErrClosed
+	}
+}
+
+func (c *duplexConn) Close() error {
+	c.closeOnce.Do(func() {
+		close(c.closeCh) // unblock local reads/writes
+		c.writeMu.Lock()
+		close(c.writeCh) // unblock peer's reader (writeCh is always non-nil inside closeOnce)
+		c.writeCh = nil
+		c.writeMu.Unlock()
+	})
+	return nil
+}
+func (c *duplexConn) LocalAddr() net.Addr              { return inMemAddr{} }
+func (c *duplexConn) RemoteAddr() net.Addr             { return inMemAddr{} }
+func (c *duplexConn) SetDeadline(time.Time) error      { return nil }
+func (c *duplexConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *duplexConn) SetWriteDeadline(time.Time) error { return nil }
+
+// duplexPipe creates a pair of connected duplexConns using buffered channels.
+// The buffered channels (cap 16) allow the SSH version exchange to complete
+// without blocking: each side writes ~15-30 bytes which fits in the buffer.
+func duplexPipe() (net.Conn, net.Conn) {
+	const bufCap = 16
+	a2b := make(chan []byte, bufCap)
+	b2a := make(chan []byte, bufCap)
+
+	a := &duplexConn{readCh: b2a, writeCh: a2b, closeCh: make(chan struct{})}
+	b := &duplexConn{readCh: a2b, writeCh: b2a, closeCh: make(chan struct{})}
+	return a, b
+}
+
+type inMemAddr struct{}
+
+func (inMemAddr) Network() string { return "inmem" }
+func (inMemAddr) String() string  { return "inmem" }
+
 // Server wraps an internal SSH server.
 type Server struct {
-	addr     string
 	server   *ssh.Server
-	listener net.Listener
+	listener *inMemListener
 	started  atomic.Bool
 	mu       sync.Mutex
 	// pending maps one-time username -> password. A successful password auth removes the entry.
 	pending map[string]string
 }
 
-// New creates an internal SSH server listening on addr.
-// If addr is empty, it defaults to "127.0.0.1:0" (random port).
-func New(addr string) *Server {
-	if addr == "" {
-		addr = "127.0.0.1:0"
-	}
+// New creates an internal SSH server that communicates in-process via net.Pipe (no TCP port).
+func New() *Server {
 	s := &Server{
-		addr:    addr,
 		pending: make(map[string]string),
 	}
 	srv := &ssh.Server{
-		Addr: addr,
 		Handler: func(sess ssh.Session) {
 			s.handleSession(sess)
 		},
@@ -129,15 +254,17 @@ func (s *Server) MintClientConfig() (*sshstd.ClientConfig, error) {
 	}, nil
 }
 
-// Addr returns the actual listener address after Start.
-func (s *Server) Addr() string {
-	if s.listener == nil {
-		return ""
+// Dial creates a new in-memory connection to this server. The returned net.Conn
+// is the client side of a net.Pipe(); the server side is handed to the SSH server
+// goroutine for handshake and session handling.
+func (s *Server) Dial() (net.Conn, error) {
+	if !s.started.Load() {
+		return nil, net.ErrClosed
 	}
-	return s.listener.Addr().String()
+	return s.listener.Dial()
 }
 
-// Start begins listening and serving SSH connections.
+// Start begins serving SSH connections on the in-memory listener.
 func (s *Server) Start() error {
 	pemBytes, err := generateHostKeyPEM()
 	if err != nil {
@@ -147,15 +274,11 @@ func (s *Server) Start() error {
 		return fmt.Errorf("set host key: %w", err)
 	}
 
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	s.listener = ln
+	s.listener = newInMemListener()
 	s.started.Store(true)
 
 	go func() {
-		if err := s.server.Serve(ln); err != nil {
+		if err := s.server.Serve(s.listener); err != nil {
 			slog.Info("ssh server stopped", "err", err)
 		}
 	}()
@@ -170,6 +293,7 @@ func (s *Server) Stop() error {
 	s.mu.Lock()
 	s.pending = make(map[string]string)
 	s.mu.Unlock()
+	_ = s.listener.Close()
 	return s.server.Close()
 }
 

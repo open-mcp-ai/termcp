@@ -15,7 +15,7 @@ import (
 
 func startRaceTestServer(t *testing.T) *sshserver.Server {
 	t.Helper()
-	srv := sshserver.New("127.0.0.1:0")
+	srv := sshserver.New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -60,9 +60,8 @@ func raceTestSleepCommand(seconds string) (string, []string) {
 
 func TestRace_ConcurrentSendInput(t *testing.T) {
 	srv := startRaceTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +89,8 @@ func TestRace_ConcurrentSendInput(t *testing.T) {
 
 func TestRace_SendInputDuringTerminate(t *testing.T) {
 	srv := startRaceTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,10 +128,9 @@ func TestRace_SendInputDuringTerminate(t *testing.T) {
 
 func TestRace_ConcurrentTerminate(t *testing.T) {
 	srv := startRaceTestServer(t)
-	addr := srv.Addr()
 
 	command, args := raceTestSleepCommand("60")
-	s, err := New(addr, srv, Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,9 +154,8 @@ func TestRace_ConcurrentTerminate(t *testing.T) {
 
 func TestRace_ConcurrentReadWrite(t *testing.T) {
 	srv := startRaceTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: raceTestShell(), Args: raceTestShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,10 +191,9 @@ func TestRace_ConcurrentReadWrite(t *testing.T) {
 
 func TestRace_ConcurrentInfoAndTerminate(t *testing.T) {
 	srv := startRaceTestServer(t)
-	addr := srv.Addr()
 
 	command, args := raceTestSleepCommand("60")
-	s, err := New(addr, srv, Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
