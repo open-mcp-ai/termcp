@@ -82,6 +82,16 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithNumber("cols", mcpgo.Description("PTY cols"), mcpgo.DefaultNumber(80)),
 	), withLogging("start_subshell", s.handleStartSubShell))
 
+	mcpServer.AddTool(mcpgo.NewTool("list_subshells",
+		mcpgo.WithDescription("List the running child shells (channels) sharing a parent session's SSH connection. Returns parent_session_id and subshells (each with id, name, status, timestamps). Use the returned ids with send_input/read_output/close_shell. list_sessions only returns parent sessions — call this to enumerate a session's channels."),
+		mcpgo.WithString("parent_session_id", mcpgo.Required(), mcpgo.Description("Parent session ID from start_session / list_sessions")),
+	), withLogging("list_subshells", s.handleListSubshells))
+
+	mcpServer.AddTool(mcpgo.NewTool("close_shell",
+		mcpgo.WithDescription("Close one shell channel without tearing down the parent session. Pass a parent session_id to close its root shell channel (remote only — no-op for internal sessions, the process keeps running); pass a child shell id (from list_subshells) to close just that channel. The SSH connection and other shells keep running. To fully stop a session, use terminate_session instead."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("A parent session id (closes root channel) or a child shell id (closes that channel)")),
+	), withLogging("close_shell", s.handleCloseShell))
+
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
 		mcpgo.WithDescription("Write bytes to the session’s stdin only; does not wait for or return output. Use read_output (same reader_id) afterward. For PTY sessions, press_enter appends a newline so the shell executes the line. Terminal control bytes: server rule 7."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
@@ -118,23 +128,22 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("send_and_read", s.handleSendAndRead))
 
 	mcpServer.AddTool(mcpgo.NewTool("list_sessions",
-		mcpgo.WithDescription("Return metadata for every session still in the server registry: running sessions and exited ones until delete_session removes them. Each item includes id, display name (defaults to the ssh profile name), status, ssh_config, and timestamps—use this to pick session_id before read_output or terminate_session."),
+		mcpgo.WithDescription("Return metadata for every running parent session currently in the server registry. Exited sessions are removed automatically — no need to call delete_session after terminate. Each entry includes id, name, status, ssh_endpoint, and timestamps. Child shells (created via start_subshell) are NOT included — use list_subshells to enumerate a session's channels."),
 	), withLogging("list_sessions", s.handleListSessions))
-
 	mcpServer.AddTool(mcpgo.NewTool("get_session_info",
 		mcpgo.WithDescription("Return a JSON document with detailed fields for one session: identifiers, command line, mode, PTY size, ssh_config, remote connection metadata, exit state, etc. Use for debugging or before resize_pty / terminate_session."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("get_session_info", s.handleGetSessionInfo))
 
 	mcpServer.AddTool(mcpgo.NewTool("terminate_session",
-		mcpgo.WithDescription("Stop the remote process / close pipes for this session (SIGTERM then optional SIGKILL path). The session row may remain until you call delete_session to drop registry metadata and free the name slot for bookkeeping."),
+		mcpgo.WithDescription("Fully stop a session: SIGTERM (then SIGKILL after grace_period) the process and close the SSH connection. The session is auto-removed from the registry once it exits. To close just one shell channel and keep the session alive, use close_shell instead."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
 		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
 	), withLogging("terminate_session", s.handleTerminateSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("delete_session",
-		mcpgo.WithDescription("Remove a session from the in-memory registry after it has exited (or been terminated). Call terminate_session first if the process is still running. Fails if the session is still active—check get_session_info / list_sessions."),
+		mcpgo.WithDescription("Remove a session from the in-memory registry. Sessions are auto-removed when they exit, so this is rarely needed — use it only to drop a still-registered session that should be gone. Fails if the session is still running (terminate_session first)."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id returned by start_session")),
 	), withLogging("delete_session", s.handleDeleteSession))
 

@@ -50,13 +50,6 @@ func testShellEchoArgs(s string) []string {
 	return testShellArgs("-c", "echo "+s)
 }
 
-func testEchoCommand(s string) (string, []string) {
-	if runtime.GOOS == "windows" {
-		return "powershell.exe", []string{"-NoProfile", "-Command", "Write-Output " + s}
-	}
-	return "echo", []string{s}
-}
-
 func testSleepCommand(seconds string) (string, []string) {
 	if runtime.GOOS == "windows" {
 		return "powershell.exe", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds " + seconds}
@@ -303,13 +296,15 @@ func TestSession_NaturalExit(t *testing.T) {
 func TestManager_CreateAndGet(t *testing.T) {
 	srv := startTestServer(t)
 
-	mgr := NewManager( nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
-	command, args := testEchoCommand("hi")
+	// Use a long-running command so auto-delete doesn't fire before we inspect.
+	command, args := testSleepCommand("60")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "test", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.Terminate(true, 0)
 
 	got := mgr.Get(s.ID)
 	if got == nil {
@@ -323,12 +318,19 @@ func TestManager_CreateAndGet(t *testing.T) {
 func TestManager_ListAll(t *testing.T) {
 	srv := startTestServer(t)
 
-	mgr := NewManager( nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
-	commandA, argsA := testEchoCommand("a")
-	commandB, argsB := testEchoCommand("b")
-	mgr.Create(Config{Command: commandA, Args: argsA, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: commandB, Args: argsB, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	command, args := testSleepCommand("60")
+	s1, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Terminate(true, 0)
+	s2, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Terminate(true, 0)
 
 	all := mgr.ListAll()
 	if len(all) != 2 {
@@ -359,7 +361,7 @@ func TestManager_CleanupAll(t *testing.T) {
 func TestManager_Delete(t *testing.T) {
 	srv := startTestServer(t)
 
-	mgr := NewManager( nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
 	command, args := testSleepCommand("0.1")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "del-me", Rows: 24, Cols: 80})
@@ -367,31 +369,31 @@ func TestManager_Delete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Terminate and wait for exited status
+	sid := s.ID
+
+	// Terminate triggers OnExit → auto-delete from registry.
 	s.Terminate(true, 0)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.Info().Status != api.SessionRunning {
-			break
+		if mgr.Get(sid) == nil {
+			break // auto-deleted
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	if mgr.Get(s.ID) == nil {
-		t.Fatal("expected session to exist")
+	// After exit, session is auto-deleted by OnExit callback.
+	if mgr.Get(sid) != nil {
+		t.Fatal("expected session to be auto-deleted from registry after exit")
 	}
 
-	if err := mgr.Delete(s.ID); err != nil {
+	// Delete is a no-op for an already-deleted session.
+	if err := mgr.Delete(sid); err != nil {
 		t.Fatal(err)
-	}
-
-	if mgr.Get(s.ID) != nil {
-		t.Fatal("expected session to be deleted")
 	}
 
 	all := mgr.ListAll()
 	if len(all) != 0 {
-		t.Fatalf("expected 0 sessions after delete, got %d", len(all))
+		t.Fatalf("expected 0 sessions, got %d", len(all))
 	}
 }
 

@@ -716,15 +716,15 @@
         </div>
         <input type="text" id="conn-name" placeholder="my-server" autocomplete="off" style="margin-bottom:8px;width:100%">
         <!-- Form view -->
-        <div id="conn-form-view">
-          <div class="conn-field"><label for="conn-f-host">Host</label><input type="text" id="conn-f-host" placeholder="192.168.1.1"></div>
-          <div class="conn-row"><div class="conn-field"><label for="conn-f-port">Port</label><input type="number" id="conn-f-port" value="22"></div><div class="conn-field"><label for="conn-f-user">User</label><input type="text" id="conn-f-user" placeholder="root"></div></div>
+        <form id="conn-form-view" autocomplete="off" onsubmit="return false">
+          <div class="conn-field"><label for="conn-f-host">Host</label><input type="text" id="conn-f-host" placeholder="192.168.1.1" autocomplete="off"></div>
+          <div class="conn-row"><div class="conn-field"><label for="conn-f-port">Port</label><input type="number" id="conn-f-port" value="22" autocomplete="off"></div><div class="conn-field"><label for="conn-f-user">User</label><input type="text" id="conn-f-user" placeholder="root" autocomplete="username"></div></div>
           <div class="conn-field"><label for="conn-f-auth">Auth</label><select id="conn-f-auth"><option value="password">Password</option><option value="key">Private Key</option></select></div>
-          <div class="conn-field" id="conn-f-password-wrap"><label for="conn-f-password">Password</label><div class="psw-wrap"><input type="password" id="conn-f-password" class="psw-input"><button type="button" class="psw-eye" title="Show password"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field" id="conn-f-password-wrap"><label for="conn-f-password">Password</label><div class="psw-wrap"><input type="password" id="conn-f-password" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show password"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
           <div class="conn-field" id="conn-f-pem-wrap" style="display:none"><label for="conn-f-pem">Private Key</label><textarea id="conn-f-pem" spellcheck="false" rows="4"></textarea></div>
-          <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
-          <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect"></div>
-        </div>
+          <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect" autocomplete="off"></div>
+        </form>
         <!-- JSON view -->
         <div id="conn-config-view" style="display:none">
           <label for="conn-config">config</label>
@@ -1336,6 +1336,21 @@
     window._lastSessionsSnapshot = sessions;
     renderSessionGrid(sessions, '');
     loadForwards();
+    // Close shell windows whose parent session is no longer in the registry
+    // (terminated/exited and auto-deleted server-side). Keeps the UI in sync
+    // instead of leaving orphaned window frames after the grid tile vanishes.
+    var liveIds = {};
+    (sessions || []).forEach(function (s) { if (s.id) liveIds[s.id] = true; });
+    var c = shellWindowsEl();
+    if (c) {
+      var wins = c.querySelectorAll('.shell-window');
+      for (var i = 0; i < wins.length; i++) {
+        var w = wins[i];
+        if (w._parentSid && !liveIds[w._parentSid] && !w._placeholder) {
+          closeShellWindow(w);
+        }
+      }
+    }
     // Refresh tabs in open windows (child shells may have changed).
     refreshAllWindowTabs();
   }
@@ -1367,8 +1382,11 @@
     var running = shells.filter(function(s) { return s.status === 'running'; });
     var existing = win._channels || {};
     // Add new running shells that don't have a tab yet.
+    // The primary shell (id === win._parentSid) is created by openShellWindow on explicit
+    // open (which also restores the last-active tab). Sync never auto-creates it, so closing
+    // the primary tab does not trigger a close→recreate loop on the next refresh.
     running.forEach(function(s) {
-      if (!existing[s.id]) createChannelTab(win, s.id);
+      if (!existing[s.id] && s.id !== win._parentSid) createChannelTab(win, s.id);
     });
     // Remove tabs for shells that are no longer running.
     Object.keys(existing).forEach(function(sid) {

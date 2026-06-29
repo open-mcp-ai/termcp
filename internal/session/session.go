@@ -48,8 +48,6 @@ type Config struct {
 	Rows    int
 	Cols    int
 	Remote  *RemoteSSH
-	// OnExit is optional; invoked once after the process exits and status is updated (Manager wires this for persistence + UI).
-	OnExit func()
 }
 
 // Session wraps an interactive process session managed over SSH.
@@ -178,7 +176,6 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		buf:         buf,
 		readerID:    rid,
 		msgMgr:      msgMgr,
-		onExit:      cfg.OnExit,
 		primaryShell: primaryShell,
 	}
 
@@ -333,43 +330,68 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 		// Internal sessions: normal exit processing.
 		if s.SSHEndpoint == "internal" {
 			s.exitOnce.Do(func() {
-				s.mu.Lock()
-				s.Status = api.SessionExited
 				code := -1
-				s.ExitCode = &code
-				s.UpdatedAt = time.Now().UTC()
-				s.mu.Unlock()
-				s.buf.Close()
-				if s.msgMgr != nil {
-					s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated (no exit code)")
-				}
-				slog.Debug("session terminated", "session_id", s.ID, "forced", force)
-				if fn := s.onExit; fn != nil {
-					fn()
-				}
+				s.markExited(&code, "Process terminated (no exit code)", "session terminated")
 			})
 		}
 	})
 }
 
-// TerminateShellOnly closes only this session's shell channel. Children and SSH client are left alone.
-// Used when closing a root session tab — the multiplexed connection stays alive.
+// markExited transitions the session to SessionExited, closes its output buffer,
+// optionally appends a system message, logs, and invokes the onExit callback.
+// exitCode is stored when non-nil (nil leaves it unset). Must run inside s.exitOnce.
+func (s *Session) markExited(exitCode *int, sysMsg, logLabel string) {
+	s.mu.Lock()
+	s.Status = api.SessionExited
+	if exitCode != nil {
+		v := *exitCode
+		s.ExitCode = &v
+	}
+	s.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+	s.buf.Close()
+	if sysMsg != "" && s.msgMgr != nil {
+		s.msgMgr.Append(s.ID, api.MsgSystem, sysMsg)
+	}
+	logArgs := []any{"session_id", s.ID}
+	if exitCode != nil {
+		logArgs = append(logArgs, "exit_code", *exitCode)
+	}
+	slog.Debug(logLabel, logArgs...)
+	if fn := s.onExit; fn != nil {
+		fn()
+	}
+}
+
+// WatchNaturalExit starts a goroutine that detects natural process exit on internal sessions.
+// Must be called after onExit is set (by Manager.Create). Call only once.
+func (s *Session) WatchNaturalExit() {
+	if s.SSHEndpoint != "internal" {
+		return
+	}
+	go func() {
+		<-s.execSession.Done()
+		s.exitOnce.Do(func() {
+			code := s.execSession.ExitCode()
+			s.markExited(&code, "Process exited", "session exited")
+		})
+	}()
+}
+
+// TerminateShellOnly closes the root tab shell channel. For internal sessions this is a no-op
+// — the process outlives the tab (like detaching from screen/tmux). For remote sessions only the
+// SSH session channel is closed; child shells on the same TCP connection are unaffected.
 func (s *Session) TerminateShellOnly() {
+	if s.SSHEndpoint == "internal" {
+		return // tab close doesn't kill the process
+	}
 	s.primaryShell.TerminateShell()
 }
 
 // Disconnect closes the underlying SSH client and marks the session as fully exited.
 func (s *Session) Disconnect() {
 	s.exitOnce.Do(func() {
-		s.mu.Lock()
-		s.Status = api.SessionExited
-		s.UpdatedAt = time.Now().UTC()
-		s.mu.Unlock()
-		s.buf.Close()
-		slog.Debug("session disconnected", "session_id", s.ID)
-		if fn := s.onExit; fn != nil {
-			fn()
-		}
+		s.markExited(nil, "", "session disconnected")
 	})
 	if s.execSession != nil {
 		if cli := s.execSession.SSHClient(); cli != nil {
@@ -630,7 +652,8 @@ func (cs *ChildShell) BufferLen() int64 {
 	return cs.buf.Len()
 }
 
-// TerminateShell closes the child shell's exec session.
+// TerminateShell closes the child shell's exec session channel without touching the
+// shared SSH client (CloseSessionOnly). The client lifetime is managed by the parent Session.
 func (cs *ChildShell) TerminateShell() {
 	cs.mu.Lock()
 	if cs.Status != api.SessionRunning {
@@ -639,7 +662,7 @@ func (cs *ChildShell) TerminateShell() {
 	}
 	cs.mu.Unlock()
 
-	cs.execSession.Close()
+	cs.execSession.CloseSessionOnly()
 	select {
 	case <-cs.execSession.Done():
 	case <-time.After(2 * time.Second):

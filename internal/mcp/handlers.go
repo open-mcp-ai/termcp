@@ -82,6 +82,17 @@ func successResult() *mcpgo.CallToolResult {
 	return mcpgo.NewToolResultText(`{"success":true}`)
 }
 
+// filterRunning returns only sessions whose Status is SessionRunning.
+func filterRunning(in []api.Session) []api.Session {
+	out := make([]api.Session, 0, len(in))
+	for _, s := range in {
+		if s.Status == api.SessionRunning {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (s *Server) requireSession(sessionID string) (*session.Session, *mcpgo.CallToolResult) {
 	sess := s.sessMgr.Get(sessionID)
 	if sess == nil {
@@ -229,6 +240,42 @@ func (s *Server) handleStartSubShell(_ context.Context, request mcpgo.CallToolRe
 	return jsonResult(map[string]any{"session_id": cs.ID, "parent_session_id": parentID, "name": cs.Name}), nil
 }
 
+func (s *Server) handleListSubshells(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	parentID := getString(args, "parent_session_id", "")
+
+	sess, bad := s.requireSession(parentID)
+	if bad != nil {
+		return bad, nil
+	}
+	all := sess.ListChildShells()
+	return jsonResult(map[string]any{"parent_session_id": parentID, "subshells": filterRunning(all)}), nil
+}
+
+// handleCloseShell closes a single shell channel without tearing down the parent session.
+// For a parent session id: closes the root shell channel only (remote) / no-op (internal);
+// the SSH connection and other child shells keep running. For a child shell id: closes
+// just that channel. Use terminate_session to fully stop a session.
+func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	shellID := getString(args, "session_id", "")
+
+	if sess := s.sessMgr.Get(shellID); sess != nil {
+		sess.TerminateShellOnly()
+		s.sessMgr.NotifyChange()
+		return successResult(), nil
+	}
+	found, err := s.sessMgr.CloseChildShell(shellID)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if !found {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", shellID)), nil
+	}
+	s.sessMgr.NotifyChange()
+	return successResult(), nil
+}
+
 func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
@@ -294,16 +341,15 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 }
 
 func (s *Server) handleListSessions(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	sessions := s.sessMgr.ListAll()
-	result := map[string]any{"sessions": sessions}
-	return jsonResult(result), nil
+	all := s.sessMgr.ListAll()
+	return jsonResult(map[string]any{"sessions": filterRunning(all)}), nil
 }
 
 func (s *Server) handleGetSessionInfo(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
 
-	sess, bad := s.requireSession(sessionID)
+	sess, bad := s.requireTerminalShell(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
