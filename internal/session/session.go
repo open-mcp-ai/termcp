@@ -32,7 +32,7 @@ type RemoteSSH struct {
 	Port               int
 	User               string
 	Password           string
-	PrivateKeyPEM      string
+	PrivateKey      string
 	KeyPassphrase      string
 	TrustUnknownHost   bool
 	KnownHosts         string
@@ -110,7 +110,7 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 		clientCfg, err := sshclient.BuildClientConfig(sshclient.DialAuth{
 			User:              strings.TrimSpace(r.User),
 			Password:          r.Password,
-			PrivateKeyPEM:     r.PrivateKeyPEM,
+			PrivateKey:     r.PrivateKey,
 			KeyPassphrase:     r.KeyPassphrase,
 			TrustUnknownHost:  r.TrustUnknownHost,
 			KnownHostsContent: r.KnownHosts,
@@ -685,7 +685,11 @@ func (cs *ChildShell) startReaders() {
 
 	go func() {
 		<-cs.execSession.Done()
-		close(cs.done)
+		select {
+		case <-cs.done:
+		default:
+			close(cs.done)
+		}
 		cs.mu.Lock()
 		cs.Status = api.SessionExited
 		code := cs.execSession.ExitCode()

@@ -232,6 +232,15 @@
     .modal-body textarea { min-height: 220px; font-family: ui-monospace, monospace; font-size: 12px; }
     .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 8px; }
     .err { color: #cf222e; font-size: 0.85rem; margin: 0 0 8px; }
+    .conn-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+    .conn-field label { font-size: 0.78rem; font-weight: 500; color: #57606a; }
+    .conn-field input, .conn-field select, .conn-field textarea { font-size: 0.85rem; padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 4px; }
+    .conn-field select { background: #fff; }
+    .conn-row { display: flex; gap: 8px; }
+    .conn-row > .conn-field { flex: 1; }
+    .psw-wrap { position: relative; }
+    .psw-input { width: 100%; padding-right: 28px; margin: 0; box-sizing: border-box; }
+    .psw-eye { position: absolute; right: 2px; top: 0; height: 100%; width: 26px; padding: 0; border: none; background: transparent; color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
     /* Floating terminal: dark theme; main page stays light */
     .shell-windows-container { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
@@ -694,24 +703,40 @@
     <div class="modal">
       <div class="modal-h">
         <h2 id="modal-conn-title">Add connection</h2>
-        <button type="button" class="btn" id="modal-conn-close">Close</button>
+        <button type="button" id="modal-conn-close" style="width:28px;height:28px;padding:0;border:none;background:transparent;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:4px" title="Close"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg></button>
       </div>
       <div class="modal-body">
         <p id="modal-conn-err" class="err" style="display:none"></p>
-        <p style="margin:0 0 8px;font-size:0.85rem;line-height:1.5">Set a <strong>profile name</strong> (letters, digits, <code>_</code>, <code>-</code> only), edit the JSON below, then <strong>Save</strong>. The server validates JSON, <code>kind</code>, and required fields; errors appear here.</p>
-        <p style="margin:0 0 8px;font-size:0.8rem;line-height:1.45;color:#57606a"><strong>Click the card</strong> to connect (default <strong>PTY</strong> + login shell). Use the <strong>gear</strong> icon only to edit this profile.</p>
-        <p style="margin:0 0 12px;font-size:0.78rem;line-height:1.45;color:#57606a">Auth: <code>password</code>, or <code>private_key_pem</code> (full PEM including <code>BEGIN…/END…</code>; use <code>\n</code> in JSON for newlines), or <code>private_key_file</code> (path readable by the termcp process).</p>
-        <label for="conn-name">Profile name (directory)</label>
-        <input type="text" id="conn-name" placeholder="my-server" autocomplete="off">
-        <label for="conn-json">config.json</label>
-        <textarea id="conn-json" spellcheck="false"></textarea>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label for="conn-name" style="margin:0;flex:1;font-size:0.85rem;font-weight:600">name</label>
+          <button type="button" class="btn" id="conn-toggle-view" style="font-size:0.78rem;padding:2px 6px" title="Toggle between form and TOML">
+            <svg class="toggle-icon-form" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5"/><path d="M4.5 5h5M4.5 7.5h3M4.5 10h2"/></svg>
+            <svg class="toggle-icon-toml" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" style="display:none"><path d="M5 3.5L2 7l3 3.5M9 10.5l3-3.5-3-3.5"/></svg>
+          </button>
+        </div>
+        <input type="text" id="conn-name" placeholder="my-server" autocomplete="off" style="margin-bottom:8px;width:100%">
+        <!-- Form view -->
+        <div id="conn-form-view">
+          <div class="conn-field"><label for="conn-f-host">Host</label><input type="text" id="conn-f-host" placeholder="192.168.1.1"></div>
+          <div class="conn-row"><div class="conn-field"><label for="conn-f-port">Port</label><input type="number" id="conn-f-port" value="22"></div><div class="conn-field"><label for="conn-f-user">User</label><input type="text" id="conn-f-user" placeholder="root"></div></div>
+          <div class="conn-field"><label for="conn-f-auth">Auth</label><select id="conn-f-auth"><option value="password">Password</option><option value="key">Private Key</option></select></div>
+          <div class="conn-field" id="conn-f-password-wrap"><label for="conn-f-password">Password</label><div class="psw-wrap"><input type="password" id="conn-f-password" class="psw-input"><button type="button" class="psw-eye" title="Show password"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field" id="conn-f-pem-wrap" style="display:none"><label for="conn-f-pem">Private Key</label><textarea id="conn-f-pem" spellcheck="false" rows="4"></textarea></div>
+          <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect"></div>
+        </div>
+        <!-- JSON view -->
+        <div id="conn-config-view" style="display:none">
+          <label for="conn-config">config</label>
+          <textarea id="conn-config" spellcheck="false"></textarea>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
           <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
       </div>
-          </div>
-          </div>
+    </div>
+  </div>
 
   <div id="modal-start" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal" style="max-width:420px">
@@ -2167,7 +2192,7 @@
     if (!win._parentSid) return;
     fetch('/api/sessions/start', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       body: JSON.stringify({ parent_session_id: win._parentSid, rows: 24, cols: 80 })
     }).then(function(r) {
       if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
@@ -2301,9 +2326,9 @@
         e.stopPropagation();
         var svg = this.querySelector('svg');
         if (svg) {
-          svg.style.transition = 'transform 0.4s ease';
+          svg.style.transition = 'transform 0.6s ease';
           svg.style.transform = 'rotate(360deg)';
-          setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 420);
+          setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 1220);
         }
         refreshShellFwList(win);
         loadForwards();
@@ -2503,7 +2528,15 @@
       });
     }
 
-    if (win.querySelector('.shell-file-go')) win.querySelector('.shell-file-go').addEventListener('click', shellFileBrowse);
+    if (win.querySelector('.shell-file-go')) win.querySelector('.shell-file-go').addEventListener('click', function(e) {
+      var svg = this.querySelector('svg');
+      if (svg) {
+        svg.style.transition = 'transform 0.6s ease';
+        svg.style.transform = 'rotate(360deg)';
+        setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 1220);
+      }
+      shellFileBrowse();
+    });
     if (win.querySelector('.shell-file-up')) win.querySelector('.shell-file-up').addEventListener('click', function() {
       var p = filePathInput.value.trim().replace(/\/+$/, '') || '/';
       if (p === '/') return;
@@ -2779,9 +2812,14 @@ SHELL_WINDOW_PANELS_HTML +
     if (!grid) return;
     setLoadBanner(document.getElementById('conn-load-banner'), bannerMsg);
     grid.innerHTML = '';
-    (connections || []).forEach(function (c) {
+    (connections || []).sort(function(a, b) {
+      if (a.kind === 'internal') return -1;
+      if (b.kind === 'internal') return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    }).forEach(function (c) {
       var tile = document.createElement('div');
       tile.className = 'conn-tile entry-card';
+      tile.setAttribute('data-conn-name', c.name);
       var icon = c.kind === 'internal' ? '🔁' : '🌐';
       tile.innerHTML =
         '<div class="entry-card-inner">' +
@@ -2871,6 +2909,78 @@ SHELL_WINDOW_PANELS_HTML +
       });
   }
 
+  // ---- connection form helpers ----
+  function _tomlEscape(v) { return v.replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
+  function _tomlVal(s) { return s ? ('"'+_tomlEscape(s)+'"') : '""'; }
+  function _connFormToTOML() {
+    var lines = ['kind = "remote"'];
+    var h = document.getElementById('conn-f-host').value.trim(); lines.push('host = ' + _tomlVal(h));
+    var p = parseInt(document.getElementById('conn-f-port').value, 10) || 22;
+    if (p !== 22) lines.push('port = ' + p);
+    lines.push('user = ' + _tomlVal(document.getElementById('conn-f-user').value.trim()));
+    var auth = document.getElementById('conn-f-auth').value;
+    if (auth === 'password') lines.push('password = ' + _tomlVal(document.getElementById('conn-f-password').value));
+    else lines.push('private_key = """\n' + document.getElementById('conn-f-pem').value + '\n"""');
+    var pp = document.getElementById('conn-f-passphrase').value;
+    if (pp) lines.push('key_passphrase = ' + _tomlVal(pp));
+    var sh = document.getElementById('conn-f-shell').value.trim();
+    if (sh) lines.push('default_shell = ' + _tomlVal(sh));
+    lines.push('trust_unknown_host = true');
+    return lines.join('\n') + '\n';
+  }
+  function _connTOMLToForm(toml) {
+    var obj = {};
+    var re = /^\s*(\w+)\s*=\s*(.+)$/gm, m;
+    while ((m = re.exec(toml)) !== null) {
+      var v = m[2].trim();
+      if (v === 'true') obj[m[1]] = true;
+      else if (v === 'false') obj[m[1]] = false;
+      else if (/^\d+$/.test(v)) obj[m[1]] = parseInt(v, 10);
+      else if (v.startsWith('"""')) obj[m[1]] = v.replace(/^"""/,'').replace(/"""$/,'').trim();
+      else obj[m[1]] = v.replace(/^"(.*)"$/,'$1').replace(/\\"/g,'"');
+    }
+    document.getElementById('conn-f-host').value = obj.host || '';
+    document.getElementById('conn-f-port').value = obj.port || 22;
+    document.getElementById('conn-f-user').value = obj.user || '';
+    document.getElementById('conn-f-password').value = obj.password || '';
+    document.getElementById('conn-f-pem').value = obj.private_key || '';
+    document.getElementById('conn-f-passphrase').value = obj.key_passphrase || '';
+    document.getElementById('conn-f-shell').value = obj.default_shell || '';
+    document.getElementById('conn-f-auth').value = obj.private_key ? 'key' : 'password';
+    _connAuthChange();
+  }
+  function _connAuthChange() {
+    var a = document.getElementById('conn-f-auth').value;
+    document.getElementById('conn-f-password-wrap').style.display = a === 'password' ? '' : 'none';
+    document.getElementById('conn-f-pem-wrap').style.display = a === 'key' ? '' : 'none';
+  }
+  function _connToggleView() {
+    var formView = document.getElementById('conn-form-view');
+    var tomlView = document.getElementById('conn-config-view');
+    var btn = document.getElementById('conn-toggle-view');
+    var iconForm = btn.querySelector('.toggle-icon-form');
+    var iconToml = btn.querySelector('.toggle-icon-toml');
+    if (tomlView.style.display === 'none') {
+      document.getElementById('conn-config').value = _connFormToTOML();
+      formView.style.display = 'none';
+      tomlView.style.display = '';
+      iconForm.style.display = 'none';
+      iconToml.style.display = '';
+    } else {
+      _connTOMLToForm(document.getElementById('conn-config').value);
+      tomlView.style.display = 'none';
+      formView.style.display = '';
+      iconToml.style.display = 'none';
+      iconForm.style.display = '';
+    }
+  }
+  function _connGetBody() {
+    if (document.getElementById('conn-config-view').style.display === 'none') {
+      return _connFormToTOML();
+    }
+    return document.getElementById('conn-config').value;
+  }
+
   function openConnModal(edit, name) {
     editingConnName = edit ? name : '';
     document.getElementById('modal-conn-err').style.display = 'none';
@@ -2879,31 +2989,65 @@ SHELL_WINDOW_PANELS_HTML +
     var nameEl = document.getElementById('conn-name');
     nameEl.value = edit ? name : '';
     nameEl.readOnly = !!edit;
-    var ta = document.getElementById('conn-json');
+    // Start in form view
+    document.getElementById('conn-form-view').style.display = '';
+    document.getElementById('conn-config-view').style.display = 'none';
     if (edit) {
       fetch('/api/connections/' + encodeURIComponent(name)).then(function (r) {
         if (!r.ok) throw new Error(r.statusText);
         return r.text();
-      }).then(function (t) { ta.value = t; }).catch(function (err) {
+      }).then(function (t) {
+        document.getElementById('conn-config').value = t;
+        _connTOMLToForm(t);
+      }).catch(function (err) {
         document.getElementById('modal-conn-err').textContent = String(err.message || err);
         document.getElementById('modal-conn-err').style.display = 'block';
       });
     } else {
       fetch('/api/connection-templates').then(function (r) { return r.json(); }).then(function (t) {
-        ta.value = t.remote || '{}';
-      }).catch(function () { ta.value = '{}'; });
+        var tmpl = t.remote || '{}';
+        document.getElementById('conn-config').value = tmpl;
+        _connTOMLToForm(tmpl);
+      }).catch(function () {});
     }
     showModal('modal-conn');
   }
+
+  document.getElementById('conn-f-auth').onchange = _connAuthChange;
+  document.getElementById('conn-toggle-view').onclick = _connToggleView;
+  function _toggleEye(btn) {
+    var inp = btn.parentElement.querySelector('input');
+    var show = inp && inp.type === 'password';
+    if (inp) inp.type = show ? 'text' : 'password';
+    var openEl = btn.querySelector('.eye-open');
+    var closedEl = btn.querySelector('.eye-closed');
+    if (openEl) openEl.style.display = show ? 'none' : '';
+    if (closedEl) closedEl.style.display = show ? '' : 'none';
+  }
+  document.querySelectorAll('.psw-eye').forEach(function(btn) {
+    btn.onclick = function() { _toggleEye(this); };
+  });
 
   document.getElementById('modal-conn-close').onclick = function () { hideModal('modal-conn'); };
   document.getElementById('conn-save').onclick = function () {
     var err = document.getElementById('modal-conn-err');
     err.style.display = 'none';
     var name = document.getElementById('conn-name').value.trim();
-    var body = document.getElementById('conn-json').value;
+    var body = _connGetBody();
     if (!name) { err.textContent = 'Profile name is required'; err.style.display = 'block'; return; }
-    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
+    // Check for duplicate when creating (not editing)
+    if (!document.getElementById('conn-name').readOnly) {
+      var tiles = document.querySelectorAll('.conn-tile');
+      for (var i = 0; i < tiles.length; i++) {
+        var n = tiles[i].getAttribute('data-conn-name');
+        if (n && n.toLowerCase() === name.toLowerCase()) {
+          err.textContent = 'Profile "' + name + '" already exists';
+          err.style.display = 'block';
+          return;
+        }
+      }
+    }
+    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
         hideModal('modal-conn');
@@ -2981,7 +3125,6 @@ SHELL_WINDOW_PANELS_HTML +
   loadForwards();
   loadConnections();
   startUIWebSocket();
-  setInterval(function () { loadForwards();  }, 5000);
 })();
   </script>
 </body>

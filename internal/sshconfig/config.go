@@ -1,10 +1,8 @@
 package sshconfig
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"github.com/BurntSushi/toml"
 	"regexp"
 	"strings"
 
@@ -18,24 +16,21 @@ const KindRemote = "remote"
 
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
-// Entry is stored as data-dir/ssh_configs/<name>/config.json
+// Entry is stored as data-dir/ssh_configs/<name>/config.toml
 type Entry struct {
-	Kind               string `json:"kind"` // "internal" | "remote"
-	Host               string `json:"host,omitempty"`
-	Port               int    `json:"port,omitempty"`
-	User               string `json:"user,omitempty"`
-	Password           string `json:"password,omitempty"`
-	PrivateKeyPEM      string `json:"private_key_pem,omitempty"`
-	PrivateKeyFile     string `json:"private_key_file,omitempty"`
-	KeyPassphrase      string `json:"key_passphrase,omitempty"`
-	TrustUnknownHost   *bool  `json:"trust_unknown_host,omitempty"`
-	KnownHosts         string `json:"known_hosts,omitempty"`
-	DialTimeoutSeconds int    `json:"dial_timeout_seconds,omitempty"`
-	Description        string `json:"description,omitempty"`
-	// DefaultShell: when the client omits command+args, split with strings.Fields and use as argv (optional).
-	DefaultShell string `json:"default_shell,omitempty"`
-	// DefaultMode: when the client omits mode, use "pty" or "pipe" (optional; empty = pty).
-	DefaultMode string `json:"default_mode,omitempty"`
+	Kind               string `toml:"kind"` // "internal" | "remote"
+	Host               string `toml:"host,omitempty"`
+	Port               int    `toml:"port,omitempty"`
+	User               string `toml:"user,omitempty"`
+	Password           string `toml:"password,omitempty"`
+	PrivateKey string `toml:"private_key,omitempty"`
+	KeyPassphrase      string `toml:"key_passphrase,omitempty"`
+	TrustUnknownHost   *bool  `toml:"trust_unknown_host,omitempty"`
+	KnownHosts         string `toml:"known_hosts,omitempty"`
+	DialTimeoutSeconds int    `toml:"dial_timeout_seconds,omitempty"`
+	Description        string `toml:"description,omitempty"`
+	DefaultShell       string `toml:"default_shell,omitempty"`
+	DefaultMode        string `toml:"default_mode,omitempty"`
 }
 
 // ValidateName checks directory/config id (reserved: internal is allowed as id).
@@ -47,14 +42,14 @@ func ValidateName(name string) error {
 	return nil
 }
 
-// ParseAndValidate decodes JSON and validates by kind.
+// ParseAndValidate decodes TOML and validates by kind.
 func ParseAndValidate(data []byte) (*Entry, error) {
 	if len(data) > maxConfigFileSize {
 		return nil, fmt.Errorf("config file too large (max %d bytes)", maxConfigFileSize)
 	}
 	var e Entry
-	if err := json.Unmarshal(data, &e); err != nil {
-		return nil, fmt.Errorf("config json: %w", err)
+	if err := toml.Unmarshal(data, &e); err != nil {
+		return nil, fmt.Errorf("config toml: %w", err)
 	}
 	k := strings.TrimSpace(strings.ToLower(e.Kind))
 	if k == "" {
@@ -76,8 +71,8 @@ func ParseAndValidate(data []byte) (*Entry, error) {
 		if e.User == "" {
 			return nil, fmt.Errorf("remote config must set \"user\"")
 		}
-		if strings.TrimSpace(e.Password) == "" && strings.TrimSpace(e.PrivateKeyPEM) == "" && strings.TrimSpace(e.PrivateKeyFile) == "" {
-			return nil, fmt.Errorf("remote config needs password, private_key_pem, or private_key_file")
+		if strings.TrimSpace(e.Password) == "" && strings.TrimSpace(e.PrivateKey) == "" {
+			return nil, fmt.Errorf("remote config needs password or private_key")
 		}
 		if e.Port < 0 || e.Port > 65535 {
 			return nil, fmt.Errorf("invalid port %d", e.Port)
@@ -138,45 +133,20 @@ func EffectiveMode(ent *Entry, mode string) string {
 	return "pty"
 }
 
-// RemoteTemplate returns default JSON for a new remote config directory.
+// RemoteTemplate returns default TOML for a new remote config directory.
 func RemoteTemplate() []byte {
-	return []byte(`{
-  "kind": "remote",
-  "description": "Edit this file with real credentials (never commit).",
-  "host": "ssh.example.com",
-  "port": 22,
-  "user": "you",
-  "password": "",
-  "private_key_pem": "",
-  "private_key_file": "",
-  "key_passphrase": "",
-  "trust_unknown_host": false,
-  "known_hosts": "",
-  "dial_timeout_seconds": 30
-}
-`)
+	return []byte("# termcp SSH config (TOML)\nkind = \"remote\"\ndescription = \"Edit this file with real credentials (never commit).\"\nhost = \"ssh.example.com\"\nport = 22\nuser = \"\"\n# auth: password or private_key\npassword = \"\"\nprivate_key = \"\"\"\n\"\"\"\nkey_passphrase = \"\"\ntrust_unknown_host = false\nknown_hosts = \"\"\ndial_timeout_seconds = 30\n")
 }
 
 
 // InternalTemplate is the built-in loopback SSH entry.
 func InternalTemplate() []byte {
-	return []byte(`{
-  "kind": "internal",
-  "description": "Built-in termcp loopback SSH (no host credentials)."
-}
-`)
+	return []byte("# termcp loopback SSH config (TOML)\nkind = \"internal\"\ndescription = \"Built-in termcp loopback SSH (no host credentials).\"\n")
 }
 
 // RemoteFromEntry converts an sshconfig Entry into session.RemoteSSH dial settings.
-func RemoteFromEntry(e *Entry) (*session.RemoteSSH, error) {
-	pem := strings.TrimSpace(e.PrivateKeyPEM)
-	if fn := strings.TrimSpace(e.PrivateKeyFile); fn != "" {
-		b, err := os.ReadFile(filepath.Clean(fn))
-		if err != nil {
-			return nil, fmt.Errorf("private_key_file %q: %w", fn, err)
-		}
-		pem = string(b)
-	}
+func RemoteFromEntry(e *Entry, configDir string) (*session.RemoteSSH, error) {
+	pem := strings.TrimSpace(e.PrivateKey)
 	trust := true
 	if e.TrustUnknownHost != nil {
 		trust = *e.TrustUnknownHost
@@ -190,7 +160,7 @@ func RemoteFromEntry(e *Entry) (*session.RemoteSSH, error) {
 		Port:               port,
 		User:               e.User,
 		Password:           e.Password,
-		PrivateKeyPEM:      pem,
+		PrivateKey:      pem,
 		KeyPassphrase:      e.KeyPassphrase,
 		TrustUnknownHost:   trust,
 		KnownHosts:         e.KnownHosts,

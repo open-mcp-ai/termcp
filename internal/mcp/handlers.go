@@ -133,7 +133,7 @@ func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *sshconfig.Ent
 	if ent.Kind == sshconfig.KindInternal {
 		return name, ent, nil, nil
 	}
-	r, err := sshconfig.RemoteFromEntry(ent)
+	r, err := sshconfig.RemoteFromEntry(ent, s.sshConfigs.ConfigDir(name))
 	if err != nil {
 		return "", nil, nil, err
 	}

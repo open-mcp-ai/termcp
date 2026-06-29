@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/ssh"
+	"github.com/pkg/sftp"
 	sshstd "golang.org/x/crypto/ssh"
 )
 
@@ -55,13 +56,23 @@ func New(addr string) *Server {
 		PasswordHandler: func(ctx ssh.Context, password string) bool {
 			return s.passwordOK(ctx.User(), password)
 		},
-			LocalPortForwardingCallback: func(ctx ssh.Context, dHost string, dPort uint32) bool {
-				return true
+		LocalPortForwardingCallback: func(ctx ssh.Context, dHost string, dPort uint32) bool {
+			return true
+		},
+		ChannelHandlers: map[string]ssh.ChannelHandler{
+			"session": ssh.DefaultSessionHandler,
+			"direct-tcpip": ssh.DirectTCPIPHandler,
+		},
+		SubsystemHandlers: map[string]ssh.SubsystemHandler{
+			"sftp": func(sess ssh.Session) {
+				srv, err := sftp.NewServer(sess)
+				if err != nil {
+					slog.Error("sftp server start", "err", err)
+					return
+				}
+				srv.Serve()
 			},
-			ChannelHandlers: map[string]ssh.ChannelHandler{
-				"session": ssh.DefaultSessionHandler,
-				"direct-tcpip": ssh.DirectTCPIPHandler,
-			},
+		},
 	}
 	_ = srv.SetOption(ssh.AllocatePty())
 	s.server = srv

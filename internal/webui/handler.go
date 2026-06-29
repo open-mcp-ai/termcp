@@ -540,7 +540,7 @@ func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry,
 	if ent.Kind == sshconfig.KindInternal {
 		return name, ent, nil, nil
 	}
-	r, err := sshconfig.RemoteFromEntry(ent)
+	r, err := sshconfig.RemoteFromEntry(ent, h.SSH.ConfigDir(name))
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -655,7 +655,6 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client) {
 	sess := h.Sessions.Get(sessionID)
 	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
 		return nil, nil
 	}
 	sshClient := sess.SSHClient()
@@ -665,15 +664,32 @@ func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*sess
 func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("id")
 	path := r.URL.Query().Get("path")
-	if path == "" { path = "/" }
-	_, sshClient := h.getFileSession(sid, w)
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
+		return
+	}
+	slog.Debug("handleListFiles", "session", sid, "path", path)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		// Internal: use local filesystem
 		fi, err := os.Stat(path)
-		if err != nil { writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()}); return }
+		if err != nil {
+			slog.Error("file stat", "path", path, "err", err)
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
 		result := map[string]any{"name": filepath.Base(path), "size": fi.Size(), "is_dir": fi.IsDir()}
 		if fi.IsDir() {
-			entries, _ := os.ReadDir(path)
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				slog.Error("file readdir", "path", path, "err", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
 			var children []map[string]any
 			for _, e := range entries {
 				info, _ := e.Info()
@@ -688,12 +704,18 @@ func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	// Remote: use SFTP
 	sftpCli, err := sftp.NewClient(sshClient)
-	if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()}); return }
+	if err != nil {
+		slog.Error("sftp client", "path", path, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
 	defer sftpCli.Close()
-	// sftpClient is unexported... we need to call StatFile
-	// Use a simpler approach
 	result, err := sftpCli.StatFile(path)
-	if err != nil { writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()}); return }
+	if err != nil {
+		slog.Error("sftp stat", "path", path, "err", err)
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -715,7 +737,11 @@ func (h *Handler) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		length, _ = strconv.ParseInt(r.URL.Query().Get("length"), 10, 64)
 	}
 
-	_, sshClient := h.getFileSession(sid, w)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		// Internal / local: http.ServeFile handles Range + If-Modified-Since natively.
 		// Only use manual path when explicit ?offset=&length= query params are set.
@@ -833,7 +859,11 @@ func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, sshClient := h.getFileSession(sid, w)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		// Internal / local filesystem.
 		flag := os.O_RDWR | os.O_CREATE
@@ -881,7 +911,11 @@ func (h *Handler) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
 		return
 	}
-	_, sshClient := h.getFileSession(sid, w)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		if err := os.Remove(path); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -916,7 +950,11 @@ func (h *Handler) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, sshClient := h.getFileSession(sid, w)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		if err := os.Rename(from, to); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -947,7 +985,11 @@ func (h *Handler) handleMakeDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, sshClient := h.getFileSession(sid, w)
+	sess, sshClient := h.getFileSession(sid, w)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
 	if sshClient == nil {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
