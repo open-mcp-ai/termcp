@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/ssh"
-	"github.com/pkg/sftp"
 	sshstd "golang.org/x/crypto/ssh"
 )
 
