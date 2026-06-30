@@ -203,20 +203,16 @@ func TestSession_ForceTerminate(t *testing.T) {
 
 	command, args := testSleepCommand("60")
 	s, err := New(srv, testConfig(command, args, api.ModePipe, ""), nil)
-
-	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Terminate(true, 0)
 
-	if err := s.ResizePty(50, 120); err != nil {
-		t.Fatalf("ResizePty failed: %v", err)
-	}
+	s.Terminate(true, 0)
 
+	time.Sleep(200 * time.Millisecond)
 	info := s.Info()
-	if info.Rows != 50 || info.Cols != 120 {
-		t.Fatalf("expected 50x120, got %dx%d", info.Rows, info.Cols)
+	if info.Status != api.SessionExited {
+		t.Fatalf("expected 'exited' after force terminate, got %q", info.Status)
 	}
 }
 
