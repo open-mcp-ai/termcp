@@ -238,6 +238,17 @@
     .conn-field select { background: #fff; }
     .conn-row { display: flex; gap: 8px; }
     .conn-row > .conn-field { flex: 1; }
+    .jump-chain { margin-top: 6px; }
+    .jump-arrow { text-align:center; color:#8c959f; font-size:0.7rem; margin:2px 0; letter-spacing:1px; }
+    .jump-card { border:1px solid #d0d7de; border-radius:6px; padding:10px; margin-bottom:8px; background:#f6f8fa; }
+    .jump-card-h { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; font-size:0.8rem; font-weight:600; color:#57606a; }
+    .jump-card .conn-field { margin-bottom:6px; }
+    .jump-card-actions { display:flex; gap:4px; }
+    .jump-summary { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; }
+    .jump-summary:hover { background:#eaeef2; }
+    .jump-summary-idx { font-size:0.7rem; font-weight:700; color:#8c959f; min-width:14px; }
+    .jump-summary-info { flex:1; font-size:0.82rem; color:#24292f; word-break:break-all; }
+    .jump-summary-info em { font-style:normal; font-size:0.68rem; color:#8c959f; margin-left:4px; padding:1px 5px; border:1px solid #d0d7de; border-radius:3px; }
     .psw-wrap { position: relative; }
     .psw-input { width: 100%; padding-right: 28px; margin: 0; box-sizing: border-box; }
     .psw-eye { position: absolute; right: 2px; top: 0; height: 100%; width: 26px; padding: 0; border: none; background: transparent; color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -726,6 +737,10 @@
           <div class="conn-field" id="conn-f-pem-wrap" style="display:none"><label for="conn-f-pem">Private Key</label><textarea id="conn-f-pem" spellcheck="false" rows="4"></textarea></div>
           <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
           <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect" autocomplete="off"></div>
+          <div class="conn-field"><label for="conn-f-proxy">Proxy (optional, SOCKS5 URL)</label><input type="text" id="conn-f-proxy" placeholder="socks5://user:pass@127.0.0.1:1080" autocomplete="off"></div>
+          <div class="jump-arrow" title="SSH traffic to this host is tunneled through the bastions below, in order">SSH Jumps Chain</div>
+          <div class="jump-chain" id="conn-jumps"></div>
+          <div class="conn-field"><button type="button" class="btn" id="conn-add-jump" style="font-size:0.8rem">+ add jump</button></div>
         </form>
         <!-- JSON view -->
         <div id="conn-config-view" style="display:none">
@@ -2941,6 +2956,138 @@ SHELL_WINDOW_PANELS_HTML +
   // ---- connection form helpers ----
   function _tomlEscape(v) { return v.replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
   function _tomlVal(s) { return s ? ('"'+_tomlEscape(s)+'"') : '""'; }
+  function _hesc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+  // section-aware TOML-ish parser: returns {root:{}, sections:{"jump":{}, "jump.jump":{}}}
+  function _parseConnTOML(toml) {
+    var root = {}, sections = {}, cur = root;
+    var lines = String(toml).replace(/\r/g,'').split('\n');
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i++].trim();
+      if (line === '' || line.charAt(0) === '#') continue;
+      var sec = line.match(/^\[([^\]]+)\]$/);
+      if (sec) { cur = sections[sec[1].trim()] || (sections[sec[1].trim()] = {}); continue; }
+      var kv = line.match(/^(\w+)\s*=\s*(.*)$/);
+      if (!kv) continue;
+      var key = kv[1], raw = kv[2];
+      if (raw.charAt(0) === '"' && raw.charAt(1) === '"' && raw.charAt(2) === '"') {
+        var body = raw.substring(3);
+        if (body.indexOf('"""') >= 0) { cur[key] = body.replace(/""".*$/,'').replace(/\\"/g,'"'); continue; }
+        var parts = [body];
+        while (i < lines.length) {
+          var l = lines[i++]; var idx = l.indexOf('"""');
+          if (idx >= 0) { parts.push(l.substring(0, idx)); break; }
+          parts.push(l);
+        }
+        cur[key] = parts.join('\n').replace(/\\"/g,'"').trim();
+        continue;
+      }
+      var v = raw.trim();
+      if (v === 'true') cur[key] = true;
+      else if (v === 'false') cur[key] = false;
+      else if (/^-?\d+$/.test(v)) cur[key] = parseInt(v, 10);
+      else cur[key] = v.replace(/^"(.*)"$/,'$1').replace(/\\"/g,'"');
+    }
+    return { root: root, sections: sections };
+  }
+
+  function _newJumpCard() {
+    return { host:'', port:22, user:'', auth:'password', password:'', pem:'', passphrase:'', proxy:'' };
+  }
+  function _sectionToJump(s) {
+    return {
+      host: s.host || '', port: s.port || 22, user: s.user || '',
+      auth: s.private_key ? 'key' : 'password',
+      password: s.password || '', pem: s.private_key || '',
+      passphrase: s.key_passphrase || '', proxy: s.proxy || ''
+    };
+  }
+  function _jumpsFromSections(sections) {
+    var arr = [], name = 'jump';
+    while (sections[name]) { arr.push(_sectionToJump(sections[name])); name += '.jump'; }
+    return arr;
+  }
+
+  var jumpCards = [];
+  var jumpEditingIdx = -1; // index of the jump currently expanded in editor mode; -1 = none
+  var jumpEditingNew = false; // the editing jump is a brand-new, unsaved one (cancel removes it)
+  var connEntryNames = null;
+
+  function renderJumps() {
+    var box = document.getElementById('conn-jumps');
+    box.innerHTML = '';
+    jumpCards.forEach(function(c, idx) {
+      var card = document.createElement('div');
+      card.className = 'jump-card';
+      card.setAttribute('data-idx', idx);
+      if (idx === jumpEditingIdx) {
+        var authIsKey = c.auth === 'key';
+        card.innerHTML =
+          '<div class="jump-card-h"><span>jump ' + (idx+1) + '</span>' +
+            '<span class="jump-card-actions">' +
+              '<button type="button" class="btn jump-save" style="font-size:0.72rem;padding:2px 8px">save</button>' +
+              '<button type="button" class="btn jump-cancel" style="font-size:0.72rem;padding:2px 8px">cancel</button>' +
+            '</span></div>' +
+          '<div class="conn-field"><label>Import from entry</label><select class="jump-import"><option value="">— select entry —</option></select></div>' +
+          '<div class="conn-row">' +
+            '<div class="conn-field"><label>Host</label><input type="text" data-f="host" value="' + _hesc(c.host) + '"></div>' +
+            '<div class="conn-field"><label>Port</label><input type="number" data-f="port" value="' + _hesc(c.port||22) + '"></div>' +
+            '<div class="conn-field"><label>User</label><input type="text" data-f="user" value="' + _hesc(c.user) + '"></div>' +
+          '</div>' +
+          '<div class="conn-field"><label>Auth</label><select data-f="auth"><option value="password"' + (authIsKey?'':' selected') + '>Password</option><option value="key"' + (authIsKey?' selected':'') + '>Private Key</option></select></div>' +
+          '<div class="conn-field j-pw" style="' + (authIsKey?'display:none':'') + '"><label>Password</label><input type="password" data-f="password" value="' + _hesc(c.password) + '"></div>' +
+          '<div class="conn-field j-pem" style="' + (authIsKey?'':'display:none') + '"><label>Private Key</label><textarea data-f="pem" rows="3">' + _hesc(c.pem) + '</textarea></div>' +
+          '<div class="conn-field"><label>Key Passphrase (optional)</label><input type="password" data-f="passphrase" value="' + _hesc(c.passphrase) + '"></div>' +
+          '<div class="conn-field"><label>Proxy (optional)</label><input type="text" data-f="proxy" placeholder="socks5://..." value="' + _hesc(c.proxy) + '"></div>';
+      } else {
+        var host = c.host || '(empty)';
+        var info = (c.user ? c.user + '@' : '') + host + (c.port && c.port !== 22 ? ':' + c.port : '');
+        var tag = c.auth === 'key' ? 'key' : (c.password || c.pem ? 'pwd' : '');
+        card.className = 'jump-card jump-summary';
+        card.setAttribute('title', 'click to edit');
+        card.innerHTML =
+          '<span class="jump-summary-idx">' + (idx+1) + '</span>' +
+          '<span class="jump-summary-info">' + _hesc(info) + (tag ? ' <em>' + tag + '</em>' : '') + '</span>' +
+          '<button type="button" class="btn jump-rm" style="font-size:0.72rem;padding:2px 8px" title="remove">remove</button>';
+      }
+      box.appendChild(card);
+    });
+    _populateJumpImports();
+  }
+
+  function _populateJumpImports() {
+    function fill() {
+      document.querySelectorAll('.jump-import').forEach(function(sel) {
+        var opts = '<option value="">— select entry —</option>';
+        (connEntryNames || []).forEach(function(n) {
+          if (n === 'internal') return;
+          opts += '<option value="' + _hesc(n) + '">' + _hesc(n) + '</option>';
+        });
+        sel.innerHTML = opts;
+      });
+    }
+    if (connEntryNames) { fill(); return; }
+    fetch('/api/connections').then(function(r){ return r.json(); }).then(function(j) {
+      connEntryNames = (j.connections || []).map(function(c){ return c.name; });
+      fill();
+    }).catch(function(){});
+  }
+
+  function _jumpToLines(c, depth) {
+    var sec = '', i;
+    for (i = 0; i < depth; i++) { if (i) sec += '.'; sec += 'jump'; }
+    var lines = ['[' + sec + ']'];
+    lines.push('host = ' + _tomlVal(c.host));
+    var p = parseInt(c.port, 10) || 22; if (p !== 22) lines.push('port = ' + p);
+    lines.push('user = ' + _tomlVal(c.user));
+    if (c.auth === 'key' || (c.pem && c.pem.trim())) lines.push('private_key = """\n' + c.pem + '\n"""');
+    else lines.push('password = ' + _tomlVal(c.password));
+    if (c.passphrase) lines.push('key_passphrase = ' + _tomlVal(c.passphrase));
+    if (c.proxy) lines.push('proxy = ' + _tomlVal(c.proxy));
+    return lines;
+  }
+
   function _connFormToTOML() {
     var lines = ['kind = "remote"'];
     var h = document.getElementById('conn-f-host').value.trim(); lines.push('host = ' + _tomlVal(h));
@@ -2954,29 +3101,30 @@ SHELL_WINDOW_PANELS_HTML +
     if (pp) lines.push('key_passphrase = ' + _tomlVal(pp));
     var sh = document.getElementById('conn-f-shell').value.trim();
     if (sh) lines.push('default_shell = ' + _tomlVal(sh));
+    var px = document.getElementById('conn-f-proxy').value.trim();
+    if (px) lines.push('proxy = ' + _tomlVal(px));
     lines.push('trust_unknown_host = true');
+    for (var j = 0; j < jumpCards.length; j++) {
+      lines = lines.concat(_jumpToLines(jumpCards[j], j + 1));
+    }
     return lines.join('\n') + '\n';
   }
   function _connTOMLToForm(toml) {
-    var obj = {};
-    var re = /^\s*(\w+)\s*=\s*(.+)$/gm, m;
-    while ((m = re.exec(toml)) !== null) {
-      var v = m[2].trim();
-      if (v === 'true') obj[m[1]] = true;
-      else if (v === 'false') obj[m[1]] = false;
-      else if (/^\d+$/.test(v)) obj[m[1]] = parseInt(v, 10);
-      else if (v.startsWith('"""')) obj[m[1]] = v.replace(/^"""/,'').replace(/"""$/,'').trim();
-      else obj[m[1]] = v.replace(/^"(.*)"$/,'$1').replace(/\\"/g,'"');
-    }
-    document.getElementById('conn-f-host').value = obj.host || '';
-    document.getElementById('conn-f-port').value = obj.port || 22;
-    document.getElementById('conn-f-user').value = obj.user || '';
-    document.getElementById('conn-f-password').value = obj.password || '';
-    document.getElementById('conn-f-pem').value = obj.private_key || '';
-    document.getElementById('conn-f-passphrase').value = obj.key_passphrase || '';
-    document.getElementById('conn-f-shell').value = obj.default_shell || '';
-    document.getElementById('conn-f-auth').value = obj.private_key ? 'key' : 'password';
+    var parsed = _parseConnTOML(toml);
+    var o = parsed.root;
+    document.getElementById('conn-f-host').value = o.host || '';
+    document.getElementById('conn-f-port').value = o.port || 22;
+    document.getElementById('conn-f-user').value = o.user || '';
+    document.getElementById('conn-f-password').value = o.password || '';
+    document.getElementById('conn-f-pem').value = o.private_key || '';
+    document.getElementById('conn-f-passphrase').value = o.key_passphrase || '';
+    document.getElementById('conn-f-shell').value = o.default_shell || '';
+    document.getElementById('conn-f-proxy').value = o.proxy || '';
+    document.getElementById('conn-f-auth').value = o.private_key ? 'key' : 'password';
     _connAuthChange();
+    jumpCards = _jumpsFromSections(parsed.sections);
+    jumpEditingIdx = -1; jumpEditingNew = false;
+    renderJumps();
   }
   function _connAuthChange() {
     var a = document.getElementById('conn-f-auth').value;
@@ -3012,6 +3160,7 @@ SHELL_WINDOW_PANELS_HTML +
 
   function openConnModal(edit, name) {
     editingConnName = edit ? name : '';
+    connEntryNames = null; // refresh import dropdown options
     document.getElementById('modal-conn-err').style.display = 'none';
     document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
     document.getElementById('conn-delete').style.display = edit && name !== 'internal' ? 'inline-block' : 'none';
@@ -3044,6 +3193,86 @@ SHELL_WINDOW_PANELS_HTML +
 
   document.getElementById('conn-f-auth').onchange = _connAuthChange;
   document.getElementById('conn-toggle-view').onclick = _connToggleView;
+
+  // ---- jump chain events ----
+  document.getElementById('conn-add-jump').onclick = function () {
+    jumpCards.push(_newJumpCard());
+    jumpEditingIdx = jumpCards.length - 1;
+    jumpEditingNew = true;
+    renderJumps();
+  };
+  var _jumpsBox = document.getElementById('conn-jumps');
+  _jumpsBox.addEventListener('input', function (e) {
+    var t = e.target, f = t.getAttribute && t.getAttribute('data-f');
+    if (!f) return;
+    var card = t.closest('.jump-card');
+    if (!card) return;
+    var idx = parseInt(card.getAttribute('data-idx'), 10);
+    if (isNaN(idx) || !jumpCards[idx]) return;
+    var c = jumpCards[idx];
+    if (t.type === 'checkbox') c[f] = t.checked;
+    else c[f] = t.value;
+    if (f === 'auth') {
+      card.querySelector('.j-pw').style.display = t.value === 'password' ? '' : 'none';
+      card.querySelector('.j-pem').style.display = t.value === 'key' ? '' : 'none';
+    }
+  });
+  _jumpsBox.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('jump-import')) return;
+    var name = e.target.value;
+    e.target.value = '';
+    if (!name) return;
+    var card = e.target.closest('.jump-card');
+    var idx = card ? parseInt(card.getAttribute('data-idx'), 10) : NaN;
+    if (isNaN(idx)) return;
+    fetch('/api/connections/' + encodeURIComponent(name)).then(function (r) {
+      if (!r.ok) throw new Error(r.statusText);
+      return r.text();
+    }).then(function (t) {
+      var parsed = _parseConnTOML(t);
+      var root = _sectionToJump(parsed.root);
+      var chain = _jumpsFromSections(parsed.sections);
+      jumpCards = jumpCards.slice(0, idx).concat([root], chain, jumpCards.slice(idx + 1));
+      jumpEditingIdx = idx; // keep editor open on the imported hop
+      jumpEditingNew = false;
+      renderJumps();
+    }).catch(function (err) {
+      var e2 = document.getElementById('modal-conn-err');
+      e2.textContent = String(err.message || err);
+      e2.style.display = 'block';
+    });
+  });
+  _jumpsBox.addEventListener('click', function (e) {
+    var card = e.target.closest('.jump-card');
+    var idx = card ? parseInt(card.getAttribute('data-idx'), 10) : NaN;
+    if (isNaN(idx)) return;
+    if (e.target.classList.contains('jump-rm')) {
+      jumpCards.splice(idx, 1);
+      if (jumpEditingIdx === idx) { jumpEditingIdx = -1; jumpEditingNew = false; }
+      else if (jumpEditingIdx > idx) { jumpEditingIdx -= 1; }
+      renderJumps();
+      return;
+    }
+    if (e.target.classList.contains('jump-save')) {
+      jumpEditingIdx = -1; jumpEditingNew = false;
+      renderJumps();
+      return;
+    }
+    if (e.target.classList.contains('jump-cancel')) {
+      if (jumpEditingNew && jumpEditingIdx === idx) {
+        jumpCards.splice(idx, 1);
+      }
+      jumpEditingIdx = -1; jumpEditingNew = false;
+      renderJumps();
+      return;
+    }
+    // click on a summary card (not on a button) → expand editor
+    if (card.classList.contains('jump-summary') && jumpEditingIdx !== idx) {
+      jumpEditingIdx = idx; jumpEditingNew = false;
+      renderJumps();
+    }
+  });
+
   function _toggleEye(btn) {
     var inp = btn.parentElement.querySelector('input');
     var show = inp && inp.type === 'password';

@@ -27,16 +27,21 @@ import (
 // Lock ordering: mu -> stdinMu. Never acquire in reverse order.
 
 // RemoteSSH selects a user-supplied SSH server instead of the built-in internal one.
+// Jump, when non-nil, is a bastion (ProxyJump): the SSH connection to this host
+// is tunneled through a direct-tcpip channel opened on the bastion's client.
+// Jump chains recursively (Jump.Jump) for multi-hop.
 type RemoteSSH struct {
 	Host               string
 	Port               int
 	User               string
 	Password           string
-	PrivateKey      string
+	PrivateKey         string
 	KeyPassphrase      string
 	TrustUnknownHost   bool
 	KnownHosts         string
 	DialTimeoutSeconds int
+	Proxy              *sshclient.Proxy
+	Jump               *RemoteSSH
 }
 
 // Config holds parameters for creating a new Session.
@@ -91,34 +96,23 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		if port < 1 || port > 65535 {
 			return nil, fmt.Errorf("ssh_port must be between 1 and 65535, got %d", port)
 		}
-		host := strings.TrimSpace(r.Host)
-		dialAddr := net.JoinHostPort(host, strconv.Itoa(port))
-
-		toSec := r.DialTimeoutSeconds
-		if toSec <= 0 {
-			toSec = 30
-		}
-		if toSec > 120 {
-			toSec = 120
-		}
-		dialTimeout := time.Duration(toSec) * time.Second
-
-		var err error
-		clientCfg, err := sshclient.BuildClientConfig(sshclient.DialAuth{
-			User:              strings.TrimSpace(r.User),
-			Password:          r.Password,
-			PrivateKey:     r.PrivateKey,
-			KeyPassphrase:     r.KeyPassphrase,
-			TrustUnknownHost:  r.TrustUnknownHost,
-			KnownHostsContent: r.KnownHosts,
-			DialTimeout:       dialTimeout,
-		})
-		if err != nil {
-			return nil, err
-		}
 		sshEndpointPublic = "remote"
 
-		execSession, err = sshclient.StartWithConfig(dialAddr, clientCfg, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		var err error
+		if r.Jump != nil {
+			client, closers, derr := buildChainClient(r)
+			if derr != nil {
+				return nil, derr
+			}
+			execSession, err = sshclient.StartWithChain(client, closers, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		} else {
+			dialAddr := remoteDialAddr(r)
+			clientCfg, cerr := remoteClientConfig(r)
+			if cerr != nil {
+				return nil, cerr
+			}
+			execSession, err = sshclient.StartWithConfig(dialAddr, clientCfg, r.Proxy, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -185,6 +179,93 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
 	return s, nil
+}
+
+// remoteDialAddr returns host:port for a remote, defaulting port 22.
+func remoteDialAddr(r *RemoteSSH) string {
+	port := r.Port
+	if port == 0 {
+		port = 22
+	}
+	return net.JoinHostPort(strings.TrimSpace(r.Host), strconv.Itoa(port))
+}
+
+// remoteDialTimeout clamps DialTimeoutSeconds to [30, 120] seconds.
+func remoteDialTimeout(r *RemoteSSH) time.Duration {
+	toSec := r.DialTimeoutSeconds
+	if toSec <= 0 {
+		toSec = 30
+	}
+	if toSec > 120 {
+		toSec = 120
+	}
+	return time.Duration(toSec) * time.Second
+}
+
+// remoteClientConfig builds the per-hop SSH client config.
+func remoteClientConfig(r *RemoteSSH) (*ssh.ClientConfig, error) {
+	return sshclient.BuildClientConfig(sshclient.DialAuth{
+		User:              strings.TrimSpace(r.User),
+		Password:          r.Password,
+		PrivateKey:        r.PrivateKey,
+		KeyPassphrase:     r.KeyPassphrase,
+		TrustUnknownHost:  r.TrustUnknownHost,
+		KnownHostsContent: r.KnownHosts,
+		DialTimeout:       remoteDialTimeout(r),
+	})
+}
+
+// buildChainClient establishes the SSH client for r, recursing through r.Jump
+// bastions (ProxyJump). The bastion's *ssh.Client.Dial opens a direct-tcpip
+// channel to the next hop; the SSH handshake to each hop runs over that channel.
+//
+// Returns the final target client plus all intermediate bastion clients (closers)
+// that must stay alive for the life of the session. On error, everything opened
+// is cleaned up.
+//
+// Per-hop host-key verification happens locally at termcp; bastions only relay TCP.
+// r.Proxy (socks5) only applies at the chain root (the deepest hop, dialed directly);
+// non-root hops get their connection from the parent bastion's Dial, so their
+// Proxy is ignored.
+func buildChainClient(r *RemoteSSH) (*ssh.Client, []io.Closer, error) {
+	addr := remoteDialAddr(r)
+	cfg, err := remoteClientConfig(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if r.Jump == nil {
+		conn, err := sshclient.DialConn(addr, r.Proxy, cfg.Timeout)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ssh dial %s: %w", addr, err)
+		}
+		c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+		if err != nil {
+			conn.Close()
+			return nil, nil, fmt.Errorf("ssh handshake %s: %w", addr, err)
+		}
+		return ssh.NewClient(c, chans, reqs), nil, nil
+	}
+
+	bastion, subClosers, err := buildChainClient(r.Jump)
+	if err != nil {
+		return nil, nil, err
+	}
+	conn, err := bastion.Dial("tcp", addr)
+	if err != nil {
+		bastion.Close()
+		sshclient.DrainClosers(subClosers)
+		return nil, nil, fmt.Errorf("bastion dial %s: %w", addr, err)
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		conn.Close()
+		bastion.Close()
+		sshclient.DrainClosers(subClosers)
+		return nil, nil, fmt.Errorf("ssh handshake %s: %w", addr, err)
+	}
+	closers := append(subClosers, io.Closer(bastion))
+	return ssh.NewClient(c, chans, reqs), closers, nil
 }
 
 // SendInput writes text to the process stdin and records it in the message log.

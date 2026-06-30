@@ -8,21 +8,23 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
 // ExecSession wraps an active SSH client session.
 type ExecSession struct {
-	client    *ssh.Client
-	session   *ssh.Session
-	Stdin     io.WriteCloser
-	Stdout    io.Reader
-	Stderr    io.Reader
-	done      chan struct{}
-	exitCode  int
-	err       error
-	ownClient bool // if false, Close() does not close the underlying SSH client
+	client       *ssh.Client
+	session      *ssh.Session
+	Stdin        io.WriteCloser
+	Stdout       io.Reader
+	Stderr       io.Reader
+	done         chan struct{}
+	exitCode     int
+	err          error
+	ownClient    bool // if false, Close() does not close the underlying SSH client
+	extraClosers []io.Closer
 }
 
 func closeIfCloser(r io.Reader) {
@@ -31,15 +33,32 @@ func closeIfCloser(r io.Reader) {
 	}
 }
 
+// DrainClosers closes closers in reverse order, ignoring errors. Used on error
+// paths and session teardown for bastion chains.
+func DrainClosers(closers []io.Closer) {
+	for i := len(closers) - 1; i >= 0; i-- {
+		if closers[i] != nil {
+			closers[i].Close()
+		}
+	}
+}
+
 // StartWithConfig dials addr with the given SSH client config and starts a command.
-func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+// If proxy is non-nil and enabled, the SSH connection is tunneled through a SOCKS5 proxy.
+func StartWithConfig(addr string, config *ssh.ClientConfig, proxy *Proxy, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
 	if config == nil {
 		return nil, fmt.Errorf("nil ssh ClientConfig")
 	}
-	client, err := ssh.Dial("tcp", addr, config)
+	conn, err := DialConn(addr, proxy, config.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
 
 	session, err := client.NewSession()
 	if err != nil {
@@ -48,6 +67,18 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 	}
 
 	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// DialConn opens the underlying TCP connection to addr, optionally via a SOCKS5 proxy.
+// Exported so chain builders in other packages can reuse the direct/proxy dial path.
+func DialConn(addr string, proxy *Proxy, timeout time.Duration) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	if proxy != nil && proxy.Enabled() {
+		return dialProxy(proxy, addr, timeout)
+	}
+	return net.DialTimeout("tcp", addr, timeout)
 }
 
 // StartWithConn creates an SSH client over an existing net.Conn (e.g. net.Pipe)
@@ -83,6 +114,31 @@ func StartWithClient(client *ssh.Client, command string, args []string, pty bool
 		return nil, fmt.Errorf("new session: %w", err)
 	}
 	return startSession(client, session, command, args, pty, rows, cols, false)
+}
+
+// StartWithChain creates an ExecSession on a freshly-built SSH client (the chain
+// target) plus any intermediate bastion clients. The target client and all
+// intermediates are closed when the ExecSession closes. Used for ProxyJump/via
+// chains where the underlying *ssh.Client was established over a bastion's
+// direct-tcpip channel.
+func StartWithChain(client *ssh.Client, closers []io.Closer, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if client == nil {
+		DrainClosers(closers)
+		return nil, fmt.Errorf("nil ssh Client")
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		DrainClosers(closers)
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+	es, err := startSession(client, session, command, args, pty, rows, cols, true)
+	if err != nil {
+		DrainClosers(closers)
+		return nil, err
+	}
+	es.extraClosers = closers
+	return es, nil
 }
 
 // startSession sets up pipes, optional PTY, starts the command, and returns an ExecSession.
@@ -219,6 +275,8 @@ func (es *ExecSession) Close() error {
 			firstErr = err
 		}
 	}
+	DrainClosers(es.extraClosers)
+	es.extraClosers = nil
 	return firstErr
 }
 
