@@ -15,8 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,6 +22,7 @@ import (
 
 	"github.com/charmbracelet/ssh"
 	"github.com/pkg/sftp"
+	"github.com/open-mcp-ai/termcp/internal/shell"
 	sshstd "golang.org/x/crypto/ssh"
 )
 
@@ -330,20 +329,8 @@ func disableHistoryExpansion(args []string) []string {
 func (s *Server) handleSession(sess ssh.Session) {
 	cmdArgs := sess.Command()
 	if len(cmdArgs) == 0 {
-		if runtime.GOOS == "windows" {
-			com := strings.TrimSpace(os.Getenv("ComSpec"))
-			if com == "" {
-				com = "cmd.exe"
-			}
-			cmdArgs = []string{com}
-		} else {
-			sh := strings.TrimSpace(os.Getenv("SHELL"))
-			if sh == "" {
-				cmdArgs = []string{"/bin/sh"}
-			} else {
-				cmdArgs = strings.Fields(sh)
-			}
-		}
+		sh, shArgs := shell.NewDetector().Argv()
+		cmdArgs = append([]string{sh}, shArgs...)
 	}
 
 
