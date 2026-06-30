@@ -95,7 +95,7 @@ func logHTTPMain(base string, port int, lanIPv4 []string) {
 }
 
 func main() {
-if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
+	if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 		base := filepath.Base(os.Args[0])
 		if len(os.Args) < 3 {
 			printSSHConfigUsage(base)
@@ -141,8 +141,6 @@ if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
 		slog.Error("failed to start SSH server", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
-	slog.Info("SSH server: in-memory (no TCP port)")
 	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
 
 	slog.Info("MCP HTTP:")
@@ -286,4 +284,3 @@ func runSSHConfigList(args []string) {
 		fmt.Println(n)
 	}
 }
-
