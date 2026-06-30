@@ -193,3 +193,63 @@ func TestDetect_NoShellFound(t *testing.T) {
 		t.Fatal("expected non-empty error hint")
 	}
 }
+
+func TestArgv_SHELLWithArgs(t *testing.T) {
+	d := newFakeDetector(
+		func(key string) string {
+			if key == "SHELL" {
+				return "/bin/bash --login -i"
+			}
+			return ""
+		},
+		func(file string) (string, error) {
+			if file == "/bin/bash" {
+				return file, nil
+			}
+			return "", errors.New("not found")
+		},
+		nil,
+		"linux",
+	)
+	path, args := d.Argv()
+	if path != "/bin/bash" {
+		t.Fatalf("expected path=/bin/bash, got %q", path)
+	}
+	if len(args) != 2 || args[0] != "--login" || args[1] != "-i" {
+		t.Fatalf("expected args=[--login -i], got %v", args)
+	}
+}
+
+func TestArgv_UnixFallback(t *testing.T) {
+	d := newFakeDetector(
+		func(key string) string { return "" },
+		func(file string) (string, error) { return "", errors.New("not found") },
+		func(path string) error {
+			if path == "/bin/sh" {
+				return nil
+			}
+			return errors.New("not found")
+		},
+		"linux",
+	)
+	path, args := d.Argv()
+	if path != "/bin/sh" {
+		t.Fatalf("expected /bin/sh, got %q", path)
+	}
+	if args != nil {
+		t.Fatalf("expected nil args, got %v", args)
+	}
+}
+
+func TestArgv_NoShellFoundFallback(t *testing.T) {
+	d := newFakeDetector(
+		func(key string) string { return "" },
+		func(file string) (string, error) { return "", errors.New("not found") },
+		func(path string) error { return errors.New("not found") },
+		"linux",
+	)
+	path, _ := d.Argv()
+	if path != "/bin/sh" {
+		t.Fatalf("expected /bin/sh last resort, got %q", path)
+	}
+}

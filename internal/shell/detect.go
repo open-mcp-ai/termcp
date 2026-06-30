@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // Detector detects the available shell on the target system.
@@ -34,7 +35,29 @@ func (d *Detector) Detect() (path, family, hint string) {
 	if d.GOOS == "windows" {
 		return d.detectWindows()
 	}
-	return d.detectUnix()
+	path, _, hint = d.detectUnix()
+	if path == "" {
+		return "", "", hint
+	}
+	return path, "unix", hint
+}
+
+// Argv returns the default shell argv (path + optional args) using the same
+// priority as Detect. Use this when spawning a shell, so that the actual
+// process matches what Detect advertises to agents.
+func (d *Detector) Argv() (path string, args []string) {
+	if d.GOOS == "windows" {
+		p, _, _ := d.detectWindows()
+		if p == "" {
+			return "cmd.exe", nil
+		}
+		return p, nil
+	}
+	p, args, _ := d.detectUnix()
+	if p == "" {
+		return "/bin/sh", nil
+	}
+	return p, args
 }
 
 func (d *Detector) detectWindows() (path, family, hint string) {
@@ -50,17 +73,18 @@ func (d *Detector) detectWindows() (path, family, hint string) {
 	return "", "", "No shell found on Windows"
 }
 
-func (d *Detector) detectUnix() (path, family, hint string) {
-	shell := d.Getenv("SHELL")
-	if shell != "" {
-		if p, err := d.LookPath(shell); err == nil {
-			return p, "unix", fmt.Sprintf("$SHELL: %s", shell)
+func (d *Detector) detectUnix() (path string, args []string, hint string) {
+	if shell := d.Getenv("SHELL"); shell != "" {
+		if fields := strings.Fields(shell); len(fields) > 0 {
+			if p, err := d.LookPath(fields[0]); err == nil {
+				return p, fields[1:], fmt.Sprintf("$SHELL: %s", shell)
+			}
 		}
 	}
 	for _, sh := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
 		if err := d.Stat(sh); err == nil {
-			return sh, "unix", fmt.Sprintf("Default: %s", sh)
+			return sh, nil, fmt.Sprintf("Default: %s", sh)
 		}
 	}
-	return "", "", "No shell found"
+	return "", nil, "No shell found"
 }
