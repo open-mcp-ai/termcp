@@ -10,6 +10,10 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+// defaultDialTimeout is the fallback TCP dial timeout when none is configured.
+// Shared by BuildClientConfig and DialConn so the default stays consistent.
+const defaultDialTimeout = 30 * time.Second
+
 // DialAuth configures SSH client authentication and host verification for a
 // non-internal (remote) server.
 type DialAuth struct {
@@ -81,7 +85,7 @@ func BuildClientConfig(auth DialAuth) (*ssh.ClientConfig, error) {
 
 	timeout := auth.DialTimeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultDialTimeout
 	}
 
 	return &ssh.ClientConfig{

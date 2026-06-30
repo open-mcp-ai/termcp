@@ -5,11 +5,11 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/open-mcp-ai/termcp/internal/shell"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -73,7 +73,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, proxy *Proxy, comman
 // Exported so chain builders in other packages can reuse the direct/proxy dial path.
 func DialConn(addr string, proxy *Proxy, timeout time.Duration) (net.Conn, error) {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultDialTimeout
 	}
 	if proxy != nil && proxy.Enabled() {
 		return dialProxy(proxy, addr, timeout)
@@ -198,11 +198,11 @@ func startSession(client *ssh.Client, session *ssh.Session, command string, args
 		switch {
 		case pty:
 			if err := session.Shell(); err != nil {
-				sh, shArgs := defaultShellExecArgv()
+				sh, shArgs := shell.NewDetector().Argv()
 				startErr = session.Start(shellQuote(sh, shArgs))
 			}
 		default:
-			sh, shArgs := defaultShellExecArgv()
+			sh, shArgs := shell.NewDetector().Argv()
 			startErr = session.Start(shellQuote(sh, shArgs))
 		}
 	} else {
@@ -284,26 +284,6 @@ func (es *ExecSession) Close() error {
 func (es *ExecSession) CloseSessionOnly() error {
 	es.Stdin.Close()
 	return es.session.Close()
-}
-
-// defaultShellExecArgv returns the local default shell argv (respects runtime.GOOS).
-func defaultShellExecArgv() (string, []string) {
-	if runtime.GOOS == "windows" {
-		c := strings.TrimSpace(os.Getenv("ComSpec"))
-		if c == "" {
-			c = "cmd.exe"
-		}
-		return c, nil
-	}
-	sh := strings.TrimSpace(os.Getenv("SHELL"))
-	if sh == "" {
-		return "/bin/sh", nil
-	}
-	f := strings.Fields(sh)
-	if len(f) == 0 {
-		return "/bin/sh", nil
-	}
-	return f[0], f[1:]
 }
 
 func shellQuote(command string, args []string) string {

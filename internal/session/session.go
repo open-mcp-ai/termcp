@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/ansi"
 	"github.com/open-mcp-ai/termcp/internal/buffer"
 	"github.com/open-mcp-ai/termcp/internal/message"
+	"github.com/open-mcp-ai/termcp/internal/shell"
 	"github.com/open-mcp-ai/termcp/internal/sshclient"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/pkg/api"
@@ -138,6 +138,17 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 	buf := buffer.New(1024 * 1024)
 	rid, _ := buf.NewReader()
 
+	// Determine the target shell family so press_enter sends the right line
+	// ending. For internal sessions the target is the local host, so we probe
+	// it via the shell detector. For remote sessions the target OS is unknown
+	// without an extra round-trip; unix (\n) is the safe default for SSH targets.
+	enterCRLF := false
+	if sshEndpointPublic == "internal" {
+		if _, family, _ := shell.NewDetector().Detect(); family != "unix" {
+			enterCRLF = true
+		}
+	}
+
 	// Wrap the exec session in a ChildShell so root and child shells share the same lifecycle.
 	primaryShell := &ChildShell{
 		ID:          id,
@@ -149,6 +160,7 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		Rows:        cfg.Rows,
 		Cols:        cfg.Cols,
 		CreatedAt:   time.Now().UTC(),
+		enterCRLF:   enterCRLF,
 	}
 	primaryShell.startReaders()
 
@@ -278,6 +290,14 @@ func (s *Session) SendTerminalBytes(data []byte, pressEnter bool) error {
 	return s.primaryShell.SendTerminalBytes(data, pressEnter)
 }
 
+// appendEnter returns data with the line ending appropriate for the shell family.
+func appendEnter(data []byte, crlf bool) []byte {
+	if crlf {
+		return append(append([]byte(nil), data...), '\r', '\n')
+	}
+	return append(append([]byte(nil), data...), '\n')
+}
+
 func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 	s.mu.RLock()
 	running := s.Status == api.SessionRunning
@@ -285,13 +305,10 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 	if !running {
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
+	crlf := s.primaryShell.enterCRLF
 	var toWrite []byte
 	if pressEnter {
-		if runtime.GOOS == "windows" {
-			toWrite = append(append([]byte(nil), data...), '\r', '\n')
-		} else {
-			toWrite = append(append([]byte(nil), data...), '\n')
-		}
+		toWrite = appendEnter(data, crlf)
 	} else {
 		toWrite = data
 	}
@@ -304,7 +321,7 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 	if persist && s.msgMgr != nil {
 		var logged string
 		if pressEnter {
-			if runtime.GOOS == "windows" {
+			if crlf {
 				logged = string(data) + "\r\n"
 			} else {
 				logged = string(data) + "\n"
@@ -586,6 +603,10 @@ type ChildShell struct {
 	ExitCode    *int
 	Rows        int
 	Cols        int
+	// enterCRLF selects the byte sequence appended on press_enter: true.
+	// It reflects the target shell family (unix vs cmd/powershell), not the
+	// termcp host OS, so cross-OS SSH sessions send the right line ending.
+	enterCRLF bool
 }
 
 // Info returns a snapshot of the child shell's public metadata.
@@ -624,11 +645,7 @@ func (cs *ChildShell) SendTerminalBytes(data []byte, pressEnter bool) error {
 	}
 	var toWrite []byte
 	if pressEnter {
-		if runtime.GOOS == "windows" {
-			toWrite = append(append([]byte(nil), data...), '\r', '\n')
-		} else {
-			toWrite = append(append([]byte(nil), data...), '\n')
-		}
+		toWrite = appendEnter(data, cs.enterCRLF)
 	} else {
 		toWrite = data
 	}
@@ -812,6 +829,7 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 		CreatedAt:   time.Now().UTC(),
 		Rows:        rows,
 		Cols:        cols,
+		enterCRLF:   s.primaryShell.enterCRLF,
 	}
 
 	cs.startReaders()

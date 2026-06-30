@@ -491,3 +491,15 @@ func TestSession_ReadOutputWithMaxBytes(t *testing.T) {
 		t.Fatal("expected HasMoreOutput=true after partial read")
 	}
 }
+
+func TestAppendEnter(t *testing.T) {
+	if got := appendEnter([]byte("ls"), false); string(got) != "ls\n" {
+		t.Fatalf("unix: expected %q, got %q", "ls\n", got)
+	}
+	if got := appendEnter([]byte("dir"), true); string(got) != "dir\r\n" {
+		t.Fatalf("windows: expected %q, got %q", "dir\r\n", got)
+	}
+	if got := appendEnter(nil, false); string(got) != "\n" {
+		t.Fatalf("empty unix: expected %q, got %q", "\n", got)
+	}
+}
