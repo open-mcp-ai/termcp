@@ -363,21 +363,6 @@ func (s *Session) markExited(exitCode *int, sysMsg, logLabel string) {
 	}
 }
 
-// WatchNaturalExit starts a goroutine that detects natural process exit on internal sessions.
-// Must be called after onExit is set (by Manager.Create). Call only once.
-func (s *Session) WatchNaturalExit() {
-	if s.SSHEndpoint != "internal" {
-		return
-	}
-	go func() {
-		<-s.execSession.Done()
-		s.exitOnce.Do(func() {
-			code := s.execSession.ExitCode()
-			s.markExited(&code, "Process exited", "session exited")
-		})
-	}()
-}
-
 // TerminateShellOnly closes the root tab shell channel. For internal sessions this is a no-op
 // — the process outlives the tab (like detaching from screen/tmux). For remote sessions only the
 // SSH session channel is closed; child shells on the same TCP connection are unaffected.

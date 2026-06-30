@@ -54,8 +54,9 @@ func (m *Manager) NotifyChange() {
 }
 
 // Create starts a new session and registers it.
-// The session is auto-removed from the registry when the process exits
-// (natural exit, Terminate, or Disconnect).
+// The session is auto-removed from the registry only on manual Terminate or
+// Disconnect; natural root-shell exit leaves the session in the registry
+// (matches remote behaviour), marking just the shell exited.
 func (m *Manager) Create(cfg Config) (*Session, error) {
 	s, err := New(m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
@@ -64,14 +65,12 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 
 	m.sessions.Store(s.ID, s)
 
-	// Must set onExit before WatchNaturalExit to avoid a race.
 	sid := s.ID
 	s.onExit = func() {
 		m.sessions.Delete(sid)
 		m.persist()
 		m.notifyListChange()
 	}
-	s.WatchNaturalExit()
 
 	m.persist()
 	m.notifyListChange()

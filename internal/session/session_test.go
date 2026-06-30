@@ -284,12 +284,19 @@ func TestSession_NaturalExit(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
+	// Natural exit of the root shell must NOT tear down the parent session —
+	// only manual Terminate/Disconnect removes it (matches remote behaviour).
+	// The root shell itself is marked exited by the generic shell exit watcher.
 	info := s.Info()
-	if info.Status != api.SessionExited {
-		t.Fatalf("expected 'exited', got %q", info.Status)
+	if info.Status != api.SessionRunning {
+		t.Fatalf("parent session should still be running after root shell exit, got %q", info.Status)
 	}
-	if info.ExitCode == nil || *info.ExitCode != 0 {
-		t.Fatalf("expected exit code 0, got %v", info.ExitCode)
+	shell := s.primaryShell.Info()
+	if shell.Status != api.SessionExited {
+		t.Fatalf("root shell should be exited, got %q", shell.Status)
+	}
+	if shell.ExitCode == nil || *shell.ExitCode != 0 {
+		t.Fatalf("expected root shell exit code 0, got %v", shell.ExitCode)
 	}
 }
 
