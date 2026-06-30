@@ -3,6 +3,7 @@ package sshclient
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -46,10 +47,57 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		return nil, fmt.Errorf("new session: %w", err)
 	}
 
+	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// StartWithConn creates an SSH client over an existing net.Conn (e.g. net.Pipe)
+// and starts a command. Used for in-process connections without TCP.
+func StartWithConn(conn net.Conn, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, "inmem", config)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
+
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+
+	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// StartWithClient creates a new ExecSession on an existing SSH client without dialing.
+// The returned ExecSession has ownClient=false; Close() will not close the shared client.
+func StartWithClient(client *ssh.Client, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if client == nil {
+		return nil, fmt.Errorf("nil ssh Client")
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+	return startSession(client, session, command, args, pty, rows, cols, false)
+}
+
+// startSession sets up pipes, optional PTY, starts the command, and returns an ExecSession.
+// When ownClient is false, error paths close session but not client.
+func startSession(client *ssh.Client, session *ssh.Session, command string, args []string, pty bool, rows, cols int, ownClient bool) (*ExecSession, error) {
+	closeClient := func() {
+		if ownClient {
+			client.Close()
+		}
+	}
+
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		session.Close()
-		client.Close()
+		closeClient()
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
@@ -57,7 +105,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 	if err != nil {
 		stdin.Close()
 		session.Close()
-		client.Close()
+		closeClient()
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
@@ -66,7 +114,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		closeIfCloser(stdout)
 		stdin.Close()
 		session.Close()
-		client.Close()
+		closeClient()
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
@@ -84,7 +132,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 			closeIfCloser(stdout)
 			stdin.Close()
 			session.Close()
-			client.Close()
+			closeClient()
 			return nil, fmt.Errorf("request pty: %w", err)
 		}
 	}
@@ -109,7 +157,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		closeIfCloser(stdout)
 		stdin.Close()
 		session.Close()
-		client.Close()
+		closeClient()
 		return nil, fmt.Errorf("start command: %w", startErr)
 	}
 
@@ -120,7 +168,7 @@ func StartWithConfig(addr string, config *ssh.ClientConfig, command string, args
 		Stdout:    stdout,
 		Stderr:    stderr,
 		done:      make(chan struct{}),
-		ownClient: true,
+		ownClient: ownClient,
 	}
 
 	go func() {
@@ -157,6 +205,9 @@ func (es *ExecSession) Signal(sig ssh.Signal) error {
 }
 
 // Close forcefully terminates the session and underlying connection.
+// SSHClient returns the underlying SSH client, or nil for internal sessions.
+func (es *ExecSession) SSHClient() *ssh.Client { return es.client }
+
 func (es *ExecSession) Close() error {
 	es.Stdin.Close()
 	var firstErr error
@@ -171,7 +222,13 @@ func (es *ExecSession) Close() error {
 	return firstErr
 }
 
-// shellQuote builds a shell-safe command string.
+// CloseSessionOnly closes this session channel without touching the shared SSH client.
+func (es *ExecSession) CloseSessionOnly() error {
+	es.Stdin.Close()
+	return es.session.Close()
+}
+
+// defaultShellExecArgv returns the local default shell argv (respects runtime.GOOS).
 func defaultShellExecArgv() (string, []string) {
 	if runtime.GOOS == "windows" {
 		c := strings.TrimSpace(os.Getenv("ComSpec"))

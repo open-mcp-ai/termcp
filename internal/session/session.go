@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +32,7 @@ type RemoteSSH struct {
 	Port               int
 	User               string
 	Password           string
-	PrivateKeyPEM      string
+	PrivateKey      string
 	KeyPassphrase      string
 	TrustUnknownHost   bool
 	KnownHosts         string
@@ -47,8 +48,6 @@ type Config struct {
 	Rows    int
 	Cols    int
 	Remote  *RemoteSSH
-	// OnExit is optional; invoked once after the process exits and status is updated (Manager wires this for persistence + UI).
-	OnExit func()
 }
 
 // Session wraps an interactive process session managed over SSH.
@@ -62,14 +61,16 @@ type Session struct {
 	buf           *buffer.Buffer
 	readerID      int
 	msgMgr        *message.Manager
-	sshAddr       string
-	done          chan struct{}
 	onExit        func()
+
+	primaryShell  *ChildShell           // wraps own execSession for unified shell lifecycle
+	childShells   map[string]*ChildShell
+	childShellsMu sync.RWMutex
 }
 
 // New creates and starts a new Session.
 // internal must be the built-in sshserver.Server (after Start) when cfg.Remote is nil; it may be nil for remote-only callers.
-func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
+func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
 	id := uuid.New().String()[:12]
 	name := cfg.Name
 	if name == "" {
@@ -78,7 +79,6 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 
 	usePty := cfg.Mode == api.ModePTY
 
-	var dialAddr string
 	var execSession *sshclient.ExecSession
 	var sshEndpointPublic string // "internal" | "remote" for MCP / JSON (no host or credentials)
 
@@ -92,7 +92,7 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 			return nil, fmt.Errorf("ssh_port must be between 1 and 65535, got %d", port)
 		}
 		host := strings.TrimSpace(r.Host)
-		dialAddr = net.JoinHostPort(host, strconv.Itoa(port))
+		dialAddr := net.JoinHostPort(host, strconv.Itoa(port))
 
 		toSec := r.DialTimeoutSeconds
 		if toSec <= 0 {
@@ -107,7 +107,7 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 		clientCfg, err := sshclient.BuildClientConfig(sshclient.DialAuth{
 			User:              strings.TrimSpace(r.User),
 			Password:          r.Password,
-			PrivateKeyPEM:     r.PrivateKeyPEM,
+			PrivateKey:     r.PrivateKey,
 			KeyPassphrase:     r.KeyPassphrase,
 			TrustUnknownHost:  r.TrustUnknownHost,
 			KnownHostsContent: r.KnownHosts,
@@ -123,7 +123,6 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 			return nil, err
 		}
 	} else {
-		dialAddr = defaultSSHAddr
 		if internal == nil {
 			return nil, errors.New("internal ssh server is not configured")
 		}
@@ -131,8 +130,12 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 		if err != nil {
 			return nil, err
 		}
+		conn, err := internal.Dial()
+		if err != nil {
+			return nil, err
+		}
 		sshEndpointPublic = "internal"
-		execSession, err = sshclient.StartWithConfig(dialAddr, minted, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
+		execSession, err = sshclient.StartWithConn(conn, minted, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
 		if err != nil {
 			return nil, err
 		}
@@ -140,6 +143,20 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 
 	buf := buffer.New(1024 * 1024)
 	rid, _ := buf.NewReader()
+
+	// Wrap the exec session in a ChildShell so root and child shells share the same lifecycle.
+	primaryShell := &ChildShell{
+		ID:          id,
+		Name:        name,
+		execSession: execSession,
+		buf:         buf,
+		done:        make(chan struct{}),
+		Status:      api.SessionRunning,
+		Rows:        cfg.Rows,
+		Cols:        cfg.Cols,
+		CreatedAt:   time.Now().UTC(),
+	}
+	primaryShell.startReaders()
 
 	s := &Session{
 		Session: api.Session{
@@ -159,67 +176,15 @@ func New(defaultSSHAddr string, internal *sshserver.Server, cfg Config, msgMgr *
 		buf:         buf,
 		readerID:    rid,
 		msgMgr:      msgMgr,
-		sshAddr:     dialAddr,
-		done:        make(chan struct{}),
-		onExit:      cfg.OnExit,
+		primaryShell: primaryShell,
 	}
-
-	s.startReaders()
 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
-	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic, "dial_addr", dialAddr)
+	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
 	return s, nil
-}
-
-func (s *Session) pipeToBuffer(r io.Reader) {
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				s.buf.Write(data)
-			}
-			if err != nil {
-				return
-			}
-			select {
-			case <-s.done:
-				return
-			default:
-			}
-		}
-	}()
-}
-
-func (s *Session) startReaders() {
-	s.pipeToBuffer(s.execSession.Stdout)
-	s.pipeToBuffer(s.execSession.Stderr)
-
-	go func() {
-		<-s.execSession.Done()
-		close(s.done)
-		s.exitOnce.Do(func() {
-			s.mu.Lock()
-			s.Status = api.SessionExited
-			code := s.execSession.ExitCode()
-			s.ExitCode = &code
-			s.UpdatedAt = time.Now().UTC()
-			s.mu.Unlock()
-			s.buf.Close()
-			if s.msgMgr != nil {
-				s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
-			}
-			slog.Debug("session exited", "session_id", s.ID, "exit_code", code)
-			if fn := s.onExit; fn != nil {
-				fn()
-			}
-		})
-	}()
 }
 
 // SendInput writes text to the process stdin and records it in the message log.
@@ -229,7 +194,7 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 
 // SendTerminalBytes writes raw keystrokes to stdin without appending to the message log (web UI).
 func (s *Session) SendTerminalBytes(data []byte, pressEnter bool) error {
-	return s.sendInput(data, pressEnter, false)
+	return s.primaryShell.SendTerminalBytes(data, pressEnter)
 }
 
 func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
@@ -308,7 +273,7 @@ func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout
 // ReadTerminalStream reads PTY output for a reader without appending to the message log (high-frequency UI streaming).
 // If maxBytes > 0, each call returns at most that many raw bytes (for WebSocket/SSE chunking); 0 means one full drain to end of buffer.
 func (s *Session) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
-	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines, false, maxBytes)
+	return s.primaryShell.ReadTerminalStream(ctx, readerID, timeout, stripAnsi, maxLines, maxBytes)
 }
 
 // OutputByteRange returns a copy of retained raw output bytes [start, start+max) and total retained length.
@@ -340,48 +305,108 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 			s.execSession.Signal(ssh.SIGTERM)
 			select {
 			case <-s.execSession.Done():
+				s.terminateChildren()
 				return
 			case <-time.After(gracePeriod):
 			}
 		}
 
-		s.execSession.Close()
+		// Terminate child shells, then close the session channel.
+		// For remote sessions the SSH client stays alive for multiplexing (Disconnect() closes it).
+		// For internal sessions there's no multiplexing, so close everything.
+		s.terminateChildren()
+		if s.SSHEndpoint == "internal" {
+			s.execSession.Close()
+		} else {
+			s.execSession.CloseSessionOnly()
+		}
 
 		select {
 		case <-s.execSession.Done():
 		case <-time.After(2 * time.Second):
 		}
 
-		s.exitOnce.Do(func() {
-			s.mu.Lock()
-			s.Status = api.SessionExited
-			code := -1
-			s.ExitCode = &code
-			s.UpdatedAt = time.Now().UTC()
-			s.mu.Unlock()
-			s.buf.Close()
-			if s.msgMgr != nil {
-				s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated (no exit code)")
-			}
-			slog.Debug("session terminated", "session_id", s.ID, "forced", force)
-			if fn := s.onExit; fn != nil {
-				fn()
-			}
-		})
+		// Remote sessions: exit processing skipped (connection stays alive).
+		// Internal sessions: normal exit processing.
+		if s.SSHEndpoint == "internal" {
+			s.exitOnce.Do(func() {
+				code := -1
+				s.markExited(&code, "Process terminated (no exit code)", "session terminated")
+			})
+		}
 	})
+}
+
+// markExited transitions the session to SessionExited, closes its output buffer,
+// optionally appends a system message, logs, and invokes the onExit callback.
+// exitCode is stored when non-nil (nil leaves it unset). Must run inside s.exitOnce.
+func (s *Session) markExited(exitCode *int, sysMsg, logLabel string) {
+	s.mu.Lock()
+	s.Status = api.SessionExited
+	if exitCode != nil {
+		v := *exitCode
+		s.ExitCode = &v
+	}
+	s.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+	s.buf.Close()
+	if sysMsg != "" && s.msgMgr != nil {
+		s.msgMgr.Append(s.ID, api.MsgSystem, sysMsg)
+	}
+	logArgs := []any{"session_id", s.ID}
+	if exitCode != nil {
+		logArgs = append(logArgs, "exit_code", *exitCode)
+	}
+	slog.Debug(logLabel, logArgs...)
+	if fn := s.onExit; fn != nil {
+		fn()
+	}
+}
+
+// TerminateShellOnly closes the root tab shell channel. For internal sessions this is a no-op
+// — the process outlives the tab (like detaching from screen/tmux). For remote sessions only the
+// SSH session channel is closed; child shells on the same TCP connection are unaffected.
+func (s *Session) TerminateShellOnly() {
+	if s.SSHEndpoint == "internal" {
+		return // tab close doesn't kill the process
+	}
+	s.primaryShell.TerminateShell()
+}
+
+// Disconnect closes the underlying SSH client and marks the session as fully exited.
+func (s *Session) Disconnect() {
+	s.exitOnce.Do(func() {
+		s.markExited(nil, "", "session disconnected")
+	})
+	if s.execSession != nil {
+		if cli := s.execSession.SSHClient(); cli != nil {
+			cli.Close()
+		}
+	}
+}
+
+// terminateChildren closes all child shells. Called during parent session termination.
+// Holds write lock long enough to snapshot+clear the map, preventing races with Create/Close.
+func (s *Session) terminateChildren() {
+	s.childShellsMu.Lock()
+	children := make([]*ChildShell, 0, len(s.childShells))
+	for k, cs := range s.childShells {
+		children = append(children, cs)
+		delete(s.childShells, k)
+	}
+	s.childShellsMu.Unlock()
+
+	for _, cs := range children {
+		cs.TerminateShell()
+	}
 }
 
 // ResizePty adjusts the terminal dimensions (pty mode only).
 func (s *Session) ResizePty(rows, cols int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Status != api.SessionRunning {
-		return fmt.Errorf("process not running")
-	}
 	if s.Mode != api.ModePTY {
 		return fmt.Errorf("PTY resize only available in pty mode")
 	}
-	if err := s.execSession.ResizePty(rows, cols); err != nil {
+	if err := s.primaryShell.ResizePty(rows, cols); err != nil {
 		return err
 	}
 	s.Rows = rows
@@ -430,6 +455,336 @@ func (s *Session) UnregisterReader(id int) {
 }
 
 // HasMoreOutput returns whether the given reader has unread data.
+// SSHClient returns the underlying SSH client for remote sessions, or nil for internal/loopback.
+func (s *Session) SSHClient() *ssh.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.execSession == nil {
+		return nil
+	}
+	return s.execSession.SSHClient()
+}
+
 func (s *Session) HasMoreOutput(readerID int) bool {
 	return s.buf.HasMore(readerID)
+}
+
+func (s *Session) IsBufferClosed() bool {
+	return s.buf.IsClosed()
+}
+
+// TerminalShell is the interface used by WebSocket/REST handlers for terminal I/O.
+// Both *Session and *ChildShell implement this interface.
+type TerminalShell interface {
+	Info() api.Session
+	SendTerminalBytes(data []byte, pressEnter bool) error
+	ResizePty(rows, cols int) error
+	RegisterReader() (int, error)
+	RegisterReaderFromBufferStart() (int, error)
+	UnregisterReader(id int)
+	ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error)
+	HasMoreOutput(readerID int) bool
+	IsBufferClosed() bool
+	OutputByteRange(start int64, max int) ([]byte, int64, error)
+	BufferLen() int64
+}
+
+// ChildShell is a lightweight shell channel sharing the parent Session's SSH connection.
+// It implements TerminalShell so it can be used interchangeably with *Session in WebSocket handlers.
+type ChildShell struct {
+	ID          string
+	Name        string
+	execSession *sshclient.ExecSession
+	buf         *buffer.Buffer
+	done        chan struct{}
+	closeOnce   sync.Once
+	mu          sync.RWMutex
+	stdinMu     sync.Mutex
+	Status      api.SessionStatus
+	CreatedAt   time.Time
+	ExitCode    *int
+	Rows        int
+	Cols        int
+}
+
+// Info returns a snapshot of the child shell's public metadata.
+func (cs *ChildShell) Info() api.Session {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	s := api.Session{
+		ID:        cs.ID,
+		Name:      cs.Name,
+		Mode:      api.ModePTY,
+		Status:    cs.Status,
+		Rows:      cs.Rows,
+		Cols:      cs.Cols,
+		CreatedAt: cs.CreatedAt,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if cs.ExitCode != nil {
+		v := *cs.ExitCode
+		s.ExitCode = &v
+	}
+	return s
+}
+
+// Done returns a channel that closes when the child shell process exits.
+func (cs *ChildShell) Done() <-chan struct{} {
+	return cs.done
+}
+
+// SendTerminalBytes writes raw keystrokes to the child shell's stdin.
+func (cs *ChildShell) SendTerminalBytes(data []byte, pressEnter bool) error {
+	cs.mu.RLock()
+	running := cs.Status == api.SessionRunning
+	cs.mu.RUnlock()
+	if !running {
+		return fmt.Errorf("process has %s, cannot send input", cs.Status)
+	}
+	var toWrite []byte
+	if pressEnter {
+		if runtime.GOOS == "windows" {
+			toWrite = append(append([]byte(nil), data...), '\r', '\n')
+		} else {
+			toWrite = append(append([]byte(nil), data...), '\n')
+		}
+	} else {
+		toWrite = data
+	}
+	cs.stdinMu.Lock()
+	_, err := cs.execSession.Stdin.Write(toWrite)
+	cs.stdinMu.Unlock()
+	return err
+}
+
+// ResizePty adjusts the child shell's terminal dimensions.
+func (cs *ChildShell) ResizePty(rows, cols int) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.Status != api.SessionRunning {
+		return fmt.Errorf("process not running")
+	}
+	if err := cs.execSession.ResizePty(rows, cols); err != nil {
+		return err
+	}
+	cs.Rows = rows
+	cs.Cols = cols
+	return nil
+}
+
+// RegisterReader creates a new output reader for this child shell.
+func (cs *ChildShell) RegisterReader() (int, error) {
+	return cs.buf.NewReader()
+}
+
+// RegisterReaderFromBufferStart creates a reader seeded at the start of the retained transcript.
+func (cs *ChildShell) RegisterReaderFromBufferStart() (int, error) {
+	return cs.buf.NewReaderFromStart()
+}
+
+// UnregisterReader removes a reader by ID.
+func (cs *ChildShell) UnregisterReader(id int) {
+	cs.buf.Unregister(id)
+}
+
+// ReadTerminalStream reads PTY output for a reader without appending to the message log.
+func (cs *ChildShell) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
+	data, err := cs.buf.Read(ctx, readerID, timeout, maxBytes)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	output := string(data)
+	if stripAnsi {
+		output = ansi.Strip(output)
+		output = ansi.Compact(output)
+	}
+	if maxLines > 0 {
+		lines := strings.Split(output, "\n")
+		if len(lines) > maxLines {
+			output = strings.Join(lines[:maxLines], "\n")
+		}
+	}
+	return output, nil
+}
+
+// HasMoreOutput returns whether the given reader has unread data.
+func (cs *ChildShell) HasMoreOutput(readerID int) bool {
+	return cs.buf.HasMore(readerID)
+}
+
+func (cs *ChildShell) IsBufferClosed() bool {
+	return cs.buf.IsClosed()
+}
+
+// OutputByteRange returns a copy of retained raw output bytes [start, start+max) and total retained length.
+func (cs *ChildShell) OutputByteRange(start int64, max int) ([]byte, int64, error) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	if cs.buf == nil {
+		return nil, 0, fmt.Errorf("output buffer unavailable")
+	}
+	data, total := cs.buf.ByteRange(start, max)
+	return data, total, nil
+}
+
+// BufferLen returns retained raw output length in bytes.
+func (cs *ChildShell) BufferLen() int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	if cs.buf == nil {
+		return 0
+	}
+	return cs.buf.Len()
+}
+
+// TerminateShell closes the child shell's exec session channel without touching the
+// shared SSH client (CloseSessionOnly). The client lifetime is managed by the parent Session.
+func (cs *ChildShell) TerminateShell() {
+	cs.mu.Lock()
+	if cs.Status != api.SessionRunning {
+		cs.mu.Unlock()
+		return // already terminated
+	}
+	cs.mu.Unlock()
+
+	cs.execSession.CloseSessionOnly()
+	select {
+	case <-cs.execSession.Done():
+	case <-time.After(2 * time.Second):
+	}
+	cs.mu.Lock()
+	cs.Status = api.SessionExited
+	code := -1
+	cs.ExitCode = &code
+	cs.mu.Unlock()
+	cs.buf.Close()
+	// Ensure Done() channel is closed for any waiters (closeOnce prevents races with the exit watcher goroutine).
+	cs.closeOnce.Do(func() { close(cs.done) })
+}
+
+// pipeChildToBuffer pipes child shell output into the buffer.
+func (cs *ChildShell) pipeToBuffer(r io.Reader) {
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				cs.buf.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+			select {
+			case <-cs.done:
+				return
+			default:
+			}
+		}
+	}()
+}
+
+// startChildReaders starts the stdout/stderr pipe goroutines and exit watcher for a child shell.
+func (cs *ChildShell) startReaders() {
+	cs.pipeToBuffer(cs.execSession.Stdout)
+	cs.pipeToBuffer(cs.execSession.Stderr)
+
+	go func() {
+		<-cs.execSession.Done()
+		cs.closeOnce.Do(func() { close(cs.done) })
+		cs.mu.Lock()
+		cs.Status = api.SessionExited
+		code := cs.execSession.ExitCode()
+		cs.ExitCode = &code
+		cs.mu.Unlock()
+		cs.buf.Close()
+		slog.Debug("child shell exited", "child_shell_id", cs.ID, "exit_code", code)
+	}()
+}
+
+// CreateChildShell opens a new SSH session channel on the parent's existing SSH connection.
+func (s *Session) CreateChildShell(command string, args []string, pty bool, rows, cols int, name string) (*ChildShell, error) {
+	sshClient := s.SSHClient()
+	if sshClient == nil {
+		return nil, fmt.Errorf("sub-shell multiplexing requires an SSH connection; internal loopback sessions do not support multiple channels")
+	}
+
+	id := uuid.New().String()[:12]
+	if name == "" {
+		name = fmt.Sprintf("shell-%s", id)
+	}
+
+	execSession, err := sshclient.StartWithClient(sshClient, command, args, pty, rows, cols)
+	if err != nil {
+		return nil, fmt.Errorf("create child shell: %w", err)
+	}
+
+	buf := buffer.New(1024 * 1024)
+	buf.NewReader() // default reader 0 for MCP read_output
+
+	cs := &ChildShell{
+		ID:          id,
+		Name:        name,
+		execSession: execSession,
+		buf:         buf,
+		done:        make(chan struct{}),
+		Status:      api.SessionRunning,
+		CreatedAt:   time.Now().UTC(),
+		Rows:        rows,
+		Cols:        cols,
+	}
+
+	cs.startReaders()
+
+	s.childShellsMu.Lock()
+	if s.childShells == nil {
+		s.childShells = make(map[string]*ChildShell)
+	}
+	s.childShells[id] = cs
+	s.childShellsMu.Unlock()
+
+	slog.Debug("child shell created", "parent_id", s.ID, "child_shell_id", id)
+	return cs, nil
+}
+
+// CloseChildShell terminates and removes a child shell from the parent.
+func (s *Session) CloseChildShell(id string) error {
+	s.childShellsMu.Lock()
+	cs, ok := s.childShells[id]
+	if !ok {
+		s.childShellsMu.Unlock()
+		return fmt.Errorf("child shell %q not found", id)
+	}
+	delete(s.childShells, id)
+	s.childShellsMu.Unlock()
+
+	cs.TerminateShell()
+	slog.Debug("child shell closed", "parent_id", s.ID, "child_shell_id", id)
+	return nil
+}
+
+// GetChildShell returns a child shell by ID, or nil if not found.
+func (s *Session) GetChildShell(id string) *ChildShell {
+	s.childShellsMu.RLock()
+	defer s.childShellsMu.RUnlock()
+	return s.childShells[id]
+}
+
+// ListChildShells returns public metadata for all child shells of this session.
+func (s *Session) ListChildShells() []api.Session {
+	s.childShellsMu.RLock()
+	defer s.childShellsMu.RUnlock()
+	type entry struct {
+		info      api.Session
+		createdAt time.Time
+	}
+	entries := make([]entry, 0, len(s.childShells))
+	for _, cs := range s.childShells {
+		entries = append(entries, entry{info: cs.Info(), createdAt: cs.CreatedAt})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].createdAt.Before(entries[j].createdAt) })
+	out := make([]api.Session, len(entries))
+	for i, e := range entries {
+		out[i] = e.info
+	}
+	return out
 }

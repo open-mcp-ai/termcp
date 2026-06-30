@@ -1,10 +1,11 @@
 package sshconfig
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestStoreRemoteRoundTrip(t *testing.T) {
@@ -27,18 +28,18 @@ func TestStoreRemoteRoundTrip(t *testing.T) {
 	if err := InitRemoteSkeleton(dir, "prod"); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "ssh_configs", "prod", "config.json"))
+	raw, err := os.ReadFile(filepath.Join(dir, "ssh_configs", "prod", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := toml.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
 	m["host"] = "h.example"
 	m["user"] = "u"
 	m["password"] = "p"
-	out, _ := json.Marshal(m)
+	out, _ := toml.Marshal(m)
 	if err := s.Save("prod", out); err != nil {
 		t.Fatal(err)
 	}

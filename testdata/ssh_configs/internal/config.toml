@@ -1,0 +1,3 @@
+# termcp loopback SSH config (TOML)
+kind = "internal"
+description = "Built-in termcp loopback SSH (no host credentials)."

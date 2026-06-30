@@ -10,8 +10,6 @@ type Config struct {
 	Host       string // HTTP server bind address (default: "127.0.0.1" = loopback; use 0.0.0.0 for all interfaces)
 	Port       int    // HTTP server port, must be 1-65535 (default: 18765)
 	DataDir    string // persistent storage directory, must be non-empty (default: "./data")
-	SSHHost    string // SSH server bind address (default: "127.0.0.1")
-	SSHPort    int    // SSH server port, 0 = random (default: 0)
 	LogLevel   string // log verbosity: debug|info|warn|error (default: "info")
 	AdminHost  string // admin HTTP API bind (default: "127.0.0.1")
 	AdminPort  int    // admin HTTP port; 0 = disabled (default: 0)
@@ -24,8 +22,6 @@ func Default() *Config {
 		Host:      "127.0.0.1",
 		Port:      18765,
 		DataDir:   "./data",
-		SSHHost:   "127.0.0.1",
-		SSHPort:   0,
 		LogLevel:  "info",
 		AdminHost: "127.0.0.1",
 		AdminPort: 0,

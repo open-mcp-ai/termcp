@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// Store manages dataDir/ssh_configs/<name>/config.json
+// Store manages dataDir/ssh_configs/<name>/config.toml
 type Store struct {
 	dataDir string
 	mu      sync.Mutex
@@ -32,14 +32,19 @@ func (s *Store) root() string {
 	return filepath.Join(s.dataDir, "ssh_configs")
 }
 
+// ConfigDir returns the directory containing config.toml for a named profile.
+func (s *Store) ConfigDir(name string) string {
+	return filepath.Join(s.root(), name)
+}
+
 func (s *Store) configPath(name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
-	return filepath.Join(s.root(), name, "config.json"), nil
+	return filepath.Join(s.root(), name, "config.toml"), nil
 }
 
-// EnsureInternal creates data-dir/ssh_configs/internal/config.json if missing.
+// EnsureInternal creates data-dir/ssh_configs/internal/config.toml if missing.
 func EnsureInternal(dataDir string) error {
 	s := NewStore(dataDir)
 	p, err := s.configPath("internal")
@@ -70,14 +75,14 @@ func (s *Store) Load(name string) (*Entry, error) {
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("ssh config %q not found (use data-dir/ssh_configs/%s/config.json or run the server binary: ssh-config init)", name, name)
+			return nil, fmt.Errorf("ssh config %q not found (use data-dir/ssh_configs/%s/config.toml)", name, name)
 		}
 		return nil, err
 	}
 	return ParseAndValidate(data)
 }
 
-// ReadRaw returns the raw config.json bytes for a name (file must exist and parse as valid Entry).
+// ReadRaw returns the raw config.toml bytes for a name (file must exist and parse as valid Entry).
 func (s *Store) ReadRaw(name string) ([]byte, error) {
 	p, err := s.configPath(name)
 	if err != nil {
@@ -93,7 +98,7 @@ func (s *Store) ReadRaw(name string) ([]byte, error) {
 	return data, nil
 }
 
-// List returns sorted config names that have config.json.
+// List returns sorted config names that have config.toml.
 func (s *Store) List() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -113,7 +118,7 @@ func (s *Store) List() ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		cfg := filepath.Join(s.root(), name, "config.json")
+		cfg := filepath.Join(s.root(), name, "config.toml")
 		if st, err := os.Stat(cfg); err == nil && !st.IsDir() {
 			names = append(names, name)
 		}
@@ -141,7 +146,7 @@ func (s *Store) Save(name string, data []byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := filepath.Join(s.root(), name, "config.json")
+	p := filepath.Join(s.root(), name, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		return err
 	}
@@ -166,7 +171,7 @@ func (s *Store) Save(name string, data []byte) error {
 	return os.Rename(tmpPath, p)
 }
 
-// InitRemoteSkeleton creates ssh_configs/<name>/config.json from template.
+// InitRemoteSkeleton creates ssh_configs/<name>/config.toml from template.
 func InitRemoteSkeleton(dataDir, name string) error {
 	if strings.EqualFold(name, "internal") {
 		return fmt.Errorf("name %q is reserved; use the auto-created internal config", name)

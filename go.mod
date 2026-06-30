@@ -3,6 +3,7 @@ module github.com/open-mcp-ai/termcp
 go 1.25.9
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/ssh v0.0.0-20250826160808-ebfa259c7309
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

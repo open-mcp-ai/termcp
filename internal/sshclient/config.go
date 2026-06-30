@@ -15,7 +15,7 @@ import (
 type DialAuth struct {
 	User              string
 	Password          string
-	PrivateKeyPEM     string
+	PrivateKey     string
 	KeyPassphrase     string
 	TrustUnknownHost  bool
 	KnownHostsContent string
@@ -23,7 +23,7 @@ type DialAuth struct {
 }
 
 // BuildClientConfig builds an ssh.ClientConfig for dialing a user-supplied host.
-// At least one of Password or PrivateKeyPEM must be non-empty.
+// At least one of Password or PrivateKey must be non-empty.
 // If TrustUnknownHost is true, host keys are not verified (insecure).
 // If false, KnownHostsContent must contain OpenSSH known_hosts lines.
 func BuildClientConfig(auth DialAuth) (*ssh.ClientConfig, error) {
@@ -32,9 +32,9 @@ func BuildClientConfig(auth DialAuth) (*ssh.ClientConfig, error) {
 		return nil, fmt.Errorf("ssh_user is required for remote SSH")
 	}
 	pw := auth.Password
-	keyPEM := strings.TrimSpace(auth.PrivateKeyPEM)
+	keyPEM := strings.TrimSpace(auth.PrivateKey)
 	if pw == "" && keyPEM == "" {
-		return nil, fmt.Errorf("provide ssh_password and/or ssh_private_key_pem for remote SSH")
+		return nil, fmt.Errorf("provide ssh_password and/or ssh_private_key for remote SSH")
 	}
 
 	var methods []ssh.AuthMethod

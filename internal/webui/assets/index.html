@@ -232,13 +232,22 @@
     .modal-body textarea { min-height: 220px; font-family: ui-monospace, monospace; font-size: 12px; }
     .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 8px; }
     .err { color: #cf222e; font-size: 0.85rem; margin: 0 0 8px; }
+    .conn-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+    .conn-field label { font-size: 0.78rem; font-weight: 500; color: #57606a; }
+    .conn-field input, .conn-field select, .conn-field textarea { font-size: 0.85rem; padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 4px; }
+    .conn-field select { background: #fff; }
+    .conn-row { display: flex; gap: 8px; }
+    .conn-row > .conn-field { flex: 1; }
+    .psw-wrap { position: relative; }
+    .psw-input { width: 100%; padding-right: 28px; margin: 0; box-sizing: border-box; }
+    .psw-eye { position: absolute; right: 2px; top: 0; height: 100%; width: 26px; padding: 0; border: none; background: transparent; color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
     /* Floating terminal: dark theme; main page stays light */
     .shell-windows-container { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
     .shell-windows-container > * { pointer-events: auto; }
     .shell-window { position: fixed; width: 640px; height: 480px; min-width: 320px; min-height: 240px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); border: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; z-index: 10001; }
-    .shell-window-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #333; background: #2d2d2d; cursor: move; user-select: none; flex-shrink: 0; z-index: 2; }
-    .shell-window-title-cluster { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .shell-window-header { display: flex; justify-content: space-between; align-items: stretch; gap: 0; padding: 0 8px 0 0; border-bottom: 1px solid #333; background: #2d2d2d; cursor: move; user-select: none; flex-shrink: 0; z-index: 2; min-height: 34px; flex-wrap: nowrap; }
+    .shell-window-title-cluster { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 8px; }
     .shell-window-title {
       margin: 0;
       font-size: 13px;
@@ -263,6 +272,19 @@
       align-items: center;
       gap: 2px;
       min-width: 0;
+    }
+    .shell-header-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      align-self: center;
+      width: 18px;
+      height: 18px;
+      color: #8b949e;
+      margin-left: 6px;
+      margin-right: 2px;
+      line-height: 0;
     }
     .shell-terminal-ic {
       display: flex;
@@ -309,7 +331,7 @@
     }
     .title-copy-btn:hover { color: #eee; background: rgba(255,255,255,.08); }
     .title-copy-btn svg { display: block; }
-    .shell-window-header-btns { display: flex; gap: 0; flex-shrink: 0; }
+    .shell-window-header-btns { display: flex; gap: 0; flex-shrink: 0; margin-left: auto; align-self: center; }
     .shell-window-header-btns button { width: 26px; height: 26px; padding: 0; border: none; background: transparent; color: #aaa; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
     .shell-window-collapse-btn { position: relative; margin-right: 2px; }
     .shell-window-collapse-btn .ic-u, .shell-window-collapse-btn .ic-d { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
@@ -369,9 +391,197 @@
     .shell-window.shell-window-collapsed { height: auto; min-height: 0; }
     .shell-window-resize-handle { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; pointer-events: none; z-index: 10; }
     .shell-window-resize-handle::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 12px; height: 12px; pointer-events: auto; cursor: nwse-resize; border-right: 2px solid rgba(255,255,255,.28); border-bottom: 2px solid rgba(255,255,255,.28); }
+    .shell-tab-bar { display: flex; align-items: flex-end; gap: 0; flex-shrink: 0; padding-left: 8px; align-self: stretch; }
+    .shell-tab-btn { width: 28px; height: 100%; padding: 0 4px; border: 1px solid transparent; border-radius: 4px 4px 0 0; background: transparent; color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color .12s, background .12s, border-color .12s; position: relative; bottom: -1px; }
+    .shell-tab-btn:hover { color: #eee; background: rgba(255,255,255,.04); }
+    .shell-tab-btn.active { color: #e6edf3; background: #1e1e1e; border-color: #333; border-bottom-color: #1e1e1e; }
+    /* Shell channel tabs (bottom of terminal area, one tab per multiplexed shell) */
+    .shell-channel-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-shrink: 0;
+      order: 10;
+      background: #252526;
+      border-top: 1px solid #333;
+      min-height: 28px;
+      max-height: 28px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: #484f58 transparent;
+    }
+    .shell-channel-tabs::-webkit-scrollbar { height: 3px; }
+    .shell-channel-tabs::-webkit-scrollbar-track { background: transparent; }
+    .shell-channel-tabs::-webkit-scrollbar-thumb { background: #484f58; border-radius: 2px; }
+    .shell-channel-tab {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      min-width: 50px;
+      max-width: 140px;
+      height: 24px;
+      border-right: 1px solid #333;
+      background: #2d2d2d;
+      color: #999;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      flex-shrink: 0;
+      user-select: none;
+      transition: background .1s, color .1s;
+    }
+    .shell-channel-tab:hover { background: #373737; color: #ccc; }
+    .shell-channel-tab.active { background: #1e1e1e; color: #e0e0e0; border-top: 2px solid #58a6ff; }
+    .shell-channel-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+    .shell-channel-tab-close {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      padding: 0;
+      border: none;
+      border-radius: 3px;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity .1s, color .1s, background .1s;
+    }
+    .shell-channel-tab:hover .shell-channel-tab-close,
+    .shell-channel-tab.active .shell-channel-tab-close { opacity: 1; }
+    .shell-channel-tab-close:hover { color: #fff; background: rgba(207,34,46,.6); }
+    .shell-channel-tab-add {
+      flex-shrink: 0;
+      width: 26px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      border-left: 1px solid #333;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: color .1s, background .1s;
+    }
+    .shell-channel-tab-add:hover { color: #fff; background: rgba(255,255,255,.06); }
+    .shell-channel-tab-add:active { background: rgba(255,255,255,.1); }
+    /* Channel body fills most of the terminal area */
+    .shell-channel-body {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .shell-channel-instance {
+      position: absolute;
+      inset: 0;
+      display: none;
+    }
+    .shell-channel-instance.active { display: block; }
+    .shell-channel-instance .xterm { height: 100%; }
+    /* Empty state when no shells */
+    .shell-channel-empty {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: #8b949e;
+      font-size: 12px;
+      min-height: 100px;
+    }
+    .shell-channel-empty.show { display: flex; }
+    .shell-channel-empty button {
+      padding: 4px 12px;
+      border: 1px solid #484f58;
+      border-radius: 4px;
+      background: #2d2d2d;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .shell-channel-empty button:hover { background: #3d3d3d; border-color: #666; }
+
     @media (max-width: 768px) {
       .shell-window { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-width: 0; max-height: calc(100dvh - 16px); }
     }
+  
+    .conn-tile .conn-tile-stack .sess-fwd-overlay {
+      position: absolute; left: 2px; top: 2px; z-index: 3;
+      width: 22px; height: 22px; padding: 0; border: none;
+      border-radius: 4px;
+      background: rgba(9,105,218,.12); color: #0969da; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08);
+      transition: background .12s, color .12s;
+    }
+    .conn-tile .conn-tile-stack .sess-fwd-overlay:hover { background: #0969da; color: #fff; }
+    .sess-fwd-overlay svg { width: 11px; height: 11px; display: block; }
+    .tools-tab {
+      font: inherit; padding: 8px 14px; border: none; border-bottom: 2px solid transparent;
+      background: transparent; color: #656d76; cursor: pointer; transition: color .12s, border-color .12s;
+    }
+    .tools-tab:hover { color: #24292f; }
+    .tools-tab.active { color: #0969da; border-bottom-color: #0969da; font-weight: 600; }
+    /* Light-themed tools panel (overrides dark shell-window) */
+    .shell-window.tools-panel { background: #fff; color: #24292f; }
+    .shell-window.tools-panel .shell-window-header { background: #f6f8fa; border-bottom-color: #d0d7de; }
+    .shell-window.tools-panel .shell-window-title { color: #1f2328; }
+    .shell-window.tools-panel .shell-window-content { background: #fff; }
+    .shell-window.tools-panel .shell-window-header-btns button { color: #57606a; }
+    .shell-window.tools-panel .shell-window-header-btns button:hover { color: #24292f; background: rgba(0,0,0,.06); }
+    .shell-window.tools-panel .sid { color: #1f2328; }
+    .shell-window.tools-panel .tools-tab { padding: 6px 10px; font-size: 0.78rem; border-bottom: 2px solid transparent; background: transparent; color: #656d76; cursor: pointer; }
+    .shell-window.tools-panel .tools-tab:hover { color: #24292f; }
+    .shell-window.tools-panel .tools-tab.active { color: #0969da; border-bottom-color: #0969da; font-weight: 600; }
+    .file-row:hover { background: #f0f6fc; }
+    #file-listing { padding: 0; }
+    #file-listing:empty::after { content: 'Enter a path and click Load'; display: block; padding: 12px; color: #656d76; font-size: 0.82rem; }
+    #file-up:hover, #file-upload-btn:hover, #file-ls:hover { background: #eaeef2; color: #24292f; }
+    #file-path:focus { background: #fff; }
+
+  
+    /* File context menu (dark, matches shell-window) */
+    .shell-file-ctx-menu { display:none; position:fixed; z-index:30001; background:#252526; border:1px solid #484f58; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.4); min-width:150px; padding:4px 0; }
+    .file-ctx-item { padding:6px 14px; cursor:pointer; font-size:0.8rem; color:#ccc; white-space:nowrap; }
+    .file-ctx-item:hover { background:#094771; color:#fff; }
+    .file-ctx-item.file-ctx-danger { color:#f85149; }
+    .file-ctx-item.file-ctx-danger:hover { background:#5a1d1d; color:#ff7b7b; }
+    /* File row menu button */
+    .shell-file-menu-btn { flex-shrink:0; width:22px; height:22px; padding:0; border:none; border-radius:4px; background:transparent; color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s; font-size:1rem; line-height:1; }
+    .shell-file-row:hover .shell-file-menu-btn { opacity:1; }
+    .shell-file-menu-btn:focus { opacity:1; background:#30363d; color:#e6edf3; }
+    .shell-file-menu-btn:active { background:#484f58; }
+    /* File detail panel inside listing */
+    .shell-file-detail { padding:12px; border-bottom:1px solid #30363d; }
+    .shell-file-detail-actions { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+    .shell-file-detail-actions button { font-size:0.75rem; padding:4px 12px; border-radius:4px; border:1px solid #484f58; background:#2d2d2d; color:#ccc; cursor:pointer; }
+    .shell-file-detail-actions button:hover { background:#3d3d3d; border-color:#666; color:#fff; }
+    .shell-file-detail-actions .sf-dl { border-color:#2da44e; color:#2da44e; }
+    .shell-file-detail-actions .sf-dl:hover { background:#1a3d1a; }
+    .shell-file-detail-actions .sf-del { border-color:#f85149; color:#f85149; }
+    .shell-file-detail-actions .sf-del:hover { background:#3d1a1a; }
+
   </style>
 </head>
 <body>
@@ -395,32 +605,140 @@
     <div class="dock-title" style="margin-top:22px">Sessions</div>
     <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
     <div id="session-grid" class="conn-grid"></div>
+
   </div>
 
+
+  <div id="panel-tools" class="shell-window tools-panel" style="display:none;width:520px;height:70vh;min-width:340px;min-height:280px">
+    <div class="shell-window-header">
+      <div class="shell-window-title-cluster">
+        <h3 class="shell-window-title">
+          <span class="shell-title-id-group">
+            <span class="shell-sid-copy">
+              <span class="sid" id="panel-tools-sid">…</span>
+              <button type="button" class="title-copy-btn" id="panel-tools-copy-sid" title="Copy session id" aria-label="Copy session id"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M5 2.5V2a1 1 0 011-1h6a1 1 0 011 1v8a1 1 0 01-1 1h-1v.5a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h1zm1 .5H4v8h6v-8H6zm-1-1V2h6v8h-1V3.5a1 1 0 00-1-1H5z"/></svg></button>
+            </span>
+          </span>
+        </h3>
+      </div>
+      <div class="shell-window-header-btns">
+        <button type="button" class="tools-tab active" data-tab="fw">Fwd</button>
+        <button type="button" class="tools-tab" data-tab="file">Files</button>
+        <span style="flex:1;min-width:4px"></span>
+        <button type="button" class="shell-window-collapse-btn" id="panel-tools-collapse" title="Collapse">
+          <svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>
+          <svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>
+        </button>
+        <button type="button" class="close-btn" id="panel-tools-close" title="Close">
+          <svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="shell-window-content" style="display:flex;flex-direction:column">
+      <p id="panel-tools-err" class="err" style="display:none"></p>
+      <div id="tools-tab-fw" style="flex:1;min-height:0;overflow:auto;padding:8px 16px 16px">
+        <input type="hidden" id="fw-ssh-config" value="">
+        <div id="tools-fw-list-view">
+          <div style="display:flex;align-items:center;margin-bottom:8px">
+            <span style="font-size:0.75rem;text-transform:uppercase;color:#656d76">Active</span>
+            <button type="button" class="icon-btn" id="fw-show-add" title="Add forwarding" style="width:26px;height:26px;margin-left:auto"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
+          </div>
+          <div id="tools-fw-list-items" style="font-size:0.8rem;color:#656d76">Loading...</div>
+        </div>
+      </div>
+      <div id="tools-tab-file" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:8px 16px 12px">
+        <div style="display:flex;gap:0;margin-bottom:6px;align-items:stretch;flex-shrink:0;border:1px solid #d0d7de;overflow:hidden">
+          <button type="button" id="file-up" title="Parent directory" style="width:34px;height:34px;padding:0;border:none;border-right:1px solid #e0e0e0;background:#f6f8fa;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 11l6-6 6 6"/></svg></button>
+          <input type="text" id="file-path" placeholder="/" style="flex:1;min-width:0;border:none;outline:none;font-family:ui-monospace,monospace;font-size:0.82rem;padding:0 10px;background:#fff;color:#24292f" autocomplete="off">
+          <input type="file" id="file-upload-input" style="display:none">
+          <button type="button" id="file-upload-btn" title="Upload file" style="width:34px;height:34px;padding:0;border:none;border-left:1px solid #e0e0e0;background:#f6f8fa;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M8 2v9M4 6l4-4 4 4M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg></button>
+          <button type="button" id="file-ls" title="Load" style="width:34px;height:34px;padding:0;border:none;border-left:1px solid #e0e0e0;background:#f6f8fa;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1 8a7 7 0 0113-4.5M15 8a7 7 0 01-13 4.5"/><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M15 2v3h-3M1 14v-3h3"/></svg></button>
+        </div>
+        <div id="file-listing" style="flex:1;min-height:0;overflow:auto;font-size:0.82rem;font-family:ui-monospace,monospace;border:1px solid #d0d7de;background:#fff"></div>
+      </div>
+      <div id="file-ctx-menu" style="display:none;position:fixed;z-index:30000;background:#fff;border:1px solid #d0d7de;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);min-width:140px;padding:4px 0">
+        <div class="file-ctx-item" data-action="download" style="padding:6px 12px;cursor:pointer;font-size:0.82rem" onmouseover="this.style.background='#f0f6fc'" onmouseout="this.style.background=''">Download</div>
+        <div class="file-ctx-item" data-action="delete" style="padding:6px 12px;cursor:pointer;font-size:0.82rem;color:#cf222e" onmouseover="this.style.background='#fff0f0'" onmouseout="this.style.background=''">Delete</div>
+      </div>
+    </div>
+    <div class="shell-window-resize-handle" title="Drag to resize"></div>
+  </div>
+
+
+  <div id="modal-forward" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-h">
+        <h2 id="modal-forward-title">New Forwarding</h2>
+        <button type="button" id="modal-forward-close" style="width:28px;height:28px;padding:0;border:none;background:transparent;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:4px" title="Close"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-forward-err" class="err" style="display:none"></p>
+        <input type="hidden" id="fw-ssh-config-modal" value="">
+        <label for="fw-direction">Direction</label>
+        <select id="fw-direction">
+          <option value="local">Local (ssh -L)</option>
+          <option value="remote">Remote (ssh -R)</option>
+          <option value="dynamic">SOCKS5 (ssh -D)</option>
+        </select>
+        <p style="font-size:0.7rem;color:#656d76;margin:-8px 0 8px 0">
+          <span id="fw-dir-hint-local">local listen → remote target</span>
+          <span id="fw-dir-hint-remote" style="display:none">remote listen → local target</span>
+          <span id="fw-dir-hint-dynamic" style="display:none">SOCKS5 → any target</span>
+        </p>
+        <div id="fw-target-fields-modal">
+          <label for="fw-remote-host">Target host</label>
+          <input type="text" id="fw-remote-host" placeholder="e.g. localhost" autocomplete="off">
+          <label for="fw-remote-port">Target port</label>
+          <input type="number" id="fw-remote-port" placeholder="port" min="1" max="65535">
+        </div>
+        <label for="fw-local-host">Listen host</label>
+        <input type="text" id="fw-local-host" placeholder="e.g. 127.0.0.1" autocomplete="off">
+        <label for="fw-local-port" id="fw-local-port-label">Listen port (0 = random)</label>
+        <input type="number" id="fw-local-port" placeholder="0" value="0" min="0" max="65535">
+        <button type="button" class="btn btn-primary" id="fw-create" style="margin-top:8px">Create</button>
+      </div>
+    </div>
+  </div>
   <div id="shell-windows-container" class="shell-windows-container" aria-live="polite"></div>
 
   <div id="modal-conn" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal">
       <div class="modal-h">
         <h2 id="modal-conn-title">Add connection</h2>
-        <button type="button" class="btn" id="modal-conn-close">Close</button>
+        <button type="button" id="modal-conn-close" style="width:28px;height:28px;padding:0;border:none;background:transparent;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:4px" title="Close"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg></button>
       </div>
       <div class="modal-body">
         <p id="modal-conn-err" class="err" style="display:none"></p>
-        <p style="margin:0 0 8px;font-size:0.85rem;line-height:1.5">Set a <strong>profile name</strong> (letters, digits, <code>_</code>, <code>-</code> only), edit the JSON below, then <strong>Save</strong>. The server validates JSON, <code>kind</code>, and required fields; errors appear here.</p>
-        <p style="margin:0 0 8px;font-size:0.8rem;line-height:1.45;color:#57606a"><strong>Click the card</strong> to connect (default <strong>PTY</strong> + login shell). Use the <strong>gear</strong> icon only to edit this profile.</p>
-        <p style="margin:0 0 12px;font-size:0.78rem;line-height:1.45;color:#57606a">Auth: <code>password</code>, or <code>private_key_pem</code> (full PEM including <code>BEGIN…/END…</code>; use <code>\n</code> in JSON for newlines), or <code>private_key_file</code> (path readable by the termcp process).</p>
-        <label for="conn-name">Profile name (directory)</label>
-        <input type="text" id="conn-name" placeholder="my-server" autocomplete="off">
-        <label for="conn-json">config.json</label>
-        <textarea id="conn-json" spellcheck="false"></textarea>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label for="conn-name" style="margin:0;flex:1;font-size:0.85rem;font-weight:600">name</label>
+          <button type="button" class="btn" id="conn-toggle-view" style="font-size:0.78rem;padding:2px 6px" title="Toggle between form and TOML">
+            <svg class="toggle-icon-form" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5"/><path d="M4.5 5h5M4.5 7.5h3M4.5 10h2"/></svg>
+            <svg class="toggle-icon-toml" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" style="display:none"><path d="M5 3.5L2 7l3 3.5M9 10.5l3-3.5-3-3.5"/></svg>
+          </button>
+        </div>
+        <input type="text" id="conn-name" placeholder="my-server" autocomplete="off" style="margin-bottom:8px;width:100%">
+        <!-- Form view -->
+        <form id="conn-form-view" autocomplete="off" onsubmit="return false">
+          <div class="conn-field"><label for="conn-f-host">Host</label><input type="text" id="conn-f-host" placeholder="192.168.1.1" autocomplete="off"></div>
+          <div class="conn-row"><div class="conn-field"><label for="conn-f-port">Port</label><input type="number" id="conn-f-port" value="22" autocomplete="off"></div><div class="conn-field"><label for="conn-f-user">User</label><input type="text" id="conn-f-user" placeholder="root" autocomplete="username"></div></div>
+          <div class="conn-field"><label for="conn-f-auth">Auth</label><select id="conn-f-auth"><option value="password">Password</option><option value="key">Private Key</option></select></div>
+          <div class="conn-field" id="conn-f-password-wrap"><label for="conn-f-password">Password</label><div class="psw-wrap"><input type="password" id="conn-f-password" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show password"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field" id="conn-f-pem-wrap" style="display:none"><label for="conn-f-pem">Private Key</label><textarea id="conn-f-pem" spellcheck="false" rows="4"></textarea></div>
+          <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect" autocomplete="off"></div>
+        </form>
+        <!-- JSON view -->
+        <div id="conn-config-view" style="display:none">
+          <label for="conn-config">config</label>
+          <textarea id="conn-config" spellcheck="false"></textarea>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
           <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
       </div>
-          </div>
-          </div>
+    </div>
+  </div>
 
   <div id="modal-start" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal" style="max-width:420px">
@@ -558,9 +876,7 @@
   }
 
   function bringShellWindowToFront(win) {
-    var c = shellWindowsEl();
-    if (!c || win.parentNode !== c) return;
-    /* Do not appendChild(win) — re-inserting the subtree reflows and fires ResizeObserver, which disturbs xterm viewport scroll. Use stacking z-index instead. */
+    if (!win || !win.classList.contains('shell-window')) return;
     if (!window._shellZSeq) window._shellZSeq = 10050;
     window._shellZSeq += 1;
     win.style.zIndex = String(window._shellZSeq);
@@ -587,10 +903,12 @@
     win._termcpMouseToFrontBound = true;
     win.addEventListener('mousedown', function (e) {
       bringShellWindowToFront(win);
-      if (!win._term) return;
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      var t = ch ? ch.term : win._term;
+      if (!t) return;
       if (e.target.closest('.shell-window-header')) return;
       if (!e.target.closest('.xterm')) {
-        try { win._term.focus(); } catch (e2) {}
+        try { t.focus(); } catch (e2) {}
       }
     });
   }
@@ -615,16 +933,337 @@
     return null;
   }
 
+  function findShellWindowByChannelSid(sessionId) {
+    var c = shellWindowsEl();
+    if (!c) return null;
+    var wins = c.querySelectorAll('.shell-window');
+    for (var i = 0; i < wins.length; i++) {
+      if (wins[i]._channels && wins[i]._channels[sessionId]) return wins[i];
+    }
+    return null;
+  }
+
   function openOrFocusShellWindow(connLabel, sessionId, clickEvent) {
     var ex = getShellWindowBySid(sessionId);
     if (ex) {
       bringShellWindowToFront(ex);
-      if (ex._term) {
-        try { ex._term.focus(); } catch (e) {}
-      }
+      var ch = ex._activeChannelSid && ex._channels && ex._channels[ex._activeChannelSid];
+      var t = ch ? ch.term : ex._term;
+      if (t) { try { t.focus(); } catch (e) {} }
       return;
     }
     openShellWindow(connLabel, sessionId, clickEvent);
+  }
+
+
+  var _toolPanelSshCfg = '';
+  var _toolPanelSessionId = '';
+  var _toolsPanelReady = false;
+  function setupToolsPanel() {
+    if (_toolsPanelReady) return;
+    _toolsPanelReady = true;
+    var win = document.getElementById('panel-tools');
+    if (!win) return;
+    // Drag
+    var header = win.querySelector('.shell-window-header');
+    setupShellWindowDrag(win, header);
+    // Resize
+    setupShellWindowResize(win);
+    // Collapse
+    var collapseBtn = document.getElementById('panel-tools-collapse');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+      collapseBtn.addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        var collapsing = !win.classList.contains('shell-window-collapsed');
+        if (collapsing) {
+          win._savedH = win.style.height || (win.getBoundingClientRect().height + 'px');
+          win.style.height = 'auto';
+          win.style.minHeight = '0';
+        } else {
+          win.style.height = win._savedH || '';
+          win.style.minHeight = '';
+        }
+        win.classList.toggle('shell-window-collapsed');
+        var icD = collapseBtn.querySelector('.ic-d');
+        var icU = collapseBtn.querySelector('.ic-u');
+        if (icD && icU) {
+          icD.style.display = win.classList.contains('shell-window-collapsed') ? 'none' : '';
+          icU.style.display = win.classList.contains('shell-window-collapsed') ? '' : 'none';
+        }
+        collapseBtn.title = win.classList.contains('shell-window-collapsed') ? 'Expand' : 'Collapse';
+      });
+    }
+    // Close
+    var closeBtn = document.getElementById('panel-tools-close');
+    bindShellWindowCloseButton(win, closeBtn);
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function() { win.style.display = 'none'; });
+    }
+    // Copy session ID
+    var copyBtn = document.getElementById('panel-tools-copy-sid');
+    if (copyBtn) {
+      copyBtn.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+      copyBtn.addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        copyTextToClipboard(_toolPanelSessionId || '').then(function() { showCopyToast(); }).catch(function() { showCopyToast('Copy failed'); });
+      });
+    }
+    // z-order on mousedown
+    win.addEventListener('mousedown', function() { bringShellWindowToFront(win); });
+  }
+
+  function openToolPanel(sshConfig, sessionId) {
+    _toolPanelSshCfg = sshConfig || 'internal';
+    _toolPanelSessionId = sessionId || '';
+    var win = document.getElementById('panel-tools');
+    if (!win) return;
+    setupToolsPanel();
+    // Update title
+    var sidEl = document.getElementById('panel-tools-sid');
+    if (sidEl) sidEl.textContent = stripSessionPrefix(sessionId) || 'Tools';
+    // Position if first time or hidden
+    if (win.style.display === 'none') {
+      win.style.left = Math.max(40, (window.innerWidth - 520) / 2) + 'px';
+      win.style.top = Math.max(30, (window.innerHeight - 500) / 2) + 'px';
+    }
+    win.style.display = '';
+    bringShellWindowToFront(win);
+    // Hidden fields
+    var el = document.getElementById('fw-ssh-config-modal');
+    if (el) el.value = _toolPanelSshCfg;
+    el = document.getElementById('fw-ssh-config');
+    if (el) el.value = _toolPanelSshCfg;
+    switchToolsTab('fw');
+    refreshFwList();
+  }
+
+  function fileAPI(suffix) {
+    if (!_toolPanelSessionId) return null;
+    return '/api/sessions/' + encodeURIComponent(_toolPanelSessionId) + '/files' + (suffix || '');
+  }
+
+  function fileBrowse() {
+    var path = document.getElementById('file-path').value.trim() || '/';
+    var url = fileAPI('?path=' + encodeURIComponent(path));
+    if (!url) { document.getElementById('file-listing').innerHTML = '<div style="padding:12px;color:#cf222e">No active session — open terminal first</div>'; return; }
+    document.getElementById('file-listing').innerHTML = '<div style="padding:12px;color:#656d76">Loading...</div>';
+    fetch(url).then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function(j) { renderFileListing(j, path); })
+      .catch(function(e) { document.getElementById('file-listing').innerHTML = '<div style="padding:12px;color:#cf222e">Error: ' + escapeHtml(String(e.message||e)) + '</div>'; });
+  }
+
+  function fileGoUp() {
+    var path = document.getElementById('file-path').value.trim() || '/';
+    if (path === '/') return;
+    var parts = path.replace(/\/+$/, '').split('/');
+    parts.pop();
+    var parent = parts.join('/') || '/';
+    document.getElementById('file-path').value = parent;
+    fileBrowse();
+  }
+
+  function fileDownloadCurrent() {
+    var path = document.getElementById('file-path').value.trim();
+    if (!path) return;
+    var url = fileAPI('/download?path=' + encodeURIComponent(path));
+    if (!url) return;
+    window.open(url, '_blank');
+  }
+
+  var _fileCtxPath = '';
+  function renderFileListing(data, currentPath) {
+    document.getElementById('file-path').value = currentPath;
+    var isDir = data && data.is_dir;
+    var children = data && data.children ? data.children : [];
+    if (!isDir) {
+      var html = '<div style="padding:12px">';
+      html += '<div style="font-weight:600;margin-bottom:8px">' + escapeHtml(data.name || currentPath) + '</div>';
+      html += '<div>Size: ' + formatSize(data.size || 0) + '</div>';
+      if (data.mod_time) html += '<div>Modified: ' + escapeHtml(data.mod_time) + '</div>';
+      html += '</div>';
+      document.getElementById('file-listing').innerHTML = html;
+      return;
+    }
+    if (!children.length) {
+      document.getElementById('file-listing').innerHTML = '<div style="padding:12px;color:#656d76">Empty directory</div>';
+      return;
+    }
+    var basePath = currentPath.replace(/\/+$/, '');
+    var html = '';
+    children.forEach(function(c) {
+      var icon = c.is_dir ? '📁' : '📄';
+      var fullPath = basePath + '/' + c.name;
+      html += '<div class="file-row" data-path="' + escapeHtml(fullPath) + '" data-isdir="' + (c.is_dir ? '1' : '0') + '" data-name="' + escapeHtml(c.name) + '" style="display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;white-space:nowrap">';
+      html += '<span style="flex-shrink:0">' + icon + '</span>';
+      html += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(c.name) + '</span>';
+      if (!c.is_dir) html += '<span style="flex-shrink:0;color:#656d76;font-size:0.75rem">' + formatSize(c.size || 0) + '</span>';
+      html += '</div>';
+    });
+    document.getElementById('file-listing').innerHTML = html;
+    document.getElementById('file-listing').querySelectorAll('.file-row').forEach(function(row) {
+      row.addEventListener('click', function(e) {
+        var p = this.getAttribute('data-path');
+        var d = this.getAttribute('data-isdir') === '1';
+        document.getElementById('file-path').value = p;
+        if (d) {
+          fileBrowse();
+        } else {
+          // Show context menu for files
+          _fileCtxPath = p;
+          var menu = document.getElementById('file-ctx-menu');
+          menu.style.display = 'block';
+          menu.style.left = e.clientX + 'px';
+          menu.style.top = e.clientY + 'px';
+          e.stopPropagation();
+        }
+      });
+    });
+  }
+
+  // Dismiss context menu on outside click
+  document.addEventListener('click', function(e) {
+    var menu = document.getElementById('file-ctx-menu');
+    if (!menu || menu.style.display === 'none') return;
+    if (!menu.contains(e.target)) menu.style.display = 'none';
+  });
+
+  // Context menu actions
+  document.getElementById('file-ctx-menu').addEventListener('click', function(e) {
+    var action = (e.target.closest('.file-ctx-item') || {}).dataset && e.target.closest('.file-ctx-item').dataset.action;
+    this.style.display = 'none';
+    if (!action || !_fileCtxPath) return;
+    if (action === 'download') {
+      var url = fileAPI('/download?path=' + encodeURIComponent(_fileCtxPath));
+      if (url) window.open(url, '_blank');
+    } else if (action === 'delete') {
+      var url2 = fileAPI('/delete?path=' + encodeURIComponent(_fileCtxPath));
+      if (!url2) return;
+      if (!confirm('Delete ' + _fileCtxPath + '?')) return;
+      fetch(url2, { method: 'DELETE' })
+        .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function() { fileBrowse(); })
+        .catch(function(err) { console.error('Delete failed:', err); });
+    }
+  });
+
+  function formatSize(bytes) {
+    if (!bytes || bytes < 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB'];
+    var i = 0;
+    var size = bytes;
+    while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+    return (i === 0 ? size : size.toFixed(1)) + ' ' + units[i];
+  }
+  function switchToolsTab(name) {
+    document.querySelectorAll('.tools-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
+    document.getElementById('tools-tab-fw').style.display = name === 'fw' ? '' : 'none';
+    var ft = document.getElementById('tools-tab-file');
+    ft.style.display = name === 'file' ? 'flex' : 'none';
+  }
+  document.querySelectorAll('.tools-tab').forEach(function(t) {
+    t.addEventListener('click', function() { switchToolsTab(t.dataset.tab); });
+  });
+  var _panelClose = document.getElementById('panel-tools-close');
+  if (_panelClose) _panelClose.addEventListener('click', function() { document.getElementById('panel-tools').style.display = 'none'; });
+
+  // File panel bindings
+  var _fileLs = document.getElementById('file-ls');
+  if (_fileLs) _fileLs.addEventListener('click', fileBrowse);
+  var _fileDownload = document.getElementById('file-download');
+  if (_fileDownload) _fileDownload.addEventListener('click', fileDownloadCurrent);
+  var _fileUp = document.getElementById('file-up');
+  if (_fileUp) _fileUp.addEventListener('click', fileGoUp);
+  var _filePath = document.getElementById('file-path');
+  if (_filePath) _filePath.addEventListener('keydown', function(e) { if (e.key === 'Enter') fileBrowse(); });
+  var _fileUploadBtn = document.getElementById('file-upload-btn');
+  var _fileUploadInput = document.getElementById('file-upload-input');
+  if (_fileUploadBtn && _fileUploadInput) {
+    _fileUploadBtn.addEventListener('click', function() { _fileUploadInput.click(); });
+    _fileUploadInput.addEventListener('change', function() {
+      var file = this.files && this.files[0];
+      if (!file) return;
+      var path = (document.getElementById('file-path').value.trim() || '/').replace(/\/+$/, '') + '/' + file.name;
+      var url = fileAPI('/upload?path=' + encodeURIComponent(path));
+      if (!url) return;
+      fetch(url, { method: 'POST', body: file })
+        .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function() { fileBrowse(); })
+        .catch(function(e) { console.error('Upload failed:', e); });
+    });
+  }
+
+  var _fwAdd = document.getElementById('fw-show-add');
+  if (_fwAdd) _fwAdd.addEventListener('click', function() {
+    document.getElementById('fw-ssh-config-modal').value = _toolPanelSshCfg;
+    document.getElementById('fw-remote-host').value = '';
+    document.getElementById('fw-remote-port').value = '';
+    document.getElementById('fw-local-host').value = '127.0.0.1';
+    document.getElementById('fw-local-port').value = '0';
+    document.getElementById('fw-direction').value = 'local';
+    document.getElementById('fw-dir-hint-local').style.display = '';
+    document.getElementById('fw-dir-hint-remote').style.display = 'none';
+    document.getElementById('fw-dir-hint-dynamic').style.display = 'none';
+    var tf = document.getElementById('fw-target-fields-modal') || document.getElementById('fw-target-fields');
+    if (tf) tf.style.display = '';
+    showModal('modal-forward');
+  });
+  var _fwClose = document.getElementById('modal-forward-close');
+  if (_fwClose) _fwClose.addEventListener('click', function() { hideModal('modal-forward'); });
+  var _fwCreate = document.getElementById('fw-create');
+  if (_fwCreate) _fwCreate.onclick = function () {
+    var err = document.getElementById('modal-forward-err');
+    err.style.display = 'none';
+    var dir = document.getElementById('fw-direction').value;
+    var remoteHost = document.getElementById('fw-remote-host').value.trim();
+    var remotePort = parseInt(document.getElementById('fw-remote-port').value) || 0;
+    if (dir !== 'dynamic' && (!remoteHost || !remotePort)) { err.textContent = 'Target host and port are required'; err.style.display = 'block'; return; }
+    var body = {
+      ssh_config: _toolPanelSshCfg,
+      direction: dir,
+      remote_host: remoteHost,
+      remote_port: remotePort,
+      local_host: document.getElementById('fw-local-host').value.trim() || '127.0.0.1',
+      local_port: parseInt(document.getElementById('fw-local-port').value) || 0
+    };
+    fetch('/api/forwards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
+        return r.json();
+      })
+      .then(function () { hideModal('modal-forward'); refreshFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();}); })
+      .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
+  };
+  document.getElementById('fw-direction').onchange = function () {
+    var v = this.value;
+    document.getElementById('fw-dir-hint-local').style.display = v === 'local' ? '' : 'none';
+    document.getElementById('fw-dir-hint-remote').style.display = v === 'remote' ? '' : 'none';
+    document.getElementById('fw-dir-hint-dynamic').style.display = v === 'dynamic' ? '' : 'none';
+    var isDynamic = v === 'dynamic';
+    var tf = document.getElementById('fw-target-fields-modal') || document.getElementById('fw-target-fields');
+    if (tf) tf.style.display = isDynamic ? 'none' : '';
+    var lh = document.getElementById('fw-local-host');
+    if (lh) { var lbl = lh.closest('label'); if (lbl) lbl.style.display = isDynamic ? 'none' : ''; lh.style.display = isDynamic ? 'none' : ''; }
+    var pl = document.getElementById('fw-local-port-label');
+    if (pl) pl.textContent = isDynamic ? 'SOCKS5 port (0 = random)' : 'Listen port (0 = random)';
+  };
+
+  function refreshFwList() {
+    fetch('/api/forwards').then(function(r){return r.json()}).then(function(j){
+      var fwds = (j.forwards||[]);
+      if (_toolPanelSshCfg) {
+        fwds = fwds.filter(function(f){return f.ssh_config === _toolPanelSshCfg || f.ssh_config.indexOf(_toolPanelSshCfg) >= 0 || (_toolPanelSshCfg.indexOf(f.ssh_config) >= 0)});
+      }
+      var el = document.getElementById('tools-fw-list-items');
+      if (!el) return;
+      if (!fwds.length) { el.innerHTML = 'No active forwards'; return; }
+      el.innerHTML = fwds.map(function(f){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #eee">' +
+          '<span><b>' + escapeHtml(f.direction) + '</b> ' + escapeHtml(f.listen_addr) + ' \u2192 ' + escapeHtml(f.target_addr) + ' <span style="color:#656d76;font-size:0.7rem">' + escapeHtml(f.ssh_config) + '</span></span>' +
+          '<button class="btn fw-del-btn" style="padding:2px 8px;font-size:0.7rem" data-fwid="' + escapeHtml(f.forward_id) + '">\u2715</button>' +
+          '</div>';
+      }).join('');
+    }).catch(function(e){ var el = document.getElementById('tools-fw-list-items'); if (el) el.innerHTML = 'Error loading'; });
   }
 
   function renderSessionGrid(sessions, bannerMsg) {
@@ -659,13 +1298,17 @@
         '<span class="sess-sid-line" title="' + escapeHtml(sid) + '">' + escapeHtml(sid) + '</span>' +
         '<button type="button" class="sess-copy-btn" title="Copy session id" aria-label="Copy session id">' + SVG_COPY_12 + '</button>' +
         '</div>' +
-        '</div>';
+        '</div>' +
+        '<div class="sess-fwd-info" style="display:none;font-size:0.62rem;color:#656d76;margin-top:2px;text-align:center"></div>';
       tile.title = 'Open terminal · ' + sid;
       var sx = tile.querySelector('.sess-x');
       sx.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
-        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).catch(function () {});
+        // First terminate (close channel), then disconnect (close SSH client).
+        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).then(function() {
+          return fetch(sessionAPI(s.id, '/disconnect'), { method: 'POST' });
+        }).catch(function () {});
         var w = getShellWindowBySid(s.id);
         if (w) closeShellWindow(w);
       };
@@ -676,10 +1319,17 @@
         e.stopPropagation();
         copyTextToClipboard(sid).then(function () { showCopyToast(); }).catch(function () { showCopyToast('Copy failed'); });
       });
+
       tile.onclick = function (e) {
         if (e.target.closest('.sess-x') || e.target.closest('.sess-copy-btn')) return;
-        openOrFocusShellWindow('', s.id, e);
+        openOrFocusShellWindow(s.name || '', s.id, e);
       };
+      var fwdInfo = tile.querySelector('.sess-fwd-info');
+      var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === (s.ssh_endpoint || s.name); });
+      if (fwds.length > 0) {
+        fwdInfo.style.display = 'block';
+        fwdInfo.textContent = fwds.length + ' forward' + (fwds.length > 1 ? 's' : '') + ': ' + fwds.map(function(f){ return f.listen_addr + '\u2192' + f.target_addr; }).join(', ');
+      }
       grid.appendChild(tile);
     });
   }
@@ -687,6 +1337,64 @@
   function applySessionsSnapshot(sessions) {
     window._lastSessionsSnapshot = sessions;
     renderSessionGrid(sessions, '');
+    loadForwards();
+    // Close shell windows whose parent session is no longer in the registry
+    // (terminated/exited and auto-deleted server-side). Keeps the UI in sync
+    // instead of leaving orphaned window frames after the grid tile vanishes.
+    var liveIds = {};
+    (sessions || []).forEach(function (s) { if (s.id) liveIds[s.id] = true; });
+    var c = shellWindowsEl();
+    if (c) {
+      var wins = c.querySelectorAll('.shell-window');
+      for (var i = 0; i < wins.length; i++) {
+        var w = wins[i];
+        if (w._parentSid && !liveIds[w._parentSid] && !w._placeholder) {
+          closeShellWindow(w);
+        }
+      }
+    }
+    // Refresh tabs in open windows (child shells may have changed).
+    refreshAllWindowTabs();
+  }
+
+  /** Per-window tab refresh: fetch child shells for win's parent session and sync tabs.
+   *  Each window is independent — no shared loop state, no cross-contamination. */
+  function refreshWindowTabs(win) {
+    if (!win || !win._parentSid) return;
+    fetch(sessionAPI(win._parentSid, '/child-shells'))
+      .then(function(r) { if (!r.ok) return; return r.json(); })
+      .then(function(j) {
+        if (!j || !j.shells) return;
+        syncWindowTabs(win, j.shells);
+      }).catch(function() {});
+  }
+
+  /** Notify all open windows that the global session list changed; each window independently
+   *  decides whether to refresh its own channel tabs. */
+  function refreshAllWindowTabs() {
+    var c = shellWindowsEl();
+    if (!c) return;
+    var wins = c.querySelectorAll('.shell-window');
+    for (var i = 0; i < wins.length; i++) {
+      refreshWindowTabs(wins[i]);
+    }
+  }
+
+  function syncWindowTabs(win, shells) {
+    var running = shells.filter(function(s) { return s.status === 'running'; });
+    var existing = win._channels || {};
+    // Add new running shells that don't have a tab yet.
+    // The primary shell (id === win._parentSid) is created by openShellWindow on explicit
+    // open (which also restores the last-active tab). Sync never auto-creates it, so closing
+    // the primary tab does not trigger a close→recreate loop on the next refresh.
+    running.forEach(function(s) {
+      if (!existing[s.id] && s.id !== win._parentSid) createChannelTab(win, s.id);
+    });
+    // Remove tabs for shells that are no longer running.
+    Object.keys(existing).forEach(function(sid) {
+      var found = running.some(function(s) { return s.id === sid; });
+      if (!found && existing[sid]) closeChannelTab(win, sid);
+    });
   }
 
   function uiWebSocketURL() {
@@ -705,6 +1413,8 @@
    * Do not forward onData until the user interacts in the terminal (mousedown / keydown / paste / compositionend).
    */
   function setupShellOnDataUserGate(win, term) {
+    // Per-window gate: once any terminal has been interacted with, all are unlocked.
+    if (win._shellUserInputReady) return;
     win._shellUserInputReady = false;
     var el = term.element;
     if (!el) return;
@@ -792,7 +1502,14 @@
     var wins = c.querySelectorAll('.shell-window');
     for (var i = 0; i < wins.length; i++) {
       var w = wins[i];
-      if (w._sid && !w._streamDone) sendTerminalWatch(w._sid, true);
+      if (w._channels) {
+        Object.keys(w._channels).forEach(function(sid) {
+          var ch = w._channels[sid];
+          if (!ch.streamDone) sendTerminalWatch(sid, true);
+        });
+      } else if (w._sid && !w._streamDone) {
+        sendTerminalWatch(w._sid, true);
+      }
     }
   }
 
@@ -824,26 +1541,49 @@
         if (j.type === 'sessions') applySessionsSnapshot(j.sessions || []);
         else if (j.type === 'terminal') {
           var win = getShellWindowBySid(j.id);
-          if (win && win._term && !win._streamDone) {
-            var bytes = b64ToBytes(j.d);
-            var tm = win._term;
-            tm.write(bytes, function () {
-              requestAnimationFrame(function () {
-                shellTermScrollToBottomIfStuck(tm, true);
+          if (!win) win = findShellWindowByChannelSid(j.id);
+          if (win) {
+            var ch = win._channels && win._channels[j.id];
+            var tm = ch ? ch.term : win._term;
+            var done = ch ? ch.streamDone : win._streamDone;
+            if (tm && !done) {
+              var bytes = b64ToBytes(j.d);
+              tm.write(bytes, function () {
+                requestAnimationFrame(function () {
+                  shellTermScrollToBottomIfStuck(tm, true);
+                });
               });
-            });
+            }
           }
         } else if (j.type === 'terminal_done') {
           var win2 = getShellWindowBySid(j.id);
-          if (win2 && !win2._streamDone) {
-            win2._streamDone = true;
-            try {
-              win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+          if (!win2) win2 = findShellWindowByChannelSid(j.id);
+          if (win2) {
+            var ch2 = win2._channels && win2._channels[j.id];
+            if (ch2) {
+              if (!ch2.streamDone) {
+                ch2.streamDone = true;
+                try {
+                  ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+                    shellTermScrollToBottomIfStuck(ch2.term, true);
+                    closeChannelTab(win2, j.id);
+                  });
+                } catch (e2) {
+                  try { ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
+                  shellTermScrollToBottomIfStuck(ch2.term, true);
+                  closeChannelTab(win2, j.id);
+                }
+              }
+            } else if (!win2._streamDone) {
+              win2._streamDone = true;
+              try {
+                win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+                  shellTermScrollToBottomIfStuck(win2._term, true);
+                });
+              } catch (e2) {
+                try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
                 shellTermScrollToBottomIfStuck(win2._term, true);
-              });
-            } catch (e2) {
-              try { win2._term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
-              shellTermScrollToBottomIfStuck(win2._term, true);
+              }
             }
           }
         }
@@ -881,13 +1621,30 @@
   }
 
   function closeShellWindow(win) {
+    // Remember active tab for reconnect.
+    if (win._parentSid && win._activeChannelSid) {
+      if (!window._shellLastActive) window._shellLastActive = {};
+      window._shellLastActive[win._parentSid] = win._activeChannelSid;
+    }
     win._inputClosed = true;
     if (win._connectAbort) {
       try { win._connectAbort.abort(); } catch (e) {}
       win._connectAbort = null;
     }
+    // Clean up channel tabs
+    var usedChannels = false;
+    if (win._channels) {
+      Object.keys(win._channels).forEach(function(sid) {
+        var ch = win._channels[sid];
+        sendTerminalWatch(sid, false);
+        if (ch.fitRo && ch.instEl) { try { ch.fitRo.unobserve(ch.instEl); } catch(e) {} }
+        if (ch.term) { try { ch.term.dispose(); } catch(e) {} }
+        if (sid === win._sid) usedChannels = true;
+      });
+      win._channels = {};
+    }
     if (win._sid) {
-      sendTerminalWatch(win._sid, false);
+      if (!usedChannels) sendTerminalWatch(win._sid, false);
       if (window._pendingTerminalWatch && window._pendingTerminalWatch[win._sid]) {
         delete window._pendingTerminalWatch[win._sid];
       }
@@ -900,11 +1657,6 @@
       try { win._shellInputUnlockAC.abort(); } catch (e) {}
       win._shellInputUnlockAC = null;
     }
-    if (win._fitRo && win._shellTermEl) {
-      try { win._fitRo.unobserve(win._shellTermEl); } catch (e) {}
-      win._fitRo = null;
-    }
-    if (win._term) { try { win._term.dispose(); } catch (e) {} win._term = null; }
     win.remove();
   }
 
@@ -950,7 +1702,9 @@
       var h = Math.max(240, startH + e.clientY - startY);
       win.style.width = w + 'px';
       win.style.height = h + 'px';
-      if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      if (ch && ch.term && ch.instEl) fitShellTerminal(ch.term, ch.instEl, win, false);
+      else if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
     }
     function onUp() {
       if (!resizing) return;
@@ -978,18 +1732,27 @@
     });
   }
 
-  function postResize(win) {
-    if (!win._sid || !win._term || win._streamDone) return;
-    wsUiSend({ type: 'resize', id: win._sid, rows: win._term.rows, cols: win._term.cols });
+  function postResize(win, optSid) {
+    var sid = optSid || win._activeChannelSid || win._sid;
+    if (!sid) return;
+    var ch = win._channels && win._channels[sid];
+    var term = ch ? ch.term : win._term;
+    var done = ch ? ch.streamDone : win._streamDone;
+    if (!term || done) return;
+    wsUiSend({ type: 'resize', id: sid, rows: term.rows, cols: term.cols });
   }
 
   /** Debounced PTY sync on container resize (local fit + optional remote resize via WebSocket). */
-  function scheduleShellRemoteResize(win) {
-    if (!win || !win._sid || win._streamDone) return;
+  function scheduleShellRemoteResize(win, term, termEl, optSid) {
+    var sid = optSid || win._activeChannelSid || win._sid;
+    if (!win || !sid) return;
+    var ch = win._channels && win._channels[sid];
+    var done = ch ? ch.streamDone : win._streamDone;
+    if (done) return;
     if (win._shellResizeSyncTimer) clearRetryTimer(win._shellResizeSyncTimer);
     win._shellResizeSyncTimer = setTimeout(function () {
       win._shellResizeSyncTimer = null;
-      postResize(win);
+      postResize(win, sid);
     }, 200);
   }
 
@@ -1034,16 +1797,6 @@
     return changed;
   }
 
-  /** After history is loaded: observe container resizes (not registered during bootstrap to avoid fit/resize during term.write). */
-  function attachShellTerminalResizeObserver(win, term, termEl) {
-    if (win._fitRo || !termEl) return;
-    var ro = new ResizeObserver(function () {
-      if (win.classList.contains('shell-window-collapsed')) return;
-      if (fitShellTerminal(term, termEl, win, false)) scheduleShellRemoteResize(win);
-    });
-    ro.observe(termEl);
-    win._fitRo = ro;
-  }
 
   /** First wheel (capture) or first viewport scroll: syncScrollArea — cold start can desync native scroll from buffer. */
   function attachXtermViewportFirstInteractionSync(term) {
@@ -1240,8 +1993,267 @@
     return null;
   }
 
-  /** Mount xterm, observers, and events on existing shell DOM (same as openShellWindow tail). */
-  function mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent) {
+  // ---- Shell channel tabs (SSH multiplexing) ----
+
+  /** Get sibling tab next to the given sessionId after removal (or null). */
+  function _channelNeighbor(win, sid) {
+    var kids = win.querySelector('.shell-channel-tabs').querySelectorAll('.shell-channel-tab');
+    var found = false;
+    var prev = null;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].getAttribute('data-chsid') === sid) { found = true; continue; }
+      if (found) return kids[i].getAttribute('data-chsid');
+      prev = kids[i].getAttribute('data-chsid');
+    }
+    return prev || null;
+  }
+
+  /** Create a channel tab + xterm instance for sessionId. */
+  function createChannelTab(win, sessionId, optLabel) {
+    if (!win._channels) { win._channels = {}; win._channelCount = 0; win._channelSeq = 0; }
+    if (win._channels[sessionId]) { switchChannelTab(win, sessionId); return; }
+    var label = optLabel || ('shell-' + (win._channelSeq + 1));
+
+    var tabsBar = win.querySelector('.shell-channel-tabs');
+    var body = win.querySelector('.shell-channel-body');
+    var addBtn = tabsBar ? tabsBar.querySelector('.shell-channel-tab-add') : null;
+    var emptyEl = win.querySelector('.shell-channel-empty');
+
+    // Hide empty state, restore body
+    if (emptyEl) emptyEl.classList.remove('show');
+    if (body) body.style.display = '';
+
+    // Create tab
+    var tab = document.createElement('div');
+    tab.className = 'shell-channel-tab active';
+    tab.setAttribute('data-chsid', sessionId);
+    tab.innerHTML = '<span class="shell-channel-tab-label">' + escapeHtml(label || 'shell') + '</span>' +
+      '<button type="button" class="shell-channel-tab-close" title="Close shell">&times;</button>';
+    if (addBtn) tabsBar.insertBefore(tab, addBtn);
+
+    // Deactivate all other tabs
+    tabsBar.querySelectorAll('.shell-channel-tab').forEach(function(t) {
+      if (t !== tab) t.classList.remove('active');
+    });
+
+    // Create instance
+    var inst = document.createElement('div');
+    inst.className = 'shell-channel-instance active';
+    inst.setAttribute('data-chsid', sessionId);
+    body.appendChild(inst);
+    // Hide other instances
+    body.querySelectorAll('.shell-channel-instance').forEach(function(el) {
+      if (el !== inst) el.classList.remove('active');
+    });
+
+    // Create xterm
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'Consolas, Monaco, monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        cursorAccent: '#1e1e1e',
+        selectionBackground: '#264f7844'
+      },
+      scrollback: 100000
+    });
+    // Hide until first fit to prevent garbled flash.
+    inst.style.visibility = 'hidden';
+    term.open(inst);
+    attachXtermViewportScrollbarGuard(term);
+    attachTermBrowserChordShield(term);
+
+    // Store channel state
+    win._channels[sessionId] = {
+      term: term,
+      instEl: inst,
+      tabEl: tab,
+      streamDone: false,
+      fitRo: null
+    };
+    win._activeChannelSid = sessionId;
+    win._channelCount += 1;
+    win._channelSeq += 1;
+
+    // Deactivate previous tabs
+    Object.keys(win._channels).forEach(function(sid) {
+      if (sid !== sessionId && win._channels[sid].tabEl) {
+        win._channels[sid].tabEl.classList.remove('active');
+      }
+    });
+
+    // Setup input gate
+    setupShellOnDataUserGate(win, term);
+
+    // onData
+    term.onData(function (data) {
+      if (win._inputClosed) return;
+      var ch = win._channels[sessionId];
+      if (!ch) return;
+      if (ch.streamDone) {
+        if (data === '\r' || data === '\n' || data === '\r\n') { closeChannelTab(win, sessionId); }
+        return;
+      }
+      if (!win._shellUserInputReady) return;
+      if (!window._uiWS || window._uiWS.readyState !== 1) return;
+      try {
+        window._uiWS.send(JSON.stringify({ type: 'input', id: sessionId, d: strToUtf8B64(data), nl: false }));
+      } catch (e) {}
+    });
+
+    // Bootstrap history + watch. Show after first fit to prevent garbled flash.
+    try { fitShellTerminal(term, inst, win, false); } catch (eFit) {}
+    inst.style.visibility = '';
+    bootstrapShellFullHistory(sessionId, term).finally(function () {
+      queueTerminalWatch(sessionId);
+      try {
+        var ro = attachShellTerminalResizeObserverForChannel(win, term, inst, sessionId);
+        win._channels[sessionId].fitRo = ro;
+        shellTermSyncViewportAfterBufferChange(term, inst, win);
+      } catch (eBoot) {}
+    });
+
+    // Tab click → switch
+    tab.addEventListener('click', function(e) {
+      if (e.target.closest('.shell-channel-tab-close')) return;
+      switchChannelTab(win, sessionId);
+    });
+
+    // Close button
+    var closeBtn = tab.querySelector('.shell-channel-tab-close');
+    closeBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeChannelTab(win, sessionId);
+    });
+
+    // Focus
+    requestAnimationFrame(function() { try { term.focus(); } catch(e) {} });
+
+    return term;
+  }
+
+  /** Switch active channel tab. */
+  function switchChannelTab(win, sessionId) {
+    var ch = win._channels && win._channels[sessionId];
+    if (!ch) return;
+    if (win._activeChannelSid === sessionId) return;
+    win._activeChannelSid = sessionId;
+    win._shellUserInputReady = true;  // explicit switch = user intends to type
+
+    // Tabs
+    var tabsBar = win.querySelector('.shell-channel-tabs');
+    if (tabsBar) {
+      tabsBar.querySelectorAll('.shell-channel-tab').forEach(function(t) {
+        t.classList.toggle('active', t.getAttribute('data-chsid') === sessionId);
+      });
+    }
+    // Instances
+    var body = win.querySelector('.shell-channel-body');
+    if (body) {
+      body.querySelectorAll('.shell-channel-instance').forEach(function(el) {
+        el.classList.toggle('active', el.getAttribute('data-chsid') === sessionId);
+      });
+    }
+
+    // Fit + focus
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        fitShellTerminal(ch.term, ch.instEl, win, true);
+        try { ch.term.focus(); } catch(e) {}
+      });
+    });
+  }
+
+  /** Close a channel tab. Terminates the shell process and cleans up. */
+  function closeChannelTab(win, sessionId) {
+    var ch = win._channels && win._channels[sessionId];
+    if (!ch) return;
+
+    ch.streamDone = true;
+
+    // Unsubscribe
+    sendTerminalWatch(sessionId, false);
+
+    // Send terminate request (fire-and-forget) — child shells only close their channel.
+    fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/terminate', { method: 'POST' }).catch(function() {});
+
+    // Dispose xterm
+    try {
+      if (ch.fitRo) { ch.fitRo.unobserve(ch.instEl); }
+    } catch(e) {}
+    try { ch.term.dispose(); } catch(e) {}
+
+    // Remove DOM
+    if (ch.tabEl && ch.tabEl.parentNode) ch.tabEl.parentNode.removeChild(ch.tabEl);
+    if (ch.instEl && ch.instEl.parentNode) ch.instEl.parentNode.removeChild(ch.instEl);
+
+    // Update state
+    delete win._channels[sessionId];
+    win._channelCount = Math.max(0, win._channelCount - 1);
+    if (win._channelCount === 0) win._channelSeq = 0;
+
+    // Switch or show empty
+    if (win._activeChannelSid === sessionId) {
+      var neighbor = _channelNeighbor(win, sessionId);
+      if (neighbor && win._channels[neighbor]) {
+        switchChannelTab(win, neighbor);
+      } else if (win._channelCount === 0) {
+        win._activeChannelSid = null;
+        _showChannelEmpty(win, true);
+      }
+    }
+  }
+
+  function _showChannelEmpty(win, show) {
+    var el = win.querySelector('.shell-channel-empty');
+    if (el) el.classList.toggle('show', !!show);
+    var body = win.querySelector('.shell-channel-body');
+    if (body) body.style.display = show ? 'none' : '';
+  }
+
+  /** "+" button / empty-state click handler. */
+  function addChannelClick(win) {
+    if (!win._parentSid) return;
+    fetch('/api/sessions/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: JSON.stringify({ parent_session_id: win._parentSid, rows: 24, cols: 80 })
+    }).then(function(r) {
+      if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+      return r.json();
+    }).then(function(j) {
+      createChannelTab(win, j.session_id);
+    }).catch(function(err) { console.error('add channel failed', err); });
+  }
+
+  /** Wire up channel tab bar events (called once per window). */
+  function _wireChannelTabBar(win) {
+    var addBtn = win.querySelector('.shell-channel-tab-add');
+    if (addBtn && !addBtn._chWired) {
+      addBtn._chWired = true;
+      addBtn.addEventListener('click', function() { addChannelClick(win); });
+    }
+    var emptyBtn = win.querySelector('.shell-channel-empty-add');
+    if (emptyBtn && !emptyBtn._chWired) {
+      emptyBtn._chWired = true;
+      emptyBtn.addEventListener('click', function() { addChannelClick(win); });
+    }
+  }
+
+  /** ResizeObserver wrapper that tracks which channel SID to resize. */
+  function attachShellTerminalResizeObserverForChannel(win, term, termEl, sessionId) {
+    var ro = new ResizeObserver(function() {
+      scheduleShellRemoteResize(win, term, termEl, sessionId);
+    });
+    ro.observe(termEl);
+    return ro;
+  }
+
+  /** Initialize shell window UI (header buttons, drag, resize, tab switching) — no xterm. */
+  function _initShellWindowUI(win, connLabel, sessionId, clickEvent) {
     var header = win.querySelector('.shell-window-header');
     var collapseBtn = win.querySelector('.shell-window-collapse-btn');
     var closeBtn = win.querySelector('.close-btn');
@@ -1260,51 +2272,7 @@
 
     bindShellWindowCloseButton(win, closeBtn);
 
-    var term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: 'Consolas, Monaco, monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: '#1e1e1e',
-        selectionBackground: '#264f7844'
-      },
-      scrollback: 100000
-    });
-    term.open(termEl);
-    attachXtermViewportScrollbarGuard(term);
-    attachTermBrowserChordShield(term);
-    win._term = term;
-    win._shellTermEl = termEl;
-    setupShellOnDataUserGate(win, term);
-
-    win._streamDone = false;
-    try { fitShellTerminal(term, termEl, win, false); } catch (eFit0) {}
-    bootstrapShellFullHistory(sessionId, term).finally(function () {
-      queueTerminalWatch(sessionId);
-      try {
-        attachShellTerminalResizeObserver(win, term, termEl);
-        shellTermSyncViewportAfterBufferChange(term, termEl, win);
-      } catch (eBoot) {}
-    });
-
     win._inputClosed = false;
-    term.onData(function (data) {
-      if (win._inputClosed) return;
-      if (win._streamDone) {
-        if (data === '\r' || data === '\n' || data === '\r\n') {
-          closeShellWindow(win);
-        }
-        return;
-      }
-      if (!win._shellUserInputReady) return;
-      if (!window._uiWS || window._uiWS.readyState !== 1) return;
-      try {
-        window._uiWS.send(JSON.stringify({ type: 'input', id: sessionId, d: strToUtf8B64(data), nl: false }));
-      } catch (e) {}
-    });
 
     collapseBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     collapseBtn.addEventListener('click', function (e) {
@@ -1327,19 +2295,326 @@
       }
       collapseBtn.title = win.classList.contains('shell-window-collapsed') ? 'Expand' : 'Collapse';
       if (!win.classList.contains('shell-window-collapsed')) {
-        fitShellTerminal(term, termEl, win, true);
-        try { term.focus(); } catch (e3) {}
+        var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+        if (ch && ch.term && ch.instEl) fitShellTerminal(ch.term, ch.instEl, win, true);
       }
     });
 
     setupShellWindowDrag(win, header);
     setupShellWindowResize(win);
+
+    // --- Header tab switching (term / fw / file panels) ---
+    var tabBtns = win.querySelectorAll('.shell-tab-btn');
+    var terminalWrap = win.querySelector('.shell-terminal-wrap');
+    var tabPanels = win.querySelectorAll('.shell-tab-panel');
+    tabBtns.forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        var tab = this.getAttribute('data-stab');
+        tabBtns.forEach(function(b) { b.classList.toggle('active', b === btn); });
+        if (terminalWrap) terminalWrap.style.display = tab === 'term' ? '' : 'none';
+        tabPanels.forEach(function(p) { p.style.display = p.getAttribute('data-stab') === tab ? 'flex' : 'none'; });
+        if (tab === 'term') {
+          var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+          if (ch && ch.term && ch.instEl) {
+            requestAnimationFrame(function() {
+              requestAnimationFrame(function() {
+                fitShellTerminal(ch.term, ch.instEl, win, true);
+                try { ch.term.focus(); } catch(e2) {}
+              });
+            });
+          }
+        }
+        if (tab === 'fw') refreshShellFwList(win);
+      });
+    });
+
+    // Forward "add" button
+    var fwAddBtn = win.querySelector('.shell-fw-add-btn');
+    if (fwAddBtn) {
+      fwAddBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _toolPanelSshCfg = connLabel || 'internal';
+        document.getElementById('fw-ssh-config-modal').value = connLabel || 'internal';
+        document.getElementById('fw-remote-host').value = '';
+        document.getElementById('fw-remote-port').value = '';
+        document.getElementById('fw-local-host').value = '127.0.0.1';
+        document.getElementById('fw-local-port').value = '0';
+        document.getElementById('fw-direction').value = 'local';
+        var errEl = document.getElementById('modal-forward-err');
+        if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+        document.getElementById('fw-direction').dispatchEvent(new Event('change'));
+        showModal('modal-forward');
+      });
+    }
+    var fwRefreshBtn = win.querySelector('.shell-fw-refresh-btn');
+    if (fwRefreshBtn) {
+      fwRefreshBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var svg = this.querySelector('svg');
+        if (svg) {
+          svg.style.transition = 'transform 0.6s ease';
+          svg.style.transform = 'rotate(360deg)';
+          setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 1220);
+        }
+        refreshShellFwList(win);
+        loadForwards();
+      });
+    }
+
+    // Refresh forwardings list for this window
+    function refreshShellFwList(w) {
+      w = w || win;
+      var listEl = w.querySelector('.shell-fw-list');
+      if (!listEl) return;
+      fetch('/api/forwards').then(function(r){return r.json()}).then(function(j){
+        var fwds = (j.forwards||[]).filter(function(f){ return f.ssh_config === (connLabel||'internal'); });
+        if (!fwds.length) { listEl.innerHTML = '<div style="padding:16px;color:#8b949e;text-align:center">No active forwards</div>'; return; }
+        listEl.innerHTML = fwds.map(function(f){
+          var dirLabel = f.direction;
+          var dirColor = dirLabel === 'local' ? '#3fb950' : (dirLabel === 'dynamic' ? '#58a6ff' : '#d29922');
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #21262d;transition:background .1s" onmouseover="this.style.background=\'#161b22\'" onmouseout="this.style.background=\'\'">' +
+            '<span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;padding:1px 5px;border-radius:3px;color:' + dirColor + ';border:1px solid ' + dirColor + ';flex-shrink:0;min-width:42px;text-align:center">' + escapeHtml(dirLabel) + '</span>' +
+            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.78rem"><span style="color:#8b949e">' + escapeHtml(f.listen_addr) + '</span> <span style="color:#484f58">→</span> <span style="color:#c9d1d9">' + escapeHtml(f.target_addr) + '</span></span>' +
+            '<button class="shell-fw-del-btn" data-fwid="' + escapeHtml(f.forward_id) + '" style="padding:2px 6px;font-size:0.68rem;border:1px solid transparent;border-radius:3px;background:transparent;color:#484f58;cursor:pointer;flex-shrink:0" onmouseover="this.style.borderColor=\'#f85149\';this.style.color=\'#f85149\'" onmouseout="this.style.borderColor=\'transparent\';this.style.color=\'#484f58\'">✕</button>' +
+            '</div>';
+        }).join('');
+        listEl.querySelectorAll('.shell-fw-del-btn').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var fwid = this.getAttribute('data-fwid');
+            fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
+              .then(function() { refreshShellFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();}); });
+          });
+        });
+        // Auto-scroll to bottom so new items are visible
+        listEl.scrollTop = listEl.scrollHeight;
+      }).catch(function(){});
+    }
+    win._refreshFwList = function() { refreshShellFwList(win); };
+
+    // File operations for this shell window
+    var filePathInput = win.querySelector('.shell-file-path');
+    var fileListing = win.querySelector('.shell-file-listing');
+    var fileUploadInput = win.querySelector('.shell-file-upload-input');
+    var fileCtxMenu = win.querySelector('.shell-file-ctx-menu');
+
+    // Dismiss context menu on outside click
+    document.addEventListener('click', function(e) {
+      if (!fileCtxMenu || fileCtxMenu.style.display === 'none') return;
+      if (!fileCtxMenu.contains(e.target)) fileCtxMenu.style.display = 'none';
+    });
+
+    function shellFileBrowse() {
+      var path = filePathInput.value.trim() || '/';
+      if (!fileListing) return;
+      fileListing.innerHTML = '<div style="padding:8px;color:#8b949e">Loading...</div>';
+      if (fileCtxMenu) fileCtxMenu.style.display = 'none';
+      fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files?path=' + encodeURIComponent(path))
+        .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function(data) { renderShellFileList(data, path); })
+        .catch(function(e) { fileListing.innerHTML = '<div style="padding:8px;color:#f85149">Error: ' + escapeHtml(String(e.message||e)) + '</div>'; });
+    }
+
+    var _ctxPath = '', _ctxIsDir = false;
+
+    function fileMenuAction(action) {
+      if (fileCtxMenu) fileCtxMenu.style.display = 'none';
+      var path = _ctxPath;
+      if (!path) return;
+      var base = path.replace(/\/+$/, '');
+      var name = base.split('/').pop() || '';
+
+      if (action === 'download') {
+        window.open('/api/sessions/' + encodeURIComponent(sessionId) + '/files/download?path=' + encodeURIComponent(path), '_blank');
+      } else if (action === 'delete') {
+        if (!confirm('Delete ' + path + '?')) return;
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/delete?path=' + encodeURIComponent(path), {method:'DELETE'})
+          .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function() { shellFileBrowse(); })
+          .catch(function(e) { alert('Delete failed: ' + e.message); });
+      } else if (action === 'rename') {
+        var newName = prompt('Rename ' + name, name);
+        if (!newName || newName === name) return;
+        var parts = base.split('/'); parts.pop();
+        var to = (parts.join('/') || '') + '/' + newName;
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/rename?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'POST'})
+          .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function() { shellFileBrowse(); })
+          .catch(function(e) { alert('Rename failed: ' + e.message); });
+      }
+    }
+
+    function showFileMenu(e, path, isDir) {
+      e.preventDefault();
+      e.stopPropagation();
+      _ctxPath = path;
+      _ctxIsDir = isDir;
+      if (!fileCtxMenu) return;
+      fileCtxMenu.querySelectorAll('.file-ctx-item').forEach(function(it) {
+        it.style.display = (it.dataset.action === 'download' && isDir) ? 'none' : '';
+      });
+      fileCtxMenu.style.display = 'block';
+      // Position near cursor, within viewport
+      var x = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX) || e.pageX || 100;
+      var y = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY) || e.pageY || 100;
+      var mw = fileCtxMenu.offsetWidth || 150;
+      var mh = fileCtxMenu.offsetHeight || 120;
+      if (x + mw > window.innerWidth) x = window.innerWidth - mw - 4;
+      if (y + mh > window.innerHeight) y = window.innerHeight - mh - 4;
+      fileCtxMenu.style.left = Math.max(0, x) + 'px';
+      fileCtxMenu.style.top = Math.max(0, y) + 'px';
+    }
+
+    if (fileCtxMenu) {
+      fileCtxMenu.addEventListener('click', function(e) {
+        var it = e.target.closest('.file-ctx-item');
+        if (!it) return;
+        fileMenuAction(it.dataset.action);
+      });
+    }
+
+    // Event delegation for file detail action buttons
+    fileListing.addEventListener('click', function(e) {
+      var btn = e.target.closest('[data-file-action]');
+      if (!btn) return;
+      e.stopPropagation();
+      var path = btn.getAttribute('data-file-path') || btn.parentElement.getAttribute('data-file-path');
+      if (!path) return;
+      var action = btn.getAttribute('data-file-action');
+      if (action === 'download') {
+        window.open('/api/sessions/' + encodeURIComponent(sessionId) + '/files/download?path=' + encodeURIComponent(path), '_blank');
+      } else if (action === 'delete') {
+        if (!confirm('Delete ' + path + '?')) return;
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/delete?path=' + encodeURIComponent(path), {method:'DELETE'})
+          .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function() { shellFileBrowse(); })
+          .catch(function(e) { alert('Delete failed: ' + e.message); });
+      } else if (action === 'rename') {
+        var pre = btn.getAttribute('data-file-name') || path.split('/').pop() || '';
+        var nm = prompt('Rename', pre);
+        if (!nm || nm === pre) return;
+        var pp = path.replace(/\/+$/, '').split('/'); pp.pop();
+        var to = (pp.join('/') || '') + '/' + nm;
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/rename?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'POST'})
+          .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function() { shellFileBrowse(); })
+          .catch(function(e) { alert('Rename failed: ' + e.message); });
+      }
+    });
+
+    var _longPressTimer = null;
+    function renderShellFileList(data, currentPath) {
+      filePathInput.value = currentPath;
+      if (!data.is_dir) {
+        // File detail view — show metadata with action buttons
+        var nm = data.name || currentPath;
+        var detailHtml = '<div class="shell-file-detail" data-file-path="' + escapeHtml(currentPath) + '">';
+        detailHtml += '<div style="font-size:0.85rem;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span>📄</span><span style="word-break:break-all">' + escapeHtml(nm) + '</span></div>';
+        detailHtml += '<div style="font-size:0.75rem;color:#8b949e;margin-bottom:2px">Size: ' + formatSize(data.size||0) + '</div>';
+        if (data.mod_time) detailHtml += '<div style="font-size:0.75rem;color:#8b949e;margin-bottom:2px">Modified: ' + escapeHtml(data.mod_time) + '</div>';
+        detailHtml += '<div class="shell-file-detail-actions">';
+        detailHtml += '<button class="sf-dl" data-file-action="download" data-file-path="' + escapeHtml(currentPath) + '">Download</button>';
+        detailHtml += '<button data-file-action="rename" data-file-path="' + escapeHtml(currentPath) + '" data-file-name="' + escapeHtml(nm) + '">Rename</button>';
+        detailHtml += '<button class="sf-del" data-file-action="delete" data-file-path="' + escapeHtml(currentPath) + '">Delete</button>';
+        detailHtml += '</div></div>';
+        fileListing.innerHTML = detailHtml;
+        return;
+      }
+      var children = data.children || [];
+      if (!children.length) { fileListing.innerHTML = '<div style="padding:8px;color:#8b949e">Empty</div>'; return; }
+      var basePath = currentPath.replace(/\/+$/, '');
+      fileListing.innerHTML = children.map(function(c) {
+        var icon = c.is_dir ? '📁' : '📄';
+        var fullPath = basePath + '/' + c.name;
+        return '<div class="shell-file-row" data-path="' + escapeHtml(fullPath) + '" data-isdir="' + (c.is_dir?'1':'0') + '" data-name="' + escapeHtml(c.name) + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-bottom:1px solid #30363d;white-space:nowrap">' +
+          '<span style="flex-shrink:0">' + icon + '</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(c.name) + '</span>' +
+          (!c.is_dir ? '<span style="flex-shrink:0;color:#8b949e;font-size:0.7rem;margin-right:2px">' + formatSize(c.size||0) + '</span>' : '') +
+          '<button class="shell-file-menu-btn" title="Menu" style="flex-shrink:0">&vellip;</button>' +
+          '</div>';
+      }).join('');
+      // Bind row events
+      fileListing.querySelectorAll('.shell-file-row').forEach(function(row) {
+        var path = row.getAttribute('data-path');
+        var isDir = row.getAttribute('data-isdir') === '1';
+        row.addEventListener('click', function(e) {
+          if (e.target.closest('.shell-file-menu-btn')) return;
+          filePathInput.value = path;
+          shellFileBrowse();
+        });
+        var btn = row.querySelector('.shell-file-menu-btn');
+        if (btn) btn.addEventListener('click', function(e) { showFileMenu(e, path, isDir); });
+        row.addEventListener('contextmenu', function(e) { showFileMenu(e, path, isDir); });
+        row.addEventListener('touchstart', function(e) {
+          if (e.target.closest('.shell-file-menu-btn')) return;
+          clearTimeout(_longPressTimer);
+          _longPressTimer = setTimeout(function() { showFileMenu(e, path, isDir); }, 600);
+        }, {passive:true});
+        row.addEventListener('touchend', function() { clearTimeout(_longPressTimer); });
+        row.addEventListener('touchmove', function() { clearTimeout(_longPressTimer); });
+      });
+    }
+
+    if (win.querySelector('.shell-file-go')) win.querySelector('.shell-file-go').addEventListener('click', function(e) {
+      var svg = this.querySelector('svg');
+      if (svg) {
+        svg.style.transition = 'transform 0.6s ease';
+        svg.style.transform = 'rotate(360deg)';
+        setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 1220);
+      }
+      shellFileBrowse();
+    });
+    if (win.querySelector('.shell-file-up')) win.querySelector('.shell-file-up').addEventListener('click', function() {
+      var p = filePathInput.value.trim().replace(/\/+$/, '') || '/';
+      if (p === '/') return;
+      var parts = p.split('/'); parts.pop();
+      filePathInput.value = parts.join('/') || '/';
+      shellFileBrowse();
+    });
+    if (filePathInput) filePathInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') shellFileBrowse(); });
+    if (win.querySelector('.shell-file-upload-btn') && fileUploadInput) {
+      win.querySelector('.shell-file-upload-btn').addEventListener('click', function() { fileUploadInput.click(); });
+      fileUploadInput.addEventListener('change', function() {
+        var file = this.files && this.files[0];
+        if (!file) return;
+        var path = (filePathInput.value.trim().replace(/\/+$/, '') || '') + '/' + file.name;
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/upload?path=' + encodeURIComponent(path), {method:'POST',body:file})
+          .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function() { shellFileBrowse(); })
+          .catch(function(e) { console.error(e); });
+      });
+    }
+
     requestAnimationFrame(function () {
-      try { term.focus(); } catch (e1) {}
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      if (ch && ch.term) try { ch.term.focus(); } catch (e1) {}
     });
   }
 
   /** After clicking an entry: show placeholder + spinner immediately to prevent double-connect. */
+    // Shared shell-window tab panels (Forwardings + Files)
+    var SHELL_WINDOW_PANELS_HTML =       '<div class="shell-tab-panel" data-stab="fw" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:12px 16px">' +
+        '<div style="display:flex;align-items:center;margin-bottom:10px;flex-shrink:0">' +
+        '<span style="font-size:0.82rem;font-weight:600;color:#e6edf3">Port Forwardings</span>' +
+        '<button type="button" class="shell-fw-refresh-btn" title="Refresh" style="width:24px;height:24px;margin-left:auto;padding:0;border:1px solid #484f58;border-radius:4px;background:transparent;color:#888;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-right:4px;transition:color .12s,background .12s,border-color .12s" onmouseover="this.style.color=\'#ccc\';this.style.borderColor=\'#666\'" onmouseout="this.style.color=\'#888\';this.style.borderColor=\'#484f58\'" onmousedown="this.style.background=\'rgba(255,255,255,.06)\'" onmouseup="this.style.background=\'transparent\'"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 7A5.5 5.5 0 0111.3 3.8M12.5 7A5.5 5.5 0 012.7 10.2"/><path d="M12.5 1.5v2.5H10M1.5 12.5v-2.5H4"/></svg></button>' +
+        '<button type="button" class="shell-fw-add-btn" title="Add forwarding" style="width:24px;height:24px;padding:0;border:1px solid #2ea043;border-radius:4px;background:transparent;color:#3fb950;cursor:pointer;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 3v8M3 7h8"/></svg></button>' +
+        '</div>' +
+        '<div class="shell-fw-list" style="flex:1;min-height:0;overflow:auto;font-size:0.78rem;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;background:#0d1117">Loading...</div>' +
+      '</div>' +
+      '<div class="shell-tab-panel" data-stab="file" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:12px 16px 12px">' +
+        '<div style="font-size:0.82rem;font-weight:600;color:#e6edf3;margin-bottom:8px">Files</div>' +
+        '<div style="display:flex;gap:0;margin-bottom:6px;align-items:stretch;flex-shrink:0;border:1px solid #484f58;overflow:hidden">' +
+        '<button type="button" class="shell-file-up" title="Parent" style="width:30px;height:30px;padding:0;border:none;border-right:1px solid #484f58;background:#2d2d2d;color:#aaa;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 10l5-5 5 5"/></svg></button>' +
+        '<input type="text" class="shell-file-path" placeholder="/" style="flex:1;min-width:0;border:none;outline:none;font-family:ui-monospace,monospace;font-size:0.78rem;padding:0 8px;background:#1e1e1e;color:#d4d4d4">' +
+        '<input type="file" class="shell-file-upload-input" style="display:none">' +
+        '<button type="button" class="shell-file-upload-btn" title="Upload" style="width:30px;height:30px;padding:0;border:none;border-left:1px solid #484f58;background:#2d2d2d;color:#aaa;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M7 2v8M4 5.5l3-3 3 3M2 10v1.5a1 1 0 001 1h8a1 1 0 001-1V10"/></svg></button>' +
+        '<button type="button" class="shell-file-go" title="Load" style="width:30px;height:30px;padding:0;border:none;border-left:1px solid #484f58;background:#2d2d2d;color:#aaa;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1 7a6 6 0 0111.2-3.8M13 7a6 6 0 01-11.2 3.8"/><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M13 2v2.5h-2.5M1 12v-2.5h2.5"/></svg></button>' +
+        '</div>' +
+        '<div class="shell-file-listing" style="flex:1;min-height:0;overflow:auto;font-size:0.78rem;font-family:ui-monospace,monospace;border:1px solid #484f58;background:#1e1e1e;color:#d4d4d4"></div>' +
+          '<div class="shell-file-ctx-menu" style="display:none"><div class="file-ctx-item" data-action="download">Download</div><div class="file-ctx-item" data-action="rename">Rename</div><div class="file-ctx-item" data-action="delete" class="file-ctx-danger">Delete</div></div>' +
+      '</div>' +
+      '</div>'; // end SHELL_WINDOW_PANELS_HTML
+
   function openPendingShellWindow(connName, clickEvent, abortCtl) {
     if (typeof Terminal === 'undefined') { alert('xterm failed to load'); return null; }
     var container = shellWindowsEl();
@@ -1352,10 +2627,11 @@
     win._placeholder = true;
     win._pendingConnName = connName;
     win._connectAbort = abortCtl;
-    win.innerHTML =
+
+        win.innerHTML =
       '<div class="shell-window-header">' +
+        '<span class="shell-header-icon"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14.5h6M8 11.5v3"/></svg></span>' +
         '<div class="shell-window-title-cluster">' +
-        '<span class="shell-terminal-ic">' + terminalIconImgHtml() + '</span>' +
         '<h3 class="shell-window-title">' +
         '<span class="sw-conn">' + escapeHtml(connName) + '</span>' +
         '<span class="shell-title-id-group">' +
@@ -1366,8 +2642,13 @@
         '</span>' +
         '</h3>' +
         '</div>' +
+        '<div class="shell-tab-bar">' +
+          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
+          '</div>' +
         '<div class="shell-window-header-btns">' +
-          '<button type="button" class="shell-window-collapse-btn" style="display:none" title="Collapse">' +
+          '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
             '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
           '</button>' +
@@ -1377,11 +2658,21 @@
         '</div>' +
       '</div>' +
       '<div class="shell-window-content"><div class="shell-terminal-wrap">' +
-        '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>Connecting <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
-      '</div></div>' +
+        '<div class="shell-channel-body">' +
+          '<div class="shell-pending"><div class="shell-pending-spinner" aria-hidden="true"></div><div>Connecting <strong>' + escapeHtml(connName) + '</strong>…</div></div>' +
+        '</div>' +
+        '<div class="shell-channel-tabs">' +
+          '<button type="button" class="shell-channel-tab-add" title="New shell channel">+</button>' +
+        '</div>' +
+        '<div class="shell-channel-empty">' +
+          '<span>No shell channels</span>' +
+          '<button type="button" class="shell-channel-empty-add">+ New Shell</button>' +
+        '</div>' +
+      '</div>' +
+SHELL_WINDOW_PANELS_HTML +
       '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
-    var termEl = win.querySelector('.shell-terminal-wrap');
+    var termEl = win.querySelector('.shell-channel-body');
     var header = win.querySelector('.shell-window-header');
     var closeBtn = win.querySelector('.close-btn');
     positionShellWindowFromClick(win, clickEvent);
@@ -1401,12 +2692,17 @@
     win._connectAbort = null;
     win._placeholder = false;
     win._pendingConnName = '';
+
     win._sid = sessionId;
+    win._parentSid = sessionId;
+    win._connName = connLabel || '';
     var sidEl = win.querySelector('.shell-sid-copy .sid');
     if (sidEl) sidEl.textContent = stripSessionPrefix(sessionId);
     var pend = win.querySelector('.shell-pending');
     if (pend) pend.remove();
-    mountXtermInShellWindow(win, win.querySelector('.shell-terminal-wrap'), connLabel, sessionId, clickEvent);
+    _wireChannelTabBar(win);
+    _initShellWindowUI(win, connLabel, sessionId, clickEvent);
+    createChannelTab(win, sessionId);
   }
 
   function openShellWindow(connLabel, sessionId, clickEvent) {
@@ -1422,10 +2718,11 @@
     win.className = 'shell-window';
     win.id = 'shell-window-' + shellWindowCount;
     win._sid = sessionId;
-    win.innerHTML =
+
+        win.innerHTML =
       '<div class="shell-window-header">' +
+        '<span class="shell-header-icon"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14.5h6M8 11.5v3"/></svg></span>' +
         '<div class="shell-window-title-cluster">' +
-        '<span class="shell-terminal-ic">' + terminalIconImgHtml() + '</span>' +
         '<h3 class="shell-window-title">' +
         (connLabel ? ('<span class="sw-conn">' + escapeHtml(connLabel) + '</span>') : '') +
         '<span class="shell-title-id-group">' +
@@ -1436,6 +2733,11 @@
         '</span>' +
         '</h3>' +
         '</div>' +
+        '<div class="shell-tab-bar">' +
+          '<button type="button" class="shell-tab-btn active" data-stab="term" title="Terminal"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M4 5l2 2-2 2"/><line x1="8" y1="9" x2="11" y2="9"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="fw" title="Forwardings"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1 7h3.5M9.5 7h3.5M7 1v3.5M7 9.5v3.5" stroke-linecap="round"/></svg></button>' +
+          '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
+          '</div>' +
         '<div class="shell-window-header-btns">' +
           '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
@@ -1446,16 +2748,42 @@
           '</button>' +
         '</div>' +
       '</div>' +
-      '<div class="shell-window-content"><div class="shell-terminal-wrap"></div></div>' +
+      '<div class="shell-window-content"><div class="shell-terminal-wrap">' +
+        '<div class="shell-channel-body"></div>' +
+        '<div class="shell-channel-tabs">' +
+          '<button type="button" class="shell-channel-tab-add" title="New shell channel">+</button>' +
+        '</div>' +
+        '<div class="shell-channel-empty">' +
+          '<span>No shell channels</span>' +
+          '<button type="button" class="shell-channel-empty-add">+ New Shell</button>' +
+        '</div>' +
+      '</div>' +
+SHELL_WINDOW_PANELS_HTML +
       '<div class="shell-window-resize-handle" title="Drag to resize"></div>';
 
-    var termEl = win.querySelector('.shell-terminal-wrap');
     positionShellWindowFromClick(win, clickEvent);
-
     /* First mount only — never re-append this node to reorder; use bringShellWindowToFront (z-index). */
     container.appendChild(win);
     bringShellWindowToFront(win);
-    mountXtermInShellWindow(win, termEl, connLabel, sessionId, clickEvent);
+    win._parentSid = sessionId;
+    win._connName = connLabel || '';
+    _wireChannelTabBar(win);
+    _initShellWindowUI(win, connLabel, sessionId, clickEvent);
+
+    // Restore all shells (root + children). If none running, auto-create one.
+    fetch(sessionAPI(sessionId, '/child-shells'))
+      .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
+      .then(function(shells) {
+        var running = shells.filter(function(s) { return s.status === 'running'; });
+        if (running.length > 0) {
+          running.forEach(function(s) { createChannelTab(win, s.id); });
+          // Restore last active tab.
+          var lastActive = window._shellLastActive && window._shellLastActive[sessionId];
+          if (lastActive && win._channels[lastActive]) switchChannelTab(win, lastActive);
+        } else {
+          _showChannelEmpty(win, true);
+        }
+      }).catch(function() { addChannelClick(win); });
   }
 
   /** POST /api/sessions/start then open shell window. command/mode may be '' to use server defaults (login shell, profile default_mode). */
@@ -1513,9 +2841,14 @@
     if (!grid) return;
     setLoadBanner(document.getElementById('conn-load-banner'), bannerMsg);
     grid.innerHTML = '';
-    (connections || []).forEach(function (c) {
+    (connections || []).sort(function(a, b) {
+      if (a.kind === 'internal') return -1;
+      if (b.kind === 'internal') return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    }).forEach(function (c) {
       var tile = document.createElement('div');
       tile.className = 'conn-tile entry-card';
+      tile.setAttribute('data-conn-name', c.name);
       var icon = c.kind === 'internal' ? '🔁' : '🌐';
       tile.innerHTML =
         '<div class="entry-card-inner">' +
@@ -1568,6 +2901,19 @@
     });
   }
 
+
+  function loadForwards() {
+    return fetch('/api/forwards')
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        window._lastForwards = j.forwards || [];
+        renderSessionGrid(window._lastSessionsSnapshot || [], '');
+      })
+      .catch(function (e) { window._lastForwards = []; });
+  }
+
+
+
   function loadConnections() {
     return fetch('/api/connections')
       .then(function (r) {
@@ -1592,6 +2938,78 @@
       });
   }
 
+  // ---- connection form helpers ----
+  function _tomlEscape(v) { return v.replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
+  function _tomlVal(s) { return s ? ('"'+_tomlEscape(s)+'"') : '""'; }
+  function _connFormToTOML() {
+    var lines = ['kind = "remote"'];
+    var h = document.getElementById('conn-f-host').value.trim(); lines.push('host = ' + _tomlVal(h));
+    var p = parseInt(document.getElementById('conn-f-port').value, 10) || 22;
+    if (p !== 22) lines.push('port = ' + p);
+    lines.push('user = ' + _tomlVal(document.getElementById('conn-f-user').value.trim()));
+    var auth = document.getElementById('conn-f-auth').value;
+    if (auth === 'password') lines.push('password = ' + _tomlVal(document.getElementById('conn-f-password').value));
+    else lines.push('private_key = """\n' + document.getElementById('conn-f-pem').value + '\n"""');
+    var pp = document.getElementById('conn-f-passphrase').value;
+    if (pp) lines.push('key_passphrase = ' + _tomlVal(pp));
+    var sh = document.getElementById('conn-f-shell').value.trim();
+    if (sh) lines.push('default_shell = ' + _tomlVal(sh));
+    lines.push('trust_unknown_host = true');
+    return lines.join('\n') + '\n';
+  }
+  function _connTOMLToForm(toml) {
+    var obj = {};
+    var re = /^\s*(\w+)\s*=\s*(.+)$/gm, m;
+    while ((m = re.exec(toml)) !== null) {
+      var v = m[2].trim();
+      if (v === 'true') obj[m[1]] = true;
+      else if (v === 'false') obj[m[1]] = false;
+      else if (/^\d+$/.test(v)) obj[m[1]] = parseInt(v, 10);
+      else if (v.startsWith('"""')) obj[m[1]] = v.replace(/^"""/,'').replace(/"""$/,'').trim();
+      else obj[m[1]] = v.replace(/^"(.*)"$/,'$1').replace(/\\"/g,'"');
+    }
+    document.getElementById('conn-f-host').value = obj.host || '';
+    document.getElementById('conn-f-port').value = obj.port || 22;
+    document.getElementById('conn-f-user').value = obj.user || '';
+    document.getElementById('conn-f-password').value = obj.password || '';
+    document.getElementById('conn-f-pem').value = obj.private_key || '';
+    document.getElementById('conn-f-passphrase').value = obj.key_passphrase || '';
+    document.getElementById('conn-f-shell').value = obj.default_shell || '';
+    document.getElementById('conn-f-auth').value = obj.private_key ? 'key' : 'password';
+    _connAuthChange();
+  }
+  function _connAuthChange() {
+    var a = document.getElementById('conn-f-auth').value;
+    document.getElementById('conn-f-password-wrap').style.display = a === 'password' ? '' : 'none';
+    document.getElementById('conn-f-pem-wrap').style.display = a === 'key' ? '' : 'none';
+  }
+  function _connToggleView() {
+    var formView = document.getElementById('conn-form-view');
+    var tomlView = document.getElementById('conn-config-view');
+    var btn = document.getElementById('conn-toggle-view');
+    var iconForm = btn.querySelector('.toggle-icon-form');
+    var iconToml = btn.querySelector('.toggle-icon-toml');
+    if (tomlView.style.display === 'none') {
+      document.getElementById('conn-config').value = _connFormToTOML();
+      formView.style.display = 'none';
+      tomlView.style.display = '';
+      iconForm.style.display = 'none';
+      iconToml.style.display = '';
+    } else {
+      _connTOMLToForm(document.getElementById('conn-config').value);
+      tomlView.style.display = 'none';
+      formView.style.display = '';
+      iconToml.style.display = 'none';
+      iconForm.style.display = '';
+    }
+  }
+  function _connGetBody() {
+    if (document.getElementById('conn-config-view').style.display === 'none') {
+      return _connFormToTOML();
+    }
+    return document.getElementById('conn-config').value;
+  }
+
   function openConnModal(edit, name) {
     editingConnName = edit ? name : '';
     document.getElementById('modal-conn-err').style.display = 'none';
@@ -1600,31 +3018,65 @@
     var nameEl = document.getElementById('conn-name');
     nameEl.value = edit ? name : '';
     nameEl.readOnly = !!edit;
-    var ta = document.getElementById('conn-json');
+    // Start in form view
+    document.getElementById('conn-form-view').style.display = '';
+    document.getElementById('conn-config-view').style.display = 'none';
     if (edit) {
       fetch('/api/connections/' + encodeURIComponent(name)).then(function (r) {
         if (!r.ok) throw new Error(r.statusText);
         return r.text();
-      }).then(function (t) { ta.value = t; }).catch(function (err) {
+      }).then(function (t) {
+        document.getElementById('conn-config').value = t;
+        _connTOMLToForm(t);
+      }).catch(function (err) {
         document.getElementById('modal-conn-err').textContent = String(err.message || err);
         document.getElementById('modal-conn-err').style.display = 'block';
       });
     } else {
       fetch('/api/connection-templates').then(function (r) { return r.json(); }).then(function (t) {
-        ta.value = t.remote || '{}';
-      }).catch(function () { ta.value = '{}'; });
+        var tmpl = t.remote || '{}';
+        document.getElementById('conn-config').value = tmpl;
+        _connTOMLToForm(tmpl);
+      }).catch(function () {});
     }
     showModal('modal-conn');
   }
+
+  document.getElementById('conn-f-auth').onchange = _connAuthChange;
+  document.getElementById('conn-toggle-view').onclick = _connToggleView;
+  function _toggleEye(btn) {
+    var inp = btn.parentElement.querySelector('input');
+    var show = inp && inp.type === 'password';
+    if (inp) inp.type = show ? 'text' : 'password';
+    var openEl = btn.querySelector('.eye-open');
+    var closedEl = btn.querySelector('.eye-closed');
+    if (openEl) openEl.style.display = show ? 'none' : '';
+    if (closedEl) closedEl.style.display = show ? '' : 'none';
+  }
+  document.querySelectorAll('.psw-eye').forEach(function(btn) {
+    btn.onclick = function() { _toggleEye(this); };
+  });
 
   document.getElementById('modal-conn-close').onclick = function () { hideModal('modal-conn'); };
   document.getElementById('conn-save').onclick = function () {
     var err = document.getElementById('modal-conn-err');
     err.style.display = 'none';
     var name = document.getElementById('conn-name').value.trim();
-    var body = document.getElementById('conn-json').value;
+    var body = _connGetBody();
     if (!name) { err.textContent = 'Profile name is required'; err.style.display = 'block'; return; }
-    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
+    // Check for duplicate when creating (not editing)
+    if (!document.getElementById('conn-name').readOnly) {
+      var tiles = document.querySelectorAll('.conn-tile');
+      for (var i = 0; i < tiles.length; i++) {
+        var n = tiles[i].getAttribute('data-conn-name');
+        if (n && n.toLowerCase() === name.toLowerCase()) {
+          err.textContent = 'Profile "' + name + '" already exists';
+          err.style.display = 'block';
+          return;
+        }
+      }
+    }
+    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
         hideModal('modal-conn');
@@ -1677,6 +3129,29 @@
     loadConnections();
     startUIWebSocket();
   };
+  // Delegated click handler for forward delete buttons (bound once, survives innerHTML refresh).
+  (function() {
+    var fwList = document.getElementById('tools-fw-list-items');
+    if (fwList) {
+      fwList.addEventListener('click', function(e) {
+        var target = e.target;
+        // Guard against text-node targets (which lack .closest).
+        var btn = (target && target.closest) ? target.closest('.fw-del-btn') : null;
+        if (!btn) return;
+        e.preventDefault();
+        var fwid = btn.getAttribute('data-fwid');
+        if (!fwid) return;
+        fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
+          .then(function(r) {
+            if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || 'HTTP ' + r.status); });
+            refreshFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();});
+          })
+          .catch(function(err) { console.error('Delete forward failed:', err); });
+      });
+    }
+  })();
+
+  loadForwards();
   loadConnections();
   startUIWebSocket();
 })();

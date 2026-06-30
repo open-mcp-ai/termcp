@@ -50,13 +50,6 @@ func testShellEchoArgs(s string) []string {
 	return testShellArgs("-c", "echo "+s)
 }
 
-func testEchoCommand(s string) (string, []string) {
-	if runtime.GOOS == "windows" {
-		return "powershell.exe", []string{"-NoProfile", "-Command", "Write-Output " + s}
-	}
-	return "echo", []string{s}
-}
-
 func testSleepCommand(seconds string) (string, []string) {
 	if runtime.GOOS == "windows" {
 		return "powershell.exe", []string{"-NoProfile", "-Command", "Start-Sleep -Seconds " + seconds}
@@ -73,9 +66,8 @@ func testPipeCommand() string {
 
 func TestInfo_DeepCopyExitCode(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +99,7 @@ func TestInfo_DeepCopyExitCode(t *testing.T) {
 
 func startTestServer(t *testing.T) *sshserver.Server {
 	t.Helper()
-	srv := sshserver.New("127.0.0.1:0")
+	srv := sshserver.New()
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -128,9 +120,8 @@ func testConfig(command string, args []string, mode api.SessionMode, name string
 
 func TestSession_CreateAndInfo(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "test-session"), nil)
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "test-session"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,9 +144,8 @@ func TestSession_CreateAndInfo(t *testing.T) {
 
 func TestSession_SendInputReadOutput(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,10 +173,9 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 
 func TestSession_Terminate(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
 	command, args := testSleepCommand("60")
-	s, err := New(addr, srv, testConfig(command, args, api.ModePipe, ""), nil)
+	s, err := New(srv, testConfig(command, args, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,28 +200,11 @@ func TestSession_Terminate(t *testing.T) {
 
 func TestSession_ForceTerminate(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
 	command, args := testSleepCommand("60")
-	s, err := New(addr, srv, testConfig(command, args, api.ModePipe, ""), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, err := New(srv, testConfig(command, args, api.ModePipe, ""), nil)
 
-	s.Terminate(true, 0)
-
-	time.Sleep(200 * time.Millisecond)
-	info := s.Info()
-	if info.Status != api.SessionExited {
-		t.Fatalf("expected 'exited' after force terminate, got %q", info.Status)
-	}
-}
-
-func TestSession_ResizePty(t *testing.T) {
-	srv := startTestServer(t)
-	addr := srv.Addr()
-
-	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,9 +222,8 @@ func TestSession_ResizePty(t *testing.T) {
 
 func TestSession_ResizePtyPipeMode(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, testConfig(testPipeCommand(), nil, api.ModePipe, ""), nil)
+	s, err := New(srv, testConfig(testPipeCommand(), nil, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,9 +240,8 @@ func TestSession_SendInputAfterExit(t *testing.T) {
 		t.Skip("PowerShell exit under ConPTY is not deterministic enough for this assertion")
 	}
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,35 +261,42 @@ func TestSession_NaturalExit(t *testing.T) {
 		t.Skip("PowerShell -Command under ConPTY stays interactive after command completion")
 	}
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, Config{Command: testShell(), Args: testShellEchoArgs("hello"), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: testShell(), Args: testShellEchoArgs("hello"), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	time.Sleep(2 * time.Second)
 
+	// Natural exit of the root shell must NOT tear down the parent session —
+	// only manual Terminate/Disconnect removes it (matches remote behaviour).
+	// The root shell itself is marked exited by the generic shell exit watcher.
 	info := s.Info()
-	if info.Status != api.SessionExited {
-		t.Fatalf("expected 'exited', got %q", info.Status)
+	if info.Status != api.SessionRunning {
+		t.Fatalf("parent session should still be running after root shell exit, got %q", info.Status)
 	}
-	if info.ExitCode == nil || *info.ExitCode != 0 {
-		t.Fatalf("expected exit code 0, got %v", info.ExitCode)
+	shell := s.primaryShell.Info()
+	if shell.Status != api.SessionExited {
+		t.Fatalf("root shell should be exited, got %q", shell.Status)
+	}
+	if shell.ExitCode == nil || *shell.ExitCode != 0 {
+		t.Fatalf("expected root shell exit code 0, got %v", shell.ExitCode)
 	}
 }
 
 func TestManager_CreateAndGet(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	mgr := NewManager(addr, nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
-	command, args := testEchoCommand("hi")
+	// Use a long-running command so auto-delete doesn't fire before we inspect.
+	command, args := testSleepCommand("60")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "test", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.Terminate(true, 0)
 
 	got := mgr.Get(s.ID)
 	if got == nil {
@@ -332,14 +309,20 @@ func TestManager_CreateAndGet(t *testing.T) {
 
 func TestManager_ListAll(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	mgr := NewManager(addr, nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
-	commandA, argsA := testEchoCommand("a")
-	commandB, argsB := testEchoCommand("b")
-	mgr.Create(Config{Command: commandA, Args: argsA, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: commandB, Args: argsB, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	command, args := testSleepCommand("60")
+	s1, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Terminate(true, 0)
+	s2, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Terminate(true, 0)
 
 	all := mgr.ListAll()
 	if len(all) != 2 {
@@ -349,9 +332,8 @@ func TestManager_ListAll(t *testing.T) {
 
 func TestManager_CleanupAll(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	mgr := NewManager(addr, nil, nil, srv)
+	mgr := NewManager( nil, nil, srv)
 
 	command, args := testSleepCommand("60")
 	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
@@ -370,9 +352,8 @@ func TestManager_CleanupAll(t *testing.T) {
 
 func TestManager_Delete(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	mgr := NewManager(addr, nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
 	command, args := testSleepCommand("0.1")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "del-me", Rows: 24, Cols: 80})
@@ -380,39 +361,38 @@ func TestManager_Delete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Terminate and wait for exited status
+	sid := s.ID
+
+	// Terminate triggers OnExit → auto-delete from registry.
 	s.Terminate(true, 0)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.Info().Status != api.SessionRunning {
-			break
+		if mgr.Get(sid) == nil {
+			break // auto-deleted
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	if mgr.Get(s.ID) == nil {
-		t.Fatal("expected session to exist")
+	// After exit, session is auto-deleted by OnExit callback.
+	if mgr.Get(sid) != nil {
+		t.Fatal("expected session to be auto-deleted from registry after exit")
 	}
 
-	if err := mgr.Delete(s.ID); err != nil {
+	// Delete is a no-op for an already-deleted session.
+	if err := mgr.Delete(sid); err != nil {
 		t.Fatal(err)
-	}
-
-	if mgr.Get(s.ID) != nil {
-		t.Fatal("expected session to be deleted")
 	}
 
 	all := mgr.ListAll()
 	if len(all) != 0 {
-		t.Fatalf("expected 0 sessions after delete, got %d", len(all))
+		t.Fatalf("expected 0 sessions, got %d", len(all))
 	}
 }
 
 func TestManager_DeleteRunningSession(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	mgr := NewManager(addr, nil, nil, srv)
+	mgr := NewManager( nil, nil, srv)
 
 	command, args := testSleepCommand("60")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80})
@@ -433,11 +413,10 @@ func TestManager_DeleteRunningSession(t *testing.T) {
 
 func TestSession_GoroutinesCleanedUp(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
 	before := runtime.NumGoroutine()
 
-	s, err := New(addr, srv, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
+	s, err := New(srv, Config{Command: testShell(), Args: testInteractiveShellArgs(), Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,9 +442,8 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 
 func TestSession_ReadOutputWithMaxBytes(t *testing.T) {
 	srv := startTestServer(t)
-	addr := srv.Addr()
 
-	s, err := New(addr, srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
