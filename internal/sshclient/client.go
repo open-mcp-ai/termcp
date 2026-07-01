@@ -250,6 +250,16 @@ func (es *ExecSession) ExitCode() int {
 	return es.exitCode
 }
 
+// Aborted returns true if the session ended due to connection loss rather than a clean process exit.
+func (es *ExecSession) Aborted() bool {
+	return es.err != nil && !isExitError(es.err)
+}
+
+func isExitError(err error) bool {
+	_, ok := err.(*ssh.ExitError)
+	return ok
+}
+
 // ResizePty sends a window-change request for the session.
 func (es *ExecSession) ResizePty(rows, cols int) error {
 	return es.session.WindowChange(rows, cols)
