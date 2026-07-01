@@ -54,6 +54,7 @@ const (
 // ForwardInfo is the public-facing view of a port forward (returned in JSON APIs).
 type ForwardInfo struct {
 	ForwardID  string           `json:"forward_id"`
+	SessionID  string           `json:"session_id"`
 	Direction  ForwardDirection `json:"direction"`
 	SSHConfig  string           `json:"ssh_config"`
 	ListenAddr string           `json:"listen_addr"`
@@ -417,6 +418,31 @@ func (fm *ForwardManager) RegisterForwardFull(fw *ForwardInfo, ln net.Listener, 
 	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
 	fm.mu.Unlock()
 	fm.notifyChange()
+}
+
+// CloseBySession closes all forwards belonging to the given session ID.
+func (fm *ForwardManager) CloseBySession(sessionID string) {
+	fm.mu.Lock()
+	var toClose []*forwardState
+	for id, fw := range fm.forwards {
+		if fw.SessionID == sessionID {
+			toClose = append(toClose, fw)
+			delete(fm.forwards, id)
+		}
+	}
+	fm.mu.Unlock()
+	for _, fw := range toClose {
+		slog.Info("forward: closing on session terminate", "forward_id", fw.ForwardID, "session_id", sessionID)
+		if fw.cancelFunc != nil {
+			fw.cancelFunc()
+		}
+		if fw.listener != nil {
+			fw.listener.Close()
+		}
+	}
+	if len(toClose) > 0 {
+		fm.notifyChange()
+	}
 }
 
 // Close closes a forward by ID and cleans up resources.

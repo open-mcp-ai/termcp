@@ -65,8 +65,9 @@ type Session struct {
 	execSession   *sshclient.ExecSession
 	buf           *buffer.Buffer
 	readerID      int
-	msgMgr        *message.Manager
-	onExit        func()
+	msgMgr         *message.Manager
+	onExit         func()
+	onChildChange  func() // called when child shells are added/removed
 
 	primaryShell  *ChildShell           // wraps own execSession for unified shell lifecycle
 	childShells   map[string]*ChildShell
@@ -592,10 +593,12 @@ type TerminalShell interface {
 type ChildShell struct {
 	ID          string
 	Name        string
+	parent      *Session // nil for the root shell (primaryShell), set for child shells
 	execSession *sshclient.ExecSession
 	buf         *buffer.Buffer
 	done        chan struct{}
 	closeOnce   sync.Once
+	cleanupOnce sync.Once // guards removeChildShell to prevent double push from explicit close + natural exit
 	mu          sync.RWMutex
 	stdinMu     sync.Mutex
 	Status      api.SessionStatus
@@ -781,6 +784,16 @@ func (cs *ChildShell) pipeToBuffer(r io.Reader) {
 	}()
 }
 
+// removeChildShell deletes a child shell from the parent's map and triggers UI notification.
+func (s *Session) removeChildShell(id string) {
+	s.childShellsMu.Lock()
+	delete(s.childShells, id)
+	s.childShellsMu.Unlock()
+	if s.onChildChange != nil {
+		s.onChildChange()
+	}
+}
+
 // startChildReaders starts the stdout/stderr pipe goroutines and exit watcher for a child shell.
 func (cs *ChildShell) startReaders() {
 	cs.pipeToBuffer(cs.execSession.Stdout)
@@ -795,6 +808,12 @@ func (cs *ChildShell) startReaders() {
 		cs.ExitCode = &code
 		cs.mu.Unlock()
 		cs.buf.Close()
+		// Clean up from parent's map and notify UI (only once).
+		cs.cleanupOnce.Do(func() {
+			if cs.parent != nil {
+				cs.parent.removeChildShell(cs.ID)
+			}
+		})
 		slog.Debug("child shell exited", "child_shell_id", cs.ID, "exit_code", code)
 	}()
 }
@@ -822,6 +841,7 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 	cs := &ChildShell{
 		ID:          id,
 		Name:        name,
+		parent:      s,
 		execSession: execSession,
 		buf:         buf,
 		done:        make(chan struct{}),
@@ -840,6 +860,9 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 	}
 	s.childShells[id] = cs
 	s.childShellsMu.Unlock()
+	if s.onChildChange != nil {
+		s.onChildChange()
+	}
 
 	slog.Debug("child shell created", "parent_id", s.ID, "child_shell_id", id)
 	return cs, nil
@@ -853,10 +876,12 @@ func (s *Session) CloseChildShell(id string) error {
 		s.childShellsMu.Unlock()
 		return fmt.Errorf("child shell %q not found", id)
 	}
-	delete(s.childShells, id)
 	s.childShellsMu.Unlock()
 
 	cs.TerminateShell()
+	cs.cleanupOnce.Do(func() {
+		s.removeChildShell(id)
+	})
 	slog.Debug("child shell closed", "parent_id", s.ID, "child_shell_id", id)
 	return nil
 }

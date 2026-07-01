@@ -18,8 +18,9 @@ type Manager struct {
 	msgMgr      *message.Manager
 	store       *storage.Store
 
-	listChangeMu sync.RWMutex
-	onListChange func()
+	listChangeMu   sync.RWMutex
+	onListChange   func()
+	onTerminate    func(sessionID string)
 }
 
 // NewManager creates a Manager. internalSSH must be the built-in sshserver.Server (after Start) when using internal profiles; may be nil if only remote sessions are used in tests.
@@ -48,6 +49,13 @@ func (m *Manager) notifyListChange() {
 	}
 }
 
+// SetTerminateListener registers a callback invoked with the session ID when a session is terminated.
+func (m *Manager) SetTerminateListener(fn func(sessionID string)) {
+	m.listChangeMu.Lock()
+	m.onTerminate = fn
+	m.listChangeMu.Unlock()
+}
+
 // NotifyChange triggers the session list change callback (for WebSocket/SSE push).
 func (m *Manager) NotifyChange() {
 	m.notifyListChange()
@@ -71,6 +79,7 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 		m.persist()
 		m.notifyListChange()
 	}
+	s.onChildChange = m.notifyListChange
 
 	m.persist()
 	m.notifyListChange()
@@ -138,6 +147,12 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	v.(*Session).Terminate(force, gracePeriod)
 	m.persist()
 	m.notifyListChange()
+	m.listChangeMu.RLock()
+	fn := m.onTerminate
+	m.listChangeMu.RUnlock()
+	if fn != nil {
+		fn(id)
+	}
 }
 
 // Delete removes an exited session from the registry.
@@ -177,23 +192,27 @@ func (m *Manager) FindActiveBySSHConfig(sshConfig string) *Session {
 }
 
 func (m *Manager) CleanupAll(force bool) {
-	// Snapshot all sessions, then terminate each one.
-	var list []*Session
-	m.sessions.Range(func(_, v any) bool {
-		list = append(list, v.(*Session))
+	// Snapshot all session IDs, then terminate each one via Manager.Terminate
+	// so onTerminate callbacks fire and associated resources are released.
+	var ids []string
+	m.sessions.Range(func(k, _ any) bool {
+		ids = append(ids, k.(string))
 		return true
 	})
-
-	for _, s := range list {
-		s.Terminate(force, 0)
+	for _, id := range ids {
+		m.Terminate(id, force, 0)
+		// Disconnect SSH client to fully release remote sessions.
+		if s := m.Get(id); s != nil {
+			s.Disconnect()
+		}
 	}
 
 	// Wait for exit goroutines to update status before persisting.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		allExited := true
-		for _, s := range list {
-			if s.Info().Status == api.SessionRunning {
+		for _, id := range ids {
+			if s := m.Get(id); s != nil && s.Info().Status == api.SessionRunning {
 				allExited = false
 				break
 			}

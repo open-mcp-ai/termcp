@@ -236,7 +236,6 @@ func (s *Server) handleStartSubShell(_ context.Context, request mcpgo.CallToolRe
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	s.sessMgr.NotifyChange()
 	return jsonResult(map[string]any{"session_id": cs.ID, "parent_session_id": parentID, "name": cs.Name}), nil
 }
 
@@ -272,7 +271,7 @@ func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolReque
 	if !found {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", shellID)), nil
 	}
-	s.sessMgr.NotifyChange()
+	// CloseChildShell already triggers onChildChange → notifyListChange.
 	return successResult(), nil
 }
 
@@ -534,6 +533,7 @@ func (s *Server) handleForwardPort(ctx context.Context, request mcpgo.CallToolRe
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	fw.SSHConfig = sess.Info().Name
+	fw.SessionID = sessionID
 	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{
 		"local_port": fw.ListenAddr,
@@ -572,6 +572,7 @@ func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolR
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	fw.SSHConfig = sess.Info().Name
+	fw.SessionID = sessionID
 	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{
 		"remote_port": localPort,
@@ -596,6 +597,7 @@ func (s *Server) handleDynamicForward(ctx context.Context, request mcpgo.CallToo
 	fw, ln, err := forward.DynamicForwardSSH(ctx, sshClient, localPort)
 	if err != nil { cancel(); return mcpgo.NewToolResultError(err.Error()), nil }
 	fw.SSHConfig = sess.Info().Name
+	fw.SessionID = sessionID
 	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{"local_port": fw.ListenAddr, "forward_id": fw.ForwardID}), nil
 }
