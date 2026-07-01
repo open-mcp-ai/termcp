@@ -235,6 +235,7 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		h.Sessions.NotifyChange()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"session_id":        cs.ID,
 			"parent_session_id": pid,
