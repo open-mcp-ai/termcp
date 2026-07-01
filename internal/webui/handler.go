@@ -235,7 +235,6 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		h.Sessions.NotifyChange()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"session_id":        cs.ID,
 			"parent_session_id": pid,
@@ -512,8 +511,7 @@ func (h *Handler) handleTerminate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cs := h.Sessions.GetChildShell(id); cs != nil {
-		cs.TerminateShell()
-		h.Sessions.NotifyChange()
+		h.Sessions.CloseChildShell(id)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -626,6 +624,7 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessID := sess.Info().ID
 	if req.Direction == "dynamic" {
 		// For internal sessions, use net.Dial directly (bypasses SSH direct-tcpip)
 		if req.SSHConfig == "internal" {
@@ -636,6 +635,7 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 			fw, fwErr = fw2, err2
 			if fwErr == nil && h.ForwardMgr != nil {
 				fw2.SSHConfig = req.SSHConfig
+				fw2.SessionID = sessID
 				h.ForwardMgr.RegisterForwardFull(fw2, ln, cancel)
 			} else if cancel != nil {
 				cancel()
@@ -650,6 +650,7 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fwErr.Error()})
 		return
 	}
+	fw.SessionID = sessID
 	writeJSON(w, http.StatusCreated, fw)
 }
 
