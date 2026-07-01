@@ -164,6 +164,7 @@ func main() {
 	mainSrv := &http.Server{Addr: addr, Handler: mux}
 
 	forwardMgr := forward.NewForwardManager()
+	sessMgr.SetTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
