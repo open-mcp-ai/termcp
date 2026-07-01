@@ -214,6 +214,7 @@ func (fm *ForwardManager) CreateLocal(sshConfig string, remoteHost string, remot
 	fm.mu.Lock()
 	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
 	fm.mu.Unlock()
+	fm.notifyChange()
 	return fw, nil
 }
 
@@ -232,6 +233,7 @@ func (fm *ForwardManager) CreateRemote(sshConfig string, localHost string, local
 	fm.mu.Lock()
 	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
 	fm.mu.Unlock()
+	fm.notifyChange()
 	return fw, nil
 }
 
@@ -397,6 +399,7 @@ func (fm *ForwardManager) DynamicForwardLocal(localPort int) (*ForwardInfo, erro
 	fm.mu.Lock()
 	fm.forwards[fwID] = fw
 	fm.mu.Unlock()
+	fm.notifyChange()
 	return &fw.ForwardInfo, nil
 }
 
@@ -438,5 +441,6 @@ func (fm *ForwardManager) Close(forwardID string) error {
 		err := fw.listener.Close()
 		slog.Info("forward close: listener closed", "forward_id", forwardID, "err", err)
 	}
+	fm.notifyChange()
 	return nil
 }

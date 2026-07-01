@@ -868,22 +868,23 @@ func (s *Session) GetChildShell(id string) *ChildShell {
 	return s.childShells[id]
 }
 
-// ListChildShells returns public metadata for all child shells of this session.
-func (s *Session) ListChildShells() []api.Session {
-	s.childShellsMu.RLock()
-	defer s.childShellsMu.RUnlock()
-	type entry struct {
-		info      api.Session
-		createdAt time.Time
+	// ListChildShells returns public metadata for all shells (root + children) of this session.
+	func (s *Session) ListChildShells() []api.Session {
+		s.childShellsMu.RLock()
+		defer s.childShellsMu.RUnlock()
+		type entry struct {
+			info      api.Session
+			createdAt time.Time
+		}
+		entries := make([]entry, 0, len(s.childShells)+1)
+		entries = append(entries, entry{info: s.primaryShell.Info(), createdAt: s.primaryShell.CreatedAt})
+		for _, cs := range s.childShells {
+			entries = append(entries, entry{info: cs.Info(), createdAt: cs.CreatedAt})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].createdAt.Before(entries[j].createdAt) })
+		out := make([]api.Session, len(entries))
+		for i, e := range entries {
+			out[i] = e.info
+		}
+		return out
 	}
-	entries := make([]entry, 0, len(s.childShells))
-	for _, cs := range s.childShells {
-		entries = append(entries, entry{info: cs.Info(), createdAt: cs.CreatedAt})
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].createdAt.Before(entries[j].createdAt) })
-	out := make([]api.Session, len(entries))
-	for i, e := range entries {
-		out[i] = e.info
-	}
-	return out
-}
