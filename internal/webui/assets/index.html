@@ -1246,7 +1246,7 @@
         if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
         return r.json();
       })
-      .then(function () { hideModal('modal-forward'); refreshFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();}); })
+      .then(function () { hideModal('modal-forward'); loadForwards(); })
       .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
   };
   document.getElementById('fw-direction').onchange = function () {
@@ -1340,7 +1340,7 @@
         openOrFocusShellWindow(s.name || '', s.id, e);
       };
       var fwdInfo = tile.querySelector('.sess-fwd-info');
-      var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === (s.ssh_endpoint || s.name); });
+      var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === s.name; });
       if (fwds.length > 0) {
         fwdInfo.style.display = 'block';
         fwdInfo.textContent = fwds.length + ' forward' + (fwds.length > 1 ? 's' : '') + ': ' + fwds.map(function(f){ return f.listen_addr + '\u2192' + f.target_addr; }).join(', ');
@@ -1370,6 +1370,7 @@
     }
     // Refresh tabs in open windows (child shells may have changed).
     refreshAllWindowTabs();
+    // Forward and child-shell tab lists are refreshed inside loadForwards() / refreshAllWindowTabs().
   }
 
   /** Per-window tab refresh: fetch child shells for win's parent session and sync tabs.
@@ -2372,7 +2373,6 @@
           svg.style.transform = 'rotate(360deg)';
           setTimeout(function() { svg.style.transition = 'none'; svg.style.transform = 'rotate(0deg)'; }, 1220);
         }
-        refreshShellFwList(win);
         loadForwards();
       });
     }
@@ -2399,7 +2399,7 @@
             e.stopPropagation();
             var fwid = this.getAttribute('data-fwid');
             fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
-              .then(function() { refreshShellFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();}); });
+              .then(function() { loadForwards(); });
           });
         });
         // Auto-scroll to bottom so new items are visible
@@ -2923,6 +2923,8 @@ SHELL_WINDOW_PANELS_HTML +
       .then(function (j) {
         window._lastForwards = j.forwards || [];
         renderSessionGrid(window._lastSessionsSnapshot || [], '');
+        refreshFwList();
+        document.querySelectorAll('.shell-window').forEach(function(w) { if (w._refreshFwList) w._refreshFwList(); });
       })
       .catch(function (e) { window._lastForwards = []; });
   }
@@ -3373,7 +3375,7 @@ SHELL_WINDOW_PANELS_HTML +
         fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
           .then(function(r) {
             if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || 'HTTP ' + r.status); });
-            refreshFwList(); loadForwards(); document.querySelectorAll('.shell-window').forEach(function(w){if(w._refreshFwList)w._refreshFwList();});
+            loadForwards();
           })
           .catch(function(err) { console.error('Delete forward failed:', err); });
       });

@@ -571,6 +571,7 @@ func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolR
 		cancel()
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
+	fw.SSHConfig = sess.Info().Name
 	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{
 		"remote_port": localPort,
@@ -594,6 +595,7 @@ func (s *Server) handleDynamicForward(ctx context.Context, request mcpgo.CallToo
 	ctx, cancel := context.WithCancel(context.Background())
 	fw, ln, err := forward.DynamicForwardSSH(ctx, sshClient, localPort)
 	if err != nil { cancel(); return mcpgo.NewToolResultError(err.Error()), nil }
+	fw.SSHConfig = sess.Info().Name
 	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{"local_port": fw.ListenAddr, "forward_id": fw.ForwardID}), nil
 }
