@@ -271,6 +271,73 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
 	), withLogging("get_file_urls", s.handleGetFileURLs))
 
+	mcpServer.AddTool(mcpgo.NewTool("file_chmod",
+		mcpgo.WithDescription("Change file permissions on the remote via SSH/SFTP. mode is a decimal Unix permission (e.g. 493 = 0755)."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("mode", mcpgo.Required(), mcpgo.Description("Unix permission mode as decimal integer (e.g. 493 for 0755)")),
+	), withLogging("file_chmod", s.handleFileChmod))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_chown",
+		mcpgo.WithDescription("Change file owner and group on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("uid", mcpgo.Required(), mcpgo.Description("User ID (numeric)")),
+		mcpgo.WithNumber("gid", mcpgo.Required(), mcpgo.Description("Group ID (numeric)")),
+	), withLogging("file_chown", s.handleFileChown))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_chtimes",
+		mcpgo.WithDescription("Change file access and modification timestamps on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("atime", mcpgo.Required(), mcpgo.Description("Access time as Unix timestamp (seconds)")),
+		mcpgo.WithNumber("mtime", mcpgo.Required(), mcpgo.Description("Modification time as Unix timestamp (seconds)")),
+	), withLogging("file_chtimes", s.handleFileChtimes))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_readlink",
+		mcpgo.WithDescription("Read the target of a symbolic link on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote symlink path")),
+	), withLogging("file_readlink", s.handleFileReadlink))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_symlink",
+		mcpgo.WithDescription("Create a symbolic link on the remote via SSH/SFTP. target is the existing path, link_path is the new symlink to create (like 'ln -s target link_path')."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("target", mcpgo.Required(), mcpgo.Description("The existing file/directory to point to")),
+		mcpgo.WithString("link_path", mcpgo.Required(), mcpgo.Description("The new symlink path to create")),
+	), withLogging("file_symlink", s.handleFileSymlink))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_link",
+		mcpgo.WithDescription("Create a hard link on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("existing_path", mcpgo.Required(), mcpgo.Description("The existing file to link to")),
+		mcpgo.WithString("new_path", mcpgo.Required(), mcpgo.Description("The new hard link path to create")),
+	), withLogging("file_link", s.handleFileLink))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_truncate",
+		mcpgo.WithDescription("Truncate a remote file to a given size via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("size", mcpgo.Required(), mcpgo.Description("New file size in bytes")),
+	), withLogging("file_truncate", s.handleFileTruncate))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_realpath",
+		mcpgo.WithDescription("Resolve the canonical absolute path on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path")),
+	), withLogging("file_realpath", s.handleFileRealpath))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_statvfs",
+		mcpgo.WithDescription("Get filesystem statistics (disk space, inodes) for a remote path via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path (must exist)")),
+	), withLogging("file_statvfs", s.handleFileStatVFS))
+
+	mcpServer.AddTool(mcpgo.NewTool("file_getwd",
+		mcpgo.WithDescription("Get the remote working directory via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
+	), withLogging("file_getwd", s.handleFileGetwd))
+
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer, sseOpts...)
 	// Streamable HTTP (MCP spec): mount at /stream for clients such as Open WebUI.
