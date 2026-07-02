@@ -293,6 +293,9 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 // SendTerminalBytes writes raw keystrokes to stdin without appending to the message log (web UI).
 func (s *Session) SendTerminalBytes(data []byte, pressEnter bool) error {
 	v, _ := s.shells.Load(s.ID)
+	if v == nil {
+		return fmt.Errorf("session shell has exited")
+	}
 	return v.(*ChildShell).SendTerminalBytes(data, pressEnter)
 }
 
