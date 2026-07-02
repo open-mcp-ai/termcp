@@ -54,31 +54,52 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	if h.ForwardMgr != nil {
 		h.ForwardMgr.SetOnChange(h.sessionHub().broadcast)
 	}
+	// Connection profiles
 	mux.HandleFunc("GET /api/connection-templates", h.handleConnectionTemplates)
 	mux.HandleFunc("GET /api/connections", h.handleListConnections)
 	mux.HandleFunc("GET /api/connections/{name}", h.handleGetConnection)
 	mux.HandleFunc("PUT /api/connections/{name}", h.handlePutConnection)
 	mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
+
+	// Sessions
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
-	mux.HandleFunc("GET /api/sessions/stream", h.handleSessionListStream)
+	mux.HandleFunc("POST /api/sessions", h.handleCreateSession)
+	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
+	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 	mux.HandleFunc("GET /api/ui/ws", h.handleWebUIWS)
-	mux.HandleFunc("POST /api/sessions/start", h.handleStartSession)
-	mux.HandleFunc("GET /api/sessions/{id}/stream", h.handleStream)
 	mux.HandleFunc("GET /api/sessions/{id}/output-range", h.handleSessionOutputRange)
-	mux.HandleFunc("POST /api/sessions/{id}/input", h.handleInput)
-	mux.HandleFunc("POST /api/sessions/{id}/resize", h.handleResize)
-	mux.HandleFunc("GET /api/sessions/{id}/child-shells", h.handleListChildShells)
-	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleTerminate)
-	mux.HandleFunc("POST /api/sessions/{id}/disconnect", h.handleDisconnect)
+	mux.HandleFunc("POST /api/sessions/{id}/shells", h.handleCreateShell)
+	mux.HandleFunc("GET /api/sessions/{id}/shells", h.handleListShells)
+
+	// Shells (globally unique IDs — virtual top-level resource for deletion)
+	mux.HandleFunc("DELETE /api/shells/{id}", h.handleCloseShell)
+
+	// Port forwards (list all, delete by ID)
 	mux.HandleFunc("GET /api/forwards", h.handleListForwards)
-	mux.HandleFunc("POST /api/forwards", h.handleCreateForward)
 	mux.HandleFunc("DELETE /api/forwards/{id}", h.handleDeleteForward)
+	// Session-scoped forwards
+	mux.HandleFunc("GET /api/sessions/{id}/forwards", h.handleListSessionForwards)
+	mux.HandleFunc("POST /api/sessions/{id}/forwards", h.handleCreateForward)
+
+	// File operations
 	mux.HandleFunc("GET /api/sessions/{id}/files", h.handleListFiles)
 	mux.HandleFunc("GET /api/sessions/{id}/files/download", h.handleDownloadFile)
+	mux.HandleFunc("PUT /api/sessions/{id}/files", h.handleRenameFile)
 	mux.HandleFunc("POST /api/sessions/{id}/files/upload", h.handleUploadFile)
+	mux.HandleFunc("DELETE /api/sessions/{id}/files", h.handleDeleteFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/dir", h.handleMakeDir)
+
+	// Backward compat: old routes map to canonical handlers
+	mux.HandleFunc("POST /api/sessions/start", h.handleCreateSession)
+	mux.HandleFunc("GET /api/sessions/{id}/child-shells", h.redirectShells)
+	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleCloseShell)
+	mux.HandleFunc("POST /api/sessions/{id}/close-shell", h.handleCloseShell)
+	mux.HandleFunc("POST /api/sessions/{id}/disconnect", h.handleDeleteSession)
+	mux.HandleFunc("POST /api/forwards", h.handleCreateForward)
 	mux.HandleFunc("DELETE /api/sessions/{id}/files/delete", h.handleDeleteFile)
 	mux.HandleFunc("POST /api/sessions/{id}/files/rename", h.handleRenameFile)
 	mux.HandleFunc("POST /api/sessions/{id}/files/mkdir", h.handleMakeDir)
+
 	mux.Handle("/", embeddedStaticServer())
 }
 
@@ -199,7 +220,7 @@ type startSessionBody struct {
 	ParentSessionID string   `json:"parent_session_id"`
 }
 
-func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var body startSessionBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -207,39 +228,6 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Command) == "" && len(body.Args) > 0 {
 		http.Error(w, "command is required when args are provided", http.StatusBadRequest)
-		return
-	}
-
-	// Child shell path: reuse parent's SSH connection.
-	if pid := strings.TrimSpace(body.ParentSessionID); pid != "" {
-		parent := h.Sessions.Get(pid)
-		if parent == nil {
-			http.Error(w, "parent session not found", http.StatusNotFound)
-			return
-		}
-		rows := body.Rows
-		if rows < 1 {
-			rows = 24
-		}
-		cols := body.Cols
-		if cols < 1 {
-			cols = 80
-		}
-		sessName := strings.TrimSpace(body.Name)
-		mode := body.Mode
-		if mode == "" {
-			mode = "pty"
-		}
-		cs, err := parent.CreateChildShell(body.Command, body.Args, mode == "pty", rows, cols, sessName)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"session_id":        cs.ID,
-			"parent_session_id": pid,
-			"name":              cs.Name,
-		})
 		return
 	}
 
@@ -302,6 +290,83 @@ func (h *Handler) handleStartSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+	// handleGetSession returns a single session's full info.
+	// GET /api/sessions/{id}
+	func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess := h.Sessions.Get(id)
+		if sess == nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, sess.Info())
+	}
+
+	// handleDeleteSession terminates all shells, closes SSH, and removes the session.
+	// DELETE /api/sessions/{id}
+	func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess := h.Sessions.Get(id)
+		if sess == nil {
+			http.NotFound(w, r)
+			return
+		}
+		h.Sessions.Terminate(id, true, 0)
+		sess.Disconnect()
+		w.WriteHeader(http.StatusNoContent)
+	}
+
+
+// handleCreateShell creates a new shell channel on an existing session.
+// POST /api/sessions/{id}/shells
+func (h *Handler) handleCreateShell(w http.ResponseWriter, r *http.Request) {
+	parentID := r.PathValue("id")
+	parent := h.Sessions.Get(parentID)
+	if parent == nil {
+		http.Error(w, "parent session not found", http.StatusNotFound)
+		return
+	}
+
+	var body startSessionBody
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+
+	rows := body.Rows
+	if rows < 1 {
+		rows = 24
+	}
+	cols := body.Cols
+	if cols < 1 {
+		cols = 80
+	}
+	mode := body.Mode
+	if mode == "" {
+		mode = "pty"
+	}
+
+	cs, err := parent.CreateChildShell(body.Command, body.Args, mode == "pty", rows, cols, strings.TrimSpace(body.Name))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":        cs.ID,
+		"parent_session_id": parentID,
+		"name":              cs.Name,
+	})
+}
+
+// redirectShells handles GET /api/sessions/{id}/child-shells -> /api/sessions/{id}/shells.
+func (h *Handler) redirectShells(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	http.Redirect(w, r, "/api/sessions/"+id+"/shells", http.StatusMovedPermanently)
+}
+
+
 func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -359,118 +424,10 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
-		http.NotFound(w, r)
-		return
-	}
 
-	// Reader at current buffer end: stream only new bytes (older scrollback via GET output-range).
-	rid, err := sess.RegisterReader()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer sess.UnregisterReader(rid)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
 
-	fl, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "stream unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	ctx := r.Context()
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		out, err := sess.ReadTerminalStream(ctx, rid, 250*time.Millisecond, false, 0, terminalOutputChunkBytes)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			slog.Debug("webui stream read", "err", err)
-			continue
-		}
-		if out != "" {
-			line := base64.StdEncoding.EncodeToString([]byte(out))
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
-			fl.Flush()
-		}
-
-		info := sess.Info()
-		if info.Status != api.SessionRunning && !sess.HasMoreOutput(rid) {
-			_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
-			fl.Flush()
-			return
-		}
-	}
-}
-
-func (h *Handler) handleInput(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
-		http.NotFound(w, r)
-		return
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if r.URL.Query().Get("newline") == "1" {
-		if err := sess.SendTerminalBytes(body, true); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	} else {
-		if err := sess.SendTerminalBytes(body, false); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type resizeBody struct {
-	Rows int `json:"rows"`
-	Cols int `json:"cols"`
-}
-
-func (h *Handler) handleResize(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
-		http.NotFound(w, r)
-		return
-	}
-	var body resizeBody
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-	if body.Rows < 1 || body.Cols < 1 {
-		http.Error(w, "rows and cols must be >= 1", http.StatusBadRequest)
-		return
-	}
-	if err := sess.ResizePty(body.Rows, body.Cols); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) handleListChildShells(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess := h.Sessions.Get(id)
 	if sess == nil {
@@ -489,19 +446,9 @@ func (h *Handler) handleListChildShells(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"shells": shells})
 }
 
-func (h *Handler) handleDisconnect(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
-		http.NotFound(w, r)
-		return
-	}
-	h.Sessions.Terminate(id, true, 0) // close all shell channels
-	sess.Disconnect()                  // close SSH client, mark exited
-	w.WriteHeader(http.StatusNoContent)
-}
 
-func (h *Handler) handleTerminate(w http.ResponseWriter, r *http.Request) {
+
+func (h *Handler) handleCloseShell(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Check regular session first.
 	if sess := h.Sessions.Get(id); sess != nil {
@@ -581,8 +528,21 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "forward manager not available"})
 		return
 	}
+
+	// session_id comes from the URL path.
+	sessionID := r.PathValue("id")
+	sess := h.Sessions.Get(sessionID)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return
+	}
+	sshClient := sess.SSHClient()
+	if sshClient == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "session has no SSH client — may not be ready"})
+		return
+	}
+
 	var req struct {
-		SSHConfig  string `json:"ssh_config"`
 		Direction  string `json:"direction"`
 		RemoteHost string `json:"remote_host"`
 		RemotePort int    `json:"remote_port"`
@@ -596,62 +556,83 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 	if req.Direction == "" {
 		req.Direction = "local"
 	}
-	if req.SSHConfig == "" {
-		req.SSHConfig = "internal"
+
+	// Validate required parameters per direction.
+	switch req.Direction {
+	case "local":
+		if req.RemoteHost == "" || req.RemotePort <= 0 || req.RemotePort > 65535 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "local forward requires remote_host and remote_port (1-65535)"})
+			return
+		}
+	case "remote":
+		if req.LocalHost == "" || req.LocalPort <= 0 || req.LocalPort > 65535 ||
+			req.RemoteHost == "" || req.RemotePort <= 0 || req.RemotePort > 65535 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "remote forward requires local_host, local_port, remote_host, remote_port (all ports 1-65535)"})
+			return
+		}
+	case "dynamic":
+		// dynamic only needs local_port (optional, auto-assigned if 0).
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "direction must be local, remote, or dynamic"})
+		return
+	}
+
+	info := sess.Info()
+	sshConfig := info.SSHEndpoint
+	if info.Name != "" {
+		sshConfig = info.Name
 	}
 
 	var fw *forward.ForwardInfo
 	var fwErr error
 
-	// Find an active session with this ssh_config and reuse its SSH client.
-	if h.Sessions == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no session manager available"})
-		return
-	}
-	slog.Info("create forward", "ssh_config", req.SSHConfig, "direction", req.Direction, "local_port", req.LocalPort)
-	sess := h.Sessions.FindActiveBySSHConfig(req.SSHConfig)
-	if sess == nil {
-		slog.Error("create forward: no active session", "ssh_config", req.SSHConfig)
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("no active session for %q — connect first, then add port forward", req.SSHConfig)})
-		return
-	}
-	slog.Info("create forward: found session", "session_id", sess.Info().ID)
-	sshClient := sess.SSHClient()
-	slog.Info("create forward: ssh client", "has_client", sshClient != nil)
-
-	if sshClient == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("no SSH client for %q — session may not be ready", req.SSHConfig)})
-		return
-	}
-
-	sessID := sess.Info().ID
 	if req.Direction == "dynamic" {
-		// For internal sessions, use net.Dial directly (bypasses SSH direct-tcpip)
-		if req.SSHConfig == "internal" {
+		if sshConfig == "internal" {
 			fw, fwErr = h.ForwardMgr.DynamicForwardLocal(req.LocalPort)
 		} else {
 			ctx, cancel := context.WithCancel(context.Background())
 			fw2, ln, err2 := forward.DynamicForwardSSH(ctx, sshClient, req.LocalPort)
 			fw, fwErr = fw2, err2
 			if fwErr == nil && h.ForwardMgr != nil {
-				fw2.SSHConfig = req.SSHConfig
-				fw2.SessionID = sessID
+				fw2.SSHConfig = sshConfig
+				fw2.SessionID = sessionID
 				h.ForwardMgr.RegisterForwardFull(fw2, ln, cancel)
 			} else if cancel != nil {
 				cancel()
 			}
 		}
 	} else if req.Direction == "local" {
-		fw, fwErr = h.ForwardMgr.CreateLocal(req.SSHConfig, req.RemoteHost, req.RemotePort, req.LocalPort, sshClient)
+		fw, fwErr = h.ForwardMgr.CreateLocal(sshConfig, req.RemoteHost, req.RemotePort, req.LocalPort, sshClient)
 	} else {
-		fw, fwErr = h.ForwardMgr.CreateRemote(req.SSHConfig, req.LocalHost, req.LocalPort, req.RemoteHost, req.RemotePort, sshClient)
+		fw, fwErr = h.ForwardMgr.CreateRemote(sshConfig, req.LocalHost, req.LocalPort, req.RemoteHost, req.RemotePort, sshClient)
 	}
 	if fwErr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fwErr.Error()})
 		return
 	}
-	fw.SessionID = sessID
+	fw.SessionID = sessionID
 	writeJSON(w, http.StatusCreated, fw)
+}
+
+// handleListSessionForwards returns forwards scoped to a single session.
+// GET /api/sessions/{id}/forwards
+func (h *Handler) handleListSessionForwards(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if h.ForwardMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"forwards": []any{}})
+		return
+	}
+	all := h.ForwardMgr.List()
+	var filtered []forward.ForwardInfo
+	for _, fw := range all {
+		if fw.SessionID == sessionID {
+			filtered = append(filtered, fw)
+		}
+	}
+	if filtered == nil {
+		filtered = []forward.ForwardInfo{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forwards": filtered})
 }
 
 func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client) {
@@ -939,6 +920,8 @@ func (h *Handler) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// handleRenameFile renames/moves a file or directory on the same filesystem.
+// PUT /api/sessions/{id}/files (canonical); POST /api/sessions/{id}/files/rename (compat).
 func (h *Handler) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("id")
 	from := strings.TrimSpace(r.URL.Query().Get("from"))

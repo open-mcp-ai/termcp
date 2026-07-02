@@ -874,7 +874,7 @@
     }
   }
 
-  /** /api/sessions/{id}{suffix} — e.g. /terminate; input and resize use WebSocket */
+  /** /api/sessions/{id}{suffix} — e.g. /close-shell; input and resize use WebSocket */
   function sessionAPI(sessionId, suffix) {
     return '/api/sessions/' + encodeURIComponent(sessionId) + suffix;
   }
@@ -1152,7 +1152,7 @@
       var url = fileAPI('/download?path=' + encodeURIComponent(_fileCtxPath));
       if (url) window.open(url, '_blank');
     } else if (action === 'delete') {
-      var url2 = fileAPI('/delete?path=' + encodeURIComponent(_fileCtxPath));
+      var url2 = fileAPI('?path=' + encodeURIComponent(_fileCtxPath));
       if (!url2) return;
       if (!confirm('Delete ' + _fileCtxPath + '?')) return;
       fetch(url2, { method: 'DELETE' })
@@ -1234,14 +1234,13 @@
     var remotePort = parseInt(document.getElementById('fw-remote-port').value) || 0;
     if (dir !== 'dynamic' && (!remoteHost || !remotePort)) { err.textContent = 'Target host and port are required'; err.style.display = 'block'; return; }
     var body = {
-      ssh_config: _toolPanelSshCfg,
       direction: dir,
       remote_host: remoteHost,
       remote_port: remotePort,
       local_host: document.getElementById('fw-local-host').value.trim() || '127.0.0.1',
       local_port: parseInt(document.getElementById('fw-local-port').value) || 0
     };
-    fetch('/api/forwards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    fetch('/api/sessions/' + encodeURIComponent(_toolPanelSessionId) + '/forwards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) {
         if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
         return r.json();
@@ -1321,8 +1320,8 @@
         e.preventDefault();
         e.stopPropagation();
         // First terminate (close channel), then disconnect (close SSH client).
-        fetch(sessionAPI(s.id, '/terminate'), { method: 'POST' }).then(function() {
-          return fetch(sessionAPI(s.id, '/disconnect'), { method: 'POST' });
+        fetch('/api/shells/' + encodeURIComponent(s.id), { method: 'DELETE' }).then(function() {
+          return fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' });
         }).catch(function () {});
         var w = getShellWindowBySid(s.id);
         if (w) closeShellWindow(w);
@@ -1377,7 +1376,7 @@
    *  Each window is independent — no shared loop state, no cross-contamination. */
   function refreshWindowTabs(win) {
     if (!win || !win._parentSid) return;
-    fetch(sessionAPI(win._parentSid, '/child-shells'))
+    fetch(sessionAPI(win._parentSid, '/shells'))
       .then(function(r) { if (!r.ok) return; return r.json(); })
       .then(function(j) {
         if (!j || !j.shells) return;
@@ -2194,7 +2193,7 @@
     sendTerminalWatch(sessionId, false);
 
     // Send terminate request (fire-and-forget) — child shells only close their channel.
-    fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/terminate', { method: 'POST' }).catch(function() {});
+    fetch('/api/shells/' + encodeURIComponent(sessionId), { method: 'DELETE' }).catch(function() {});
 
     // Dispose xterm
     try {
@@ -2233,10 +2232,10 @@
   /** "+" button / empty-state click handler. */
   function addChannelClick(win) {
     if (!win._parentSid) return;
-    fetch('/api/sessions/start', {
+    fetch('/api/sessions/' + encodeURIComponent(win._parentSid) + '/shells', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: JSON.stringify({ parent_session_id: win._parentSid, rows: 24, cols: 80 })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: 24, cols: 80 })
     }).then(function(r) {
       if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
       return r.json();
@@ -2444,7 +2443,7 @@
         window.open('/api/sessions/' + encodeURIComponent(sessionId) + '/files/download?path=' + encodeURIComponent(path), '_blank');
       } else if (action === 'delete') {
         if (!confirm('Delete ' + path + '?')) return;
-        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/delete?path=' + encodeURIComponent(path), {method:'DELETE'})
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files?path=' + encodeURIComponent(path), {method:'DELETE'})
           .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function() { shellFileBrowse(); })
           .catch(function(e) { alert('Delete failed: ' + e.message); });
@@ -2453,7 +2452,7 @@
         if (!newName || newName === name) return;
         var parts = base.split('/'); parts.pop();
         var to = (parts.join('/') || '') + '/' + newName;
-        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/rename?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'POST'})
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'PUT'})
           .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function() { shellFileBrowse(); })
           .catch(function(e) { alert('Rename failed: ' + e.message); });
@@ -2501,7 +2500,7 @@
         window.open('/api/sessions/' + encodeURIComponent(sessionId) + '/files/download?path=' + encodeURIComponent(path), '_blank');
       } else if (action === 'delete') {
         if (!confirm('Delete ' + path + '?')) return;
-        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/delete?path=' + encodeURIComponent(path), {method:'DELETE'})
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files?path=' + encodeURIComponent(path), {method:'DELETE'})
           .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function() { shellFileBrowse(); })
           .catch(function(e) { alert('Delete failed: ' + e.message); });
@@ -2511,7 +2510,7 @@
         if (!nm || nm === pre) return;
         var pp = path.replace(/\/+$/, '').split('/'); pp.pop();
         var to = (pp.join('/') || '') + '/' + nm;
-        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files/rename?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'POST'})
+        fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/files?from=' + encodeURIComponent(path) + '&to=' + encodeURIComponent(to), {method:'PUT'})
           .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function() { shellFileBrowse(); })
           .catch(function(e) { alert('Rename failed: ' + e.message); });
@@ -2786,7 +2785,7 @@ SHELL_WINDOW_PANELS_HTML +
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
 
     // Restore all shells (root + children). If none running, auto-create one.
-    fetch(sessionAPI(sessionId, '/child-shells'))
+    fetch(sessionAPI(sessionId, '/shells'))
       .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
       .then(function(shells) {
         var running = shells.filter(function(s) { return s.status === 'running'; });
@@ -2824,7 +2823,7 @@ SHELL_WINDOW_PANELS_HTML +
     };
     if (opt.name) body.name = opt.name;
     else if (connName) body.name = connName;
-    return fetch('/api/sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal })
+    return fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
         return r.json();
