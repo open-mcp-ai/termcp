@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -310,6 +311,85 @@ func (s *Client) StatFile(remotePath string) (*FileStatResult, error) {
 	}
 
 	return result, nil
+}
+
+// ChmodFile changes the permissions of a remote file.
+func (s *Client) ChmodFile(remotePath string, mode os.FileMode) error {
+	return s.client.Chmod(remotePath, mode)
+}
+
+// ChownFile changes the owner and group of a remote file.
+func (s *Client) ChownFile(remotePath string, uid, gid int) error {
+	return s.client.Chown(remotePath, uid, gid)
+}
+
+// ChtimesFile changes the access and modification times of a remote file.
+func (s *Client) ChtimesFile(remotePath string, atime, mtime time.Time) error {
+	return s.client.Chtimes(remotePath, atime, mtime)
+}
+
+// ReadLink returns the target of a symbolic link.
+func (s *Client) ReadLink(path string) (string, error) {
+	return s.client.ReadLink(path)
+}
+
+// SymlinkFile creates a symbolic link on the remote.
+// target is the existing path, linkPath is the new symlink to create.
+func (s *Client) SymlinkFile(target, linkPath string) error {
+	return s.client.Symlink(target, linkPath)
+}
+
+// LinkFile creates a hard link on the remote.
+func (s *Client) LinkFile(existing, newPath string) error {
+	return s.client.Link(existing, newPath)
+}
+
+// TruncateFile truncates a remote file to the given size.
+func (s *Client) TruncateFile(path string, size int64) error {
+	return s.client.Truncate(path, size)
+}
+
+// RealPath returns the canonical absolute path of a remote file or directory.
+func (s *Client) RealPath(path string) (string, error) {
+	return s.client.RealPath(path)
+}
+
+// FsStatResult holds the result of a file_statvfs operation.
+type FsStatResult struct {
+	TotalSpace  uint64 `json:"total_space"`
+	FreeSpace   uint64 `json:"free_space"`
+	AvailSpace  uint64 `json:"avail_space"`
+	TotalINodes uint64 `json:"total_inodes"`
+	FreeINodes  uint64 `json:"free_inodes"`
+	AvailINodes uint64 `json:"avail_inodes"`
+	BlockSize   uint64 `json:"block_size"`
+}
+
+// fsStatFromVFS converts a pkg/sftp StatVFS to FsStatResult.
+func fsStatFromVFS(v *sftp.StatVFS) *FsStatResult {
+	return &FsStatResult{
+		TotalSpace:  v.Frsize * v.Blocks,
+		FreeSpace:   v.Frsize * v.Bfree,
+		AvailSpace:  v.Frsize * v.Bavail,
+		TotalINodes: v.Files,
+		FreeINodes:  v.Ffree,
+		AvailINodes: v.Favail,
+		BlockSize:   v.Frsize,
+	}
+}
+
+// StatVFS returns filesystem statistics for the given remote path.
+func (s *Client) StatVFS(path string) (*FsStatResult, error) {
+	v, err := s.client.StatVFS(path)
+	if err != nil {
+		return nil, fmt.Errorf("statvfs: %w", err)
+	}
+	return fsStatFromVFS(v), nil
+}
+
+// Getwd returns the remote working directory.
+func (s *Client) Getwd() (string, error) {
+	return s.client.Getwd()
 }
 
 // OpenSFTPOverSSH opens an SFTP connection over an existing SSH client (for regular SSH).
