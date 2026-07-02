@@ -23,11 +23,17 @@
 
 ## Quick Start
 
-```bash
-# Build
-go build -o termcp .
+### Install
 
-# Run (defaults: loopback, port 18765)
+```bash
+go install github.com/open-mcp-ai/termcp@latest
+termcp --data-dir ./data
+```
+
+### Build from source
+
+```bash
+go build -o termcp .
 ./termcp --data-dir ./data
 ```
 
