@@ -735,7 +735,7 @@
           <div class="conn-field"><label for="conn-f-auth">Auth</label><select id="conn-f-auth"><option value="password">Password</option><option value="key">Private Key</option></select></div>
           <div class="conn-field" id="conn-f-password-wrap"><label for="conn-f-password">Password</label><div class="psw-wrap"><input type="password" id="conn-f-password" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show password"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
           <div class="conn-field" id="conn-f-pem-wrap" style="display:none"><label for="conn-f-pem">Private Key</label><textarea id="conn-f-pem" spellcheck="false" rows="4"></textarea></div>
-          <div class="conn-field"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
+          <div class="conn-field" id="conn-f-passphrase-wrap" style="display:none"><label for="conn-f-passphrase">Key Passphrase (optional)</label><div class="psw-wrap"><input type="password" id="conn-f-passphrase" class="psw-input" autocomplete="new-password"><button type="button" class="psw-eye" title="Show"><svg class="eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 3.5A6.4 6.4 0 018 3.2C12.5 3.2 15 8 15 8s-1 2-2.8 3.8M10 10a3 3 0 01-4-4M3.5 11.5l-2 2M3 8c0 0 2.5-5 7-5 1 0 2 .4 3 1M14.5 1l-13 13"/></svg></button></div></div>
           <div class="conn-field"><label for="conn-f-shell">Default Shell (optional)</label><input type="text" id="conn-f-shell" placeholder="auto-detect" autocomplete="off"></div>
           <div class="conn-field"><label for="conn-f-proxy">Proxy (optional, SOCKS5 URL)</label><input type="text" id="conn-f-proxy" placeholder="socks5://user:pass@127.0.0.1:1080" autocomplete="off"></div>
           <div class="jump-arrow" title="SSH traffic to this host is tunneled through the bastions below, in order">SSH Jumps Chain</div>
@@ -3039,7 +3039,7 @@ SHELL_WINDOW_PANELS_HTML +
           '<div class="conn-field"><label>Auth</label><select data-f="auth"><option value="password"' + (authIsKey?'':' selected') + '>Password</option><option value="key"' + (authIsKey?' selected':'') + '>Private Key</option></select></div>' +
           '<div class="conn-field j-pw" style="' + (authIsKey?'display:none':'') + '"><label>Password</label><input type="password" data-f="password" value="' + _hesc(c.password) + '"></div>' +
           '<div class="conn-field j-pem" style="' + (authIsKey?'':'display:none') + '"><label>Private Key</label><textarea data-f="pem" rows="3">' + _hesc(c.pem) + '</textarea></div>' +
-          '<div class="conn-field"><label>Key Passphrase (optional)</label><input type="password" data-f="passphrase" value="' + _hesc(c.passphrase) + '"></div>' +
+          '<div class="conn-field j-passphrase" style="' + (authIsKey?'':'display:none') + '"><label>Key Passphrase (optional)</label><input type="password" data-f="passphrase" value="' + _hesc(c.passphrase) + '"></div>' +
           '<div class="conn-field"><label>Proxy (optional)</label><input type="text" data-f="proxy" placeholder="socks5://..." value="' + _hesc(c.proxy) + '"></div>';
       } else {
         var host = c.host || '(empty)';
@@ -3131,6 +3131,7 @@ SHELL_WINDOW_PANELS_HTML +
     var a = document.getElementById('conn-f-auth').value;
     document.getElementById('conn-f-password-wrap').style.display = a === 'password' ? '' : 'none';
     document.getElementById('conn-f-pem-wrap').style.display = a === 'key' ? '' : 'none';
+    document.getElementById('conn-f-passphrase-wrap').style.display = a === 'key' ? '' : 'none';
   }
   function _connToggleView() {
     var formView = document.getElementById('conn-form-view');
@@ -3216,6 +3217,7 @@ SHELL_WINDOW_PANELS_HTML +
     if (f === 'auth') {
       card.querySelector('.j-pw').style.display = t.value === 'password' ? '' : 'none';
       card.querySelector('.j-pem').style.display = t.value === 'key' ? '' : 'none';
+      card.querySelector('.j-passphrase').style.display = t.value === 'key' ? '' : 'none';
     }
   });
   _jumpsBox.addEventListener('change', function (e) {
