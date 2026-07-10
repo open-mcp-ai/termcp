@@ -9,7 +9,8 @@ import (
 	"sync"
 )
 
-// Store manages dataDir/ssh_configs/<name>/config.toml
+// Store manages dataDir/ssh_configs/<name>/config.toml for remote profiles.
+// The built-in "internal" profile is virtual: it is never written to disk.
 type Store struct {
 	dataDir string
 	mu      sync.Mutex
@@ -33,6 +34,7 @@ func (s *Store) root() string {
 }
 
 // ConfigDir returns the directory containing config.toml for a named profile.
+// For the virtual internal profile this path is not used for I/O.
 func (s *Store) ConfigDir(name string) string {
 	return filepath.Join(s.root(), name)
 }
@@ -44,30 +46,27 @@ func (s *Store) configPath(name string) (string, error) {
 	return filepath.Join(s.root(), name, "config.toml"), nil
 }
 
-// EnsureInternal creates data-dir/ssh_configs/internal/config.toml if missing.
-func EnsureInternal(dataDir string) error {
-	s := NewStore(dataDir)
-	p, err := s.configPath("internal")
+func isInternalName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "internal")
+}
+
+// InternalEntry returns the built-in loopback profile (not loaded from disk).
+func InternalEntry() *Entry {
+	ent, err := ParseAndValidate(InternalTemplate())
 	if err != nil {
-		return err
+		// Template is compile-time constant; fallback if somehow invalid.
+		return &Entry{Kind: KindInternal}
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(p)
-	if err == nil {
-		if _, err := ParseAndValidate(data); err == nil {
-			return nil
-		}
-		// corrupt or invalid template: overwrite
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	return os.WriteFile(p, InternalTemplate(), 0600)
+	return ent
 }
 
 // Load reads and validates a named config.
+// name "internal" is always the virtual built-in entry (disk leftovers are ignored).
 func (s *Store) Load(name string) (*Entry, error) {
+	name = strings.TrimSpace(name)
+	if isInternalName(name) {
+		return InternalEntry(), nil
+	}
 	p, err := s.configPath(name)
 	if err != nil {
 		return nil, err
@@ -82,8 +81,13 @@ func (s *Store) Load(name string) (*Entry, error) {
 	return ParseAndValidate(data)
 }
 
-// ReadRaw returns the raw config.toml bytes for a name (file must exist and parse as valid Entry).
+// ReadRaw returns the raw config.toml bytes for a name.
+// For the virtual internal profile it returns InternalTemplate().
 func (s *Store) ReadRaw(name string) ([]byte, error) {
+	name = strings.TrimSpace(name)
+	if isInternalName(name) {
+		return InternalTemplate(), nil
+	}
 	p, err := s.configPath(name)
 	if err != nil {
 		return nil, err
@@ -98,7 +102,8 @@ func (s *Store) ReadRaw(name string) ([]byte, error) {
 	return data, nil
 }
 
-// List returns sorted config names that have config.toml.
+// List returns sorted config names: virtual "internal" plus remote profiles on disk.
+// Leftover ssh_configs/internal/ directories are ignored.
 func (s *Store) List() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,16 +113,19 @@ func (s *Store) List() ([]string, error) {
 	entries, err := os.ReadDir(s.root())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []string{"internal"}, nil
 		}
 		return nil, err
 	}
-	var names []string
+	names := []string{"internal"}
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		name := e.Name()
+		if isInternalName(name) {
+			continue // disk leftover; virtual entry already listed
+		}
 		cfg := filepath.Join(s.root(), name, "config.toml")
 		if st, err := os.Stat(cfg); err == nil && !st.IsDir() {
 			names = append(names, name)
@@ -127,7 +135,8 @@ func (s *Store) List() ([]string, error) {
 	return names, nil
 }
 
-// Save writes config JSON for a name (validates first).
+// Save writes config for a remote name (validates first).
+// The virtual internal profile cannot be saved.
 func (s *Store) Save(name string, data []byte) error {
 	if _, err := ParseAndValidate(data); err != nil {
 		return err
@@ -135,14 +144,8 @@ func (s *Store) Save(name string, data []byte) error {
 	if err := ValidateName(name); err != nil {
 		return err
 	}
-	if strings.EqualFold(name, "internal") {
-		ent, err := ParseAndValidate(data)
-		if err != nil {
-			return err
-		}
-		if ent.Kind != KindInternal {
-			return fmt.Errorf("name %q is reserved for kind %q only", name, KindInternal)
-		}
+	if isInternalName(name) {
+		return fmt.Errorf("cannot save reserved virtual ssh config %q", "internal")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -173,8 +176,8 @@ func (s *Store) Save(name string, data []byte) error {
 
 // InitRemoteSkeleton creates ssh_configs/<name>/config.toml from template.
 func InitRemoteSkeleton(dataDir, name string) error {
-	if strings.EqualFold(name, "internal") {
-		return fmt.Errorf("name %q is reserved; use the auto-created internal config", name)
+	if isInternalName(name) {
+		return fmt.Errorf("name %q is reserved for the built-in virtual profile", name)
 	}
 	if err := ValidateName(name); err != nil {
 		return err
@@ -193,9 +196,54 @@ func InitRemoteSkeleton(dataDir, name string) error {
 	return os.WriteFile(p, RemoteTemplate(), 0600)
 }
 
-// Delete removes a remote config; internal cannot be deleted.
+// Rename moves a remote config directory to a new validated name.
+func (s *Store) Rename(oldName, newName string) error {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == newName {
+		return nil
+	}
+	if isInternalName(oldName) || isInternalName(newName) {
+		return fmt.Errorf("cannot rename reserved ssh config %q", "internal")
+	}
+	oldPath, err := s.configPath(oldName)
+	if err != nil {
+		return err
+	}
+	newPath, err := s.configPath(newName)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	oldDir := filepath.Dir(oldPath)
+	newDir := filepath.Dir(newPath)
+	if st, err := os.Stat(oldPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("ssh config %q not found", oldName)
+		}
+		return err
+	} else if st.IsDir() {
+		return fmt.Errorf("ssh config %q is not a file", oldName)
+	}
+	// Case-insensitive collision check (Windows/macOS).
+	entries, err := os.ReadDir(s.root())
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != oldName && strings.EqualFold(e.Name(), newName) {
+			return fmt.Errorf("config already exists: %s", filepath.Join(s.root(), e.Name(), "config.toml"))
+		}
+	}
+	return os.Rename(oldDir, newDir)
+}
+
+// Delete removes a remote config; the virtual internal profile cannot be deleted.
 func (s *Store) Delete(name string) error {
-	if strings.EqualFold(name, "internal") {
+	if isInternalName(name) {
 		return fmt.Errorf("cannot delete reserved ssh config %q", name)
 	}
 	p, err := s.configPath(name)

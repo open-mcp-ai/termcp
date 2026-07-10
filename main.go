@@ -125,6 +125,7 @@ func main() {
 	flag.StringVar(&cfg.AdminHost, "admin-host", cfg.AdminHost, "SSH config admin API bind host")
 	flag.IntVar(&cfg.AdminPort, "admin-port", cfg.AdminPort, "SSH config admin HTTP port (0 = disabled; requires admin-token)")
 	flag.StringVar(&cfg.AdminToken, "admin-token", cfg.AdminToken, "Bearer / X-Admin-Token for PUT/GET/DELETE /api/ssh-configs")
+	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
 	flag.Parse()
 
 	if err := cfg.Validate(); err != nil {
@@ -135,11 +136,14 @@ func main() {
 	slog.SetDefault(slog.New(buildLogHandler(cfg)))
 	slog.Info("termcp server started")
 
-	// Start internal SSH server (in-process, no TCP port)
-	sshSrv := sshserver.New()
-	if err := sshSrv.Start(); err != nil {
-		slog.Error("failed to start SSH server", "err", err)
-		os.Exit(1)
+	// Start internal SSH server (in-process, no TCP port) unless disabled.
+	var sshSrv *sshserver.Server
+	if !cfg.NoInternal {
+		sshSrv = sshserver.New()
+		if err := sshSrv.Start(); err != nil {
+			slog.Error("failed to start SSH server", "err", err)
+			os.Exit(1)
+		}
 	}
 	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
 
@@ -153,10 +157,6 @@ func main() {
 	msgMgr := message.NewManager(store)
 	sessMgr := session.NewManager(msgMgr, store, sshSrv)
 
-	if err := sshconfig.EnsureInternal(cfg.DataDir); err != nil {
-		slog.Error("failed to ensure internal ssh config", "err", err)
-		os.Exit(1)
-	}
 	sshStore := sshconfig.NewStore(cfg.DataDir)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -167,10 +167,11 @@ func main() {
 	sessMgr.SetTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
+	mcpSrv.NoInternal = cfg.NoInternal
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
-	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr}).Register(mux)
+	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
 
 	var adminSrv *http.Server
 	if cfg.AdminPort > 0 {
@@ -206,7 +207,9 @@ func main() {
 		shuttingDown.Store(true)
 		slog.Info("shutting down")
 		sessMgr.CleanupAll(true)
-		sshSrv.Stop()
+		if sshSrv != nil {
+			sshSrv.Stop()
+		}
 		if adminSrv != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = adminSrv.Shutdown(ctx)
@@ -271,10 +274,6 @@ func runSSHConfigInit(args []string) {
 
 func runSSHConfigList(args []string) {
 	dataDir := parseSSHConfigDataDir("ssh-config list", args)
-	if err := sshconfig.EnsureInternal(dataDir); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	store := sshconfig.NewStore(dataDir)
 	names, err := store.List()
 	if err != nil {

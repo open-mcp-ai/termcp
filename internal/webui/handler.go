@@ -41,6 +41,7 @@ type Handler struct {
 	Sessions   *session.Manager
 	SSH        *sshconfig.Store
 	ForwardMgr *forward.ForwardManager
+	NoInternal bool // when true, hide and refuse the built-in loopback profile
 
 	sessHub *sessionListHub
 }
@@ -140,6 +141,9 @@ func (h *Handler) handleListConnections(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			continue
 		}
+		if h.NoInternal && ent.Kind == sshconfig.KindInternal {
+			continue
+		}
 		list = append(list, summarizeConnection(n, ent))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": list})
@@ -184,10 +188,25 @@ func (h *Handler) handlePutConnection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ssh store not configured", http.StatusServiceUnavailable)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(name), "internal") {
+		http.Error(w, "built-in internal profile is not editable", http.StatusForbidden)
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if _, err := sshconfig.ParseAndValidate(body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	if from != "" && from != name {
+		if err := h.SSH.Rename(from, name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	if err := h.SSH.Save(name, body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -477,6 +496,9 @@ func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry,
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
+		if h.NoInternal {
+			return "", nil, nil, fmt.Errorf("ssh_config is required when internal profile is disabled")
+		}
 		name = "internal"
 	}
 	ent, err = h.SSH.Load(name)
@@ -484,6 +506,9 @@ func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry,
 		return "", nil, nil, err
 	}
 	if ent.Kind == sshconfig.KindInternal {
+		if h.NoInternal {
+			return "", nil, nil, fmt.Errorf("internal profile is disabled")
+		}
 		return name, ent, nil, nil
 	}
 	r, err := sshconfig.RemoteFromEntry(ent, h.SSH.ConfigDir(name))
@@ -578,16 +603,17 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := sess.Info()
-	sshConfig := info.SSHEndpoint
-	if info.Name != "" {
-		sshConfig = info.Name
+	sshConfig := info.Name
+	if sshConfig == "" {
+		sshConfig = info.SSHEndpoint
 	}
+	isInternal := info.SSHEndpoint == "internal"
 
 	var fw *forward.ForwardInfo
 	var fwErr error
 
 	if req.Direction == "dynamic" {
-		if sshConfig == "internal" {
+		if isInternal {
 			fw, fwErr = h.ForwardMgr.DynamicForwardLocal(req.LocalPort)
 		} else {
 			ctx, cancel := context.WithCancel(context.Background())
