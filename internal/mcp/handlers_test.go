@@ -27,9 +27,6 @@ func newTestServer(t *testing.T) *Server {
 	dir := t.TempDir()
 	store := storage.New(dir)
 	msgMgr := message.NewManager(store)
-	if err := sshconfig.EnsureInternal(dir); err != nil {
-		t.Fatal(err)
-	}
 	sessMgr := session.NewManager(msgMgr, store, srv)
 	return New(sessMgr, msgMgr, sshconfig.NewStore(dir), nil)
 }

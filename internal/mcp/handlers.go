@@ -146,6 +146,9 @@ func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *sshconfig.Ent
 	}
 	name := strings.TrimSpace(getString(args, "ssh_config", ""))
 	if name == "" {
+		if s.NoInternal {
+			return "", nil, nil, fmt.Errorf("ssh_config is required when internal profile is disabled")
+		}
 		name = "internal"
 	}
 	ent, err := s.sshConfigs.Load(name)
@@ -153,6 +156,9 @@ func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *sshconfig.Ent
 		return "", nil, nil, err
 	}
 	if ent.Kind == sshconfig.KindInternal {
+		if s.NoInternal {
+			return "", nil, nil, fmt.Errorf("internal profile is disabled")
+		}
 		return name, ent, nil, nil
 	}
 	r, err := sshconfig.RemoteFromEntry(ent, s.sshConfigs.ConfigDir(name))
@@ -495,9 +501,12 @@ func (s *Server) handleListSSHConfigs(ctx context.Context, request mcpgo.CallToo
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	arr := make([]any, len(names))
-	for i, n := range names {
-		arr[i] = n
+	arr := make([]any, 0, len(names))
+	for _, n := range names {
+		if s.NoInternal && strings.EqualFold(n, "internal") {
+			continue
+		}
+		arr = append(arr, n)
 	}
 	return jsonResult(map[string]any{"ssh_configs": arr}), nil
 }
