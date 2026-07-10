@@ -120,7 +120,9 @@ func validateDialSpec(d *DialSpec, label string) error {
 	if d.User == "" {
 		return fmt.Errorf("%s must set \"user\"", label)
 	}
-	if strings.TrimSpace(d.Password) == "" && strings.TrimSpace(d.PrivateKey) == "" {
+	d.Password = strings.TrimSpace(d.Password)
+	d.PrivateKey = strings.TrimSpace(d.PrivateKey)
+	if d.Password == "" && d.PrivateKey == "" {
 		return fmt.Errorf("%s needs password or private_key", label)
 	}
 	if d.Port < 0 || d.Port > 65535 {
