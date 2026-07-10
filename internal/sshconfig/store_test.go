@@ -10,9 +10,6 @@ import (
 
 func TestStoreRemoteRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	if err := EnsureInternal(dir); err != nil {
-		t.Fatal(err)
-	}
 	s := NewStore(dir)
 	names, err := s.List()
 	if err != nil {
@@ -24,6 +21,10 @@ func TestStoreRemoteRoundTrip(t *testing.T) {
 	in, err := s.Load("internal")
 	if err != nil || in.Kind != KindInternal {
 		t.Fatalf("internal: %+v err %v", in, err)
+	}
+	// Virtual internal must not create a disk directory.
+	if _, err := os.Stat(filepath.Join(dir, "ssh_configs", "internal")); !os.IsNotExist(err) {
+		t.Fatalf("expected no on-disk internal dir, stat err=%v", err)
 	}
 	if err := InitRemoteSkeleton(dir, "prod"); err != nil {
 		t.Fatal(err)
@@ -46,5 +47,32 @@ func TestStoreRemoteRoundTrip(t *testing.T) {
 	e, err := s.Load("prod")
 	if err != nil || e.Host != "h.example" {
 		t.Fatalf("load prod: %+v %v", e, err)
+	}
+	// Leftover disk internal dir is ignored; still only one "internal" in list.
+	if err := os.MkdirAll(filepath.Join(dir, "ssh_configs", "internal"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ssh_configs", "internal", "config.toml"), []byte("kind = \"remote\"\nhost=\"x\"\nuser=\"u\"\npassword=\"p\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	names, err = s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var internals int
+	for _, n := range names {
+		if n == "internal" {
+			internals++
+		}
+	}
+	if internals != 1 {
+		t.Fatalf("list should have exactly one internal, got %#v", names)
+	}
+	in, err = s.Load("internal")
+	if err != nil || in.Kind != KindInternal {
+		t.Fatalf("disk leftover must not override virtual internal: %+v %v", in, err)
+	}
+	if err := s.Save("internal", InternalTemplate()); err == nil {
+		t.Fatal("expected Save(internal) to fail")
 	}
 }

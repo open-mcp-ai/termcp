@@ -14,6 +14,7 @@ type Config struct {
 	AdminHost  string // admin HTTP API bind (default: "127.0.0.1")
 	AdminPort  int    // admin HTTP port; 0 = disabled (default: 0)
 	AdminToken string // bearer / X-Admin-Token for PUT/GET/DELETE /api/ssh-configs; required when AdminPort != 0
+	NoInternal bool   // disable the built-in loopback SSH profile
 }
 
 // Default returns a Config with sensible defaults.

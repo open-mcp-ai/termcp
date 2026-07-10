@@ -45,6 +45,7 @@ type Server struct {
 	sshConfigs   *sshconfig.Store
 	forwardMgr   *forward.ForwardManager
 	baseURL      string // http://host:port, set from Start()
+	NoInternal   bool   // when true, hide and refuse the built-in loopback profile
 }
 
 // New creates and configures the MCP server with all tools registered.

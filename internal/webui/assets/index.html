@@ -2864,6 +2864,8 @@ SHELL_WINDOW_PANELS_HTML +
       tile.className = 'conn-tile entry-card';
       tile.setAttribute('data-conn-name', c.name);
       var icon = c.kind === 'internal' ? '🔁' : '🌐';
+      var editBtn = c.kind === 'internal' ? '' :
+        '<button type="button" class="conn-edit-btn" title="Edit profile" aria-label="Edit profile">' + SVG_CONN_EDIT + '</button>';
       tile.innerHTML =
         '<div class="entry-card-inner">' +
         '<div class="conn-tile-stack">' +
@@ -2872,14 +2874,14 @@ SHELL_WINDOW_PANELS_HTML +
         '<div class="entry-card-main">' +
         '<div class="conn-nm-row">' +
         '<span class="conn-nm" title="Click to connect">' + escapeHtml(c.name) + '</span>' +
-        '<button type="button" class="conn-edit-btn" title="Edit profile" aria-label="Edit profile">' + SVG_CONN_EDIT + '</button>' +
+        editBtn +
         '</div>' +
         '</div>' +
         '</div>';
       var inner = tile.querySelector('.entry-card-inner');
       var tipConnect = 'Click to connect; Alt+click for custom command';
       if (c.kind === 'internal') {
-        inner.title = tipConnect + ' (built-in loopback)';
+        inner.title = tipConnect + ' (built-in loopback; not editable)';
       } else {
         var hostLine = ((c.user || '') + '@' + (c.host || '') + (c.port && c.port !== 22 ? ':' + c.port : '')).trim();
         inner.title = hostLine ? (tipConnect + ' — ' + hostLine) : tipConnect;
@@ -2906,11 +2908,14 @@ SHELL_WINDOW_PANELS_HTML +
             inner.classList.remove('entry-connecting');
           });
       });
-      tile.querySelector('.conn-edit-btn').addEventListener('click', function (ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        openConnModal(true, c.name);
-      });
+      var editEl = tile.querySelector('.conn-edit-btn');
+      if (editEl) {
+        editEl.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openConnModal(true, c.name, c.kind);
+        });
+      }
       grid.appendChild(tile);
     });
   }
@@ -3013,7 +3018,7 @@ SHELL_WINDOW_PANELS_HTML +
   var jumpCards = [];
   var jumpEditingIdx = -1; // index of the jump currently expanded in editor mode; -1 = none
   var jumpEditingNew = false; // the editing jump is a brand-new, unsaved one (cancel removes it)
-  var connEntryNames = null;
+  var connEntries = null;
 
   function renderJumps() {
     var box = document.getElementById('conn-jumps');
@@ -3061,16 +3066,16 @@ SHELL_WINDOW_PANELS_HTML +
     function fill() {
       document.querySelectorAll('.jump-import').forEach(function(sel) {
         var opts = '<option value="">— select entry —</option>';
-        (connEntryNames || []).forEach(function(n) {
-          if (n === 'internal') return;
-          opts += '<option value="' + _hesc(n) + '">' + _hesc(n) + '</option>';
+        (connEntries || []).forEach(function(c) {
+          if (!c || c.kind !== 'remote') return;
+          opts += '<option value="' + _hesc(c.name) + '">' + _hesc(c.name) + '</option>';
         });
         sel.innerHTML = opts;
       });
     }
-    if (connEntryNames) { fill(); return; }
+    if (connEntries) { fill(); return; }
     fetch('/api/connections').then(function(r){ return r.json(); }).then(function(j) {
-      connEntryNames = (j.connections || []).map(function(c){ return c.name; });
+      connEntries = j.connections || [];
       fill();
     }).catch(function(){});
   }
@@ -3160,15 +3165,16 @@ SHELL_WINDOW_PANELS_HTML +
     return document.getElementById('conn-config').value;
   }
 
-  function openConnModal(edit, name) {
+  function openConnModal(edit, name, kind) {
+    if (edit && kind === 'internal') return; // built-in virtual profile is not editable
     editingConnName = edit ? name : '';
-    connEntryNames = null; // refresh import dropdown options
+    connEntries = null; // refresh import dropdown options
     document.getElementById('modal-conn-err').style.display = 'none';
     document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
-    document.getElementById('conn-delete').style.display = edit && name !== 'internal' ? 'inline-block' : 'none';
+    document.getElementById('conn-delete').style.display = edit ? 'inline-block' : 'none';
     var nameEl = document.getElementById('conn-name');
     nameEl.value = edit ? name : '';
-    nameEl.readOnly = !!edit;
+    nameEl.readOnly = false;
     // Start in form view
     document.getElementById('conn-form-view').style.display = '';
     document.getElementById('conn-config-view').style.display = 'none';
@@ -3296,19 +3302,26 @@ SHELL_WINDOW_PANELS_HTML +
     var name = document.getElementById('conn-name').value.trim();
     var body = _connGetBody();
     if (!name) { err.textContent = 'Profile name is required'; err.style.display = 'block'; return; }
-    // Check for duplicate when creating (not editing)
-    if (!document.getElementById('conn-name').readOnly) {
-      var tiles = document.querySelectorAll('.conn-tile');
-      for (var i = 0; i < tiles.length; i++) {
-        var n = tiles[i].getAttribute('data-conn-name');
-        if (n && n.toLowerCase() === name.toLowerCase()) {
-          err.textContent = 'Profile "' + name + '" already exists';
-          err.style.display = 'block';
-          return;
-        }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) {
+      err.textContent = 'Name must start with a letter/digit and contain only letters, digits, _ or - (max 64)';
+      err.style.display = 'block';
+      return;
+    }
+    // Check for duplicate; when editing, exclude the original name.
+    var tiles = document.querySelectorAll('.conn-tile');
+    for (var i = 0; i < tiles.length; i++) {
+      var n = tiles[i].getAttribute('data-conn-name');
+      if (n && n.toLowerCase() === name.toLowerCase() && n.toLowerCase() !== editingConnName.toLowerCase()) {
+        err.textContent = 'Profile "' + name + '" already exists';
+        err.style.display = 'block';
+        return;
       }
     }
-    fetch('/api/connections/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
+    var url = '/api/connections/' + encodeURIComponent(name);
+    if (editingConnName && editingConnName !== name) {
+      url += '?from=' + encodeURIComponent(editingConnName);
+    }
+    fetch(url, { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
         hideModal('modal-conn');
@@ -3318,7 +3331,7 @@ SHELL_WINDOW_PANELS_HTML +
   };
   document.getElementById('conn-delete').onclick = function () {
     var name = document.getElementById('conn-name').value.trim();
-    if (!name || name === 'internal') return;
+    if (!name) return;
     if (!confirm('Delete connection ' + name + '?')) return;
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function (r) {
