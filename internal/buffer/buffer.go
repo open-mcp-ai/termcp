@@ -137,8 +137,15 @@ func (b *Buffer) maybeCompactLocked() {
 
 // Read returns bytes available ahead of the reader's cursor, then advances the cursor.
 // If maxBytes > 0, at most that many bytes are returned and the cursor advances by that amount;
-// if maxBytes == 0, all bytes from the cursor to the end of the buffer are returned (legacy behavior).
+// if maxBytes == 0, all bytes from the cursor to the end of the buffer are returned.
 func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration, maxBytes int) ([]byte, error) {
+	return b.ReadLimited(ctx, readerID, timeout, maxBytes, 0)
+}
+
+// ReadLimited returns output with byte and line limits applied before advancing the cursor.
+// If maxLines > 0, at most that many newline-terminated lines are returned; remaining
+// bytes stay unread so HasMore stays true.
+func (b *Buffer) ReadLimited(ctx context.Context, readerID int, timeout time.Duration, maxBytes, maxLines int) ([]byte, error) {
 	b.mu.Lock()
 	rs, ok := b.readers[readerID]
 	if !ok {
@@ -146,7 +153,7 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration, 
 		return nil, ErrReader
 	}
 
-	if data := b.drainLocked(rs, maxBytes); data != nil {
+	if data := b.drainLocked(rs, maxBytes, maxLines); data != nil {
 		b.mu.Unlock()
 		return data, nil
 	}
@@ -195,7 +202,7 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration, 
 		}
 	}
 
-	if data := b.drainLocked(rs, maxBytes); data != nil {
+	if data := b.drainLocked(rs, maxBytes, maxLines); data != nil {
 		b.mu.Unlock()
 		return data, nil
 	}
@@ -208,7 +215,8 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration, 
 }
 
 // drainLocked copies up to one slice from readPos forward and advances readPos. b.mu held.
-func (b *Buffer) drainLocked(rs *readerState, maxBytes int) []byte {
+// maxBytes/maxLines limit how far the cursor advances; unread data stays available.
+func (b *Buffer) drainLocked(rs *readerState, maxBytes, maxLines int) []byte {
 	end := int64(len(b.master))
 	if rs.readPos >= end {
 		return nil
@@ -217,6 +225,18 @@ func (b *Buffer) drainLocked(rs *readerState, maxBytes int) []byte {
 	if maxBytes > 0 {
 		if lim := rs.readPos + int64(maxBytes); lim < endPos {
 			endPos = lim
+		}
+	}
+	if maxLines > 0 {
+		lines := 0
+		for i := rs.readPos; i < endPos; i++ {
+			if b.master[i] == '\n' {
+				lines++
+				if lines >= maxLines {
+					endPos = i + 1
+					break
+				}
+			}
 		}
 	}
 	s := b.master[rs.readPos:endPos]

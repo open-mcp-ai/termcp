@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **Session / Shell 双 ID**：`start_session` 返回互不相同的 `session_id`（连接容器）与 `shell_id`（终端通道）。首个 shell 不再与 session 共用 id。
+- **I/O 只认 `shell_id`**：`send_input` / `press_key` / `read_output` / `resize_pty` / `register_reader` / `unregister_reader` / `close_shell` 参数改为 `shell_id`。连接级操作（forwards、files、terminate、delete、start_subshell）仍用 `session_id`。
+- **删除工具**：`send_and_read`、`background_send`、`delete_session`（硬切换，无别名）。
+- **删除参数**：`send_input.press_enter`。执行命令改为 `send_input` + `press_key(key="enter")`。
+- **新增 `press_key`**：命名按键白名单（enter/tab/esc/方向键/backspace/delete/home/end/ctrl+c|d|z|l|u|w），可选 `repeat`。
+- **转发 OpenSSH 命名**：`local_forward` = ssh `-L`；新增 `remote_forward` = ssh `-R`；删除 `forward_port`。旧版 `local_forward` 曾错误实现为 `-R`，现已纠正。
+- **`start_subshell` / `list_subshells`**：参数 `parent_session_id` → `session_id`；返回字段对齐 `shell_id` / `shells`。
+- **去掉恒空 `initial_output`**；`read_output` 默认 `timeout` 从 5 改为 3。
+- **生命周期叙事**：MCP 只保留 `terminate_session`；`force=true` 立即强杀，HTTP `DELETE /api/sessions/{id}` 仍保留。
+
+### 文档
+
+- 重写 MCP `instructions`、`docs/mcp-tools.md`、CLAUDE multi-session 规则；对齐 resource-model。
+
+### 修复
+
+- **`read_output.max_lines` 丢数据**：行数限制改为 buffer 层按换行截断游标；未返回行保留且 `has_more=true`（原先先消费再字符串截断）。
+- **internal `close_shell` 误拆会话**：子 shell 主动关闭设 `deliberateClose`，退出 watcher 不再把 intentional channel close 当 SSH 断连。
+
 ## v0.0.4 — 2026-05-23
 
 ### 新功能

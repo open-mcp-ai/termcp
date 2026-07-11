@@ -29,24 +29,25 @@ Agents using interactive-process MCP tools must follow these rules for non-block
 
 ### Rules
 
-1. **One task = one session.** Start a new session per independent task via `start_session`. Use the `name` param for tracking.
-2. **Never block on reads.** Always use `read_output` with `timeout` ≤ 3. A long timeout blocks the entire agent — other sessions go unserviced.
-3. **Prefer `send_and_read`.** For send-then-read patterns, use `send_and_read` instead of separate `send_input` + `read_output` calls. Same timeout rule applies.
-4. **Poll in rotation.** When managing N sessions, loop through all of them: `read_output(timeout=1)` each, act on whichever has output, repeat.
-5. **Clean up.** `terminate_session` then `delete_session` when done. Never leave zombie sessions.
+1. **One task = one session.** Start a new session per independent task via `start_session`. Keep both `session_id` (connection) and `shell_id` (terminal I/O). Use the `name` param for tracking.
+2. **Never block on reads.** Always use `read_output` with `timeout` ≤ 3. A long timeout blocks the entire agent — other shells go unserviced.
+3. **Run a command as three calls.** `send_input(shell_id, text)` types only; `press_key(shell_id, key="enter")` executes; then `read_output(shell_id, timeout≤3)`. Do not put newlines in text.
+4. **Poll in rotation.** When managing N shells, loop through all of them: `read_output(timeout=1)` each, act on whichever has output, repeat.
+5. **Clean up.** `terminate_session(session_id)` closes the connection (cascades shells + forwards) and removes the session. Use `force=true` for immediate kill. `close_shell` only closes one channel.
 
-### Multi-agent shared session
+### Multi-agent shared shell
 
 When multiple agents need to observe the same process:
 
-1. Agent A: `start_session(...)` → session_id, default reader_id=0
-2. Agent B: `register_reader(session_id=...)` → gets its own reader_id
-3. Each agent calls `read_output(session_id=..., reader_id=<theirs>)` — independent cursors, no output stealing
-4. Agent B leaves: `unregister_reader(session_id=..., reader_id=...)`
+1. Agent A: `start_session(...)` → session_id + shell_id, default reader_id=0
+2. Agent B: `register_reader(shell_id=...)` → gets its own reader_id
+3. Each agent calls `read_output(shell_id=..., reader_id=<theirs>)` — independent cursors, no output stealing
+4. Agent B leaves: `unregister_reader(shell_id=..., reader_id=...)`
 
 ### Anti-patterns
 
-- ❌ `read_output(timeout=30)` — blocks 30s, other sessions starve
+- ❌ `read_output(timeout=30)` — blocks 30s, other shells starve
 - ❌ Waiting for session A to finish before starting session B — start both, poll both
 - ❌ Multiple agents using the same reader_id — output gets consumed, others miss it
-- ❌ Forgetting `delete_session` after `terminate_session` — stale metadata accumulates
+- ❌ Using `session_id` for I/O tools — I/O is always `shell_id`
+- ❌ Relying on removed tools: `send_and_read`, `background_send`, `press_enter`, `forward_port`

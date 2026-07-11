@@ -51,6 +51,12 @@ func appendSafeArgs(attrs []any, request mcpgo.CallToolRequest) []any {
 	if v, ok := args["session_id"].(string); ok && v != "" {
 		attrs = append(attrs, "session_id", v)
 	}
+	if v, ok := args["shell_id"].(string); ok && v != "" {
+		attrs = append(attrs, "shell_id", v)
+	}
+	if v, ok := args["key"].(string); ok && v != "" {
+		attrs = append(attrs, "key", v)
+	}
 	if v, ok := args["reader_id"].(float64); ok {
 		attrs = append(attrs, "reader_id", int64(v))
 	}
@@ -80,8 +86,8 @@ func appendSafeArgs(attrs []any, request mcpgo.CallToolRequest) []any {
 	if v, ok := args["timeout"].(float64); ok {
 		attrs = append(attrs, "timeout", v)
 	}
-	if v, ok := args["press_enter"].(bool); ok {
-		attrs = append(attrs, "press_enter", v)
+	if v, ok := args["repeat"].(float64); ok {
+		attrs = append(attrs, "repeat", int64(v))
 	}
 	if v, ok := args["force"].(bool); ok {
 		attrs = append(attrs, "force", v)

@@ -307,6 +307,37 @@ func TestBuffer_HasMore(t *testing.T) {
 	}
 }
 
+func TestBuffer_ReadLimitedMaxLinesPreservesUnreadData(t *testing.T) {
+	b := New(1024)
+	r, _ := b.NewReader()
+
+	if err := b.Write([]byte("one\ntwo\nthree\nfour\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := b.ReadLimited(context.Background(), r, 0, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "one\ntwo\n" {
+		t.Fatalf("expected first two lines, got %q", string(data))
+	}
+	if !b.HasMore(r) {
+		t.Fatal("expected unread data after max_lines read")
+	}
+
+	data, err = b.ReadLimited(context.Background(), r, 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "three\nfour\n" {
+		t.Fatalf("expected remaining lines, got %q", string(data))
+	}
+	if b.HasMore(r) {
+		t.Fatal("expected no unread data after draining")
+	}
+}
+
 func TestBuffer_InvalidReader(t *testing.T) {
 	b := New(1024)
 	_, err := b.Read(context.Background(), 999, 0, 0)
