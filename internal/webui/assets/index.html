@@ -1399,11 +1399,11 @@
     var running = shells.filter(function(s) { return s.status === 'running'; });
     var existing = win._channels || {};
     // Add new running shells that don't have a tab yet.
-    // The primary shell (id === win._parentSid) is created by openShellWindow on explicit
-    // open (which also restores the last-active tab). Sync never auto-creates it, so closing
-    // the primary tab does not trigger a close→recreate loop on the next refresh.
+    // Primary shell tab is created on explicit open (session create / restore). Sync only
+    // adds additional shells so closing a tab does not recreate it on the next refresh.
     running.forEach(function(s) {
-      if (!existing[s.id] && s.id !== win._parentSid) createChannelTab(win, s.id);
+      var sid = s.shell_id || s.id;
+      if (!existing[sid] && sid !== win._primaryShellId) createChannelTab(win, sid);
     });
     // Remove tabs for shells that are no longer running.
     Object.keys(existing).forEach(function(sid) {
@@ -2240,7 +2240,7 @@
       if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
       return r.json();
     }).then(function(j) {
-      createChannelTab(win, j.session_id);
+      createChannelTab(win, j.shell_id || j.session_id);
     }).catch(function(err) { console.error('add channel failed', err); });
   }
 
@@ -2701,7 +2701,7 @@ SHELL_WINDOW_PANELS_HTML +
     return win;
   }
 
-  function finalizePendingShellWindow(win, connLabel, sessionId, clickEvent) {
+  function finalizePendingShellWindow(win, connLabel, sessionId, shellId, clickEvent) {
     if (!win || !win.parentNode || !sessionId) return;
     win._connectAbort = null;
     win._placeholder = false;
@@ -2709,6 +2709,7 @@ SHELL_WINDOW_PANELS_HTML +
 
     win._sid = sessionId;
     win._parentSid = sessionId;
+    win._primaryShellId = shellId || sessionId;
     win._connName = connLabel || '';
     var sidEl = win.querySelector('.shell-sid-copy .sid');
     if (sidEl) sidEl.textContent = stripSessionPrefix(sessionId);
@@ -2716,7 +2717,7 @@ SHELL_WINDOW_PANELS_HTML +
     if (pend) pend.remove();
     _wireChannelTabBar(win);
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
-    createChannelTab(win, sessionId);
+    createChannelTab(win, win._primaryShellId);
   }
 
   function openShellWindow(connLabel, sessionId, clickEvent) {
@@ -2784,13 +2785,16 @@ SHELL_WINDOW_PANELS_HTML +
     _wireChannelTabBar(win);
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
 
-    // Restore all shells (root + children). If none running, auto-create one.
+    // Restore all peer shells. If none running, show empty state.
     fetch(sessionAPI(sessionId, '/shells'))
       .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
       .then(function(shells) {
         var running = shells.filter(function(s) { return s.status === 'running'; });
         if (running.length > 0) {
-          running.forEach(function(s) { createChannelTab(win, s.id); });
+          if (!win._primaryShellId) {
+            win._primaryShellId = (running[0].shell_id || running[0].id);
+          }
+          running.forEach(function(s) { createChannelTab(win, s.shell_id || s.id); });
           // Restore last active tab.
           var lastActive = window._shellLastActive && window._shellLastActive[sessionId];
           if (lastActive && win._channels[lastActive]) switchChannelTab(win, lastActive);
@@ -2830,10 +2834,12 @@ SHELL_WINDOW_PANELS_HTML +
       })
       .then(function (j) {
         var sid = j && j.session_id;
+        var shellId = j && (j.shell_id || j.session_id);
         if (!sid) throw new Error('No session_id in response');
+        if (!shellId) throw new Error('No shell_id in response');
         pendingWin._connectAbort = null;
         if (pendingWin.parentNode) {
-          finalizePendingShellWindow(pendingWin, connName || 'session', sid, clickEvt);
+          finalizePendingShellWindow(pendingWin, connName || 'session', sid, shellId, clickEvt);
         } else {
           openShellWindow(connName || 'session', sid, clickEvt);
         }

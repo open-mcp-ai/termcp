@@ -112,15 +112,12 @@ func (s *Server) sftpClient(sessionID string) (*sftp.Client, *mcpgo.CallToolResu
 	return cli, nil
 }
 
-// requireTerminalShell looks up a session or child shell for terminal I/O operations.
-func (s *Server) requireTerminalShell(sessionID string) (session.TerminalShell, *mcpgo.CallToolResult) {
-	if sess := s.sessMgr.Get(sessionID); sess != nil {
-		return sess, nil
-	}
-	if cs := s.sessMgr.GetChildShell(sessionID); cs != nil {
+// requireShell looks up a shell by shell_id for terminal I/O (never session_id).
+func (s *Server) requireShell(shellID string) (*session.ChildShell, *mcpgo.CallToolResult) {
+	if cs := s.sessMgr.GetChildShell(shellID); cs != nil {
 		return cs, nil
 	}
-	return nil, mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", sessionID))
+	return nil, mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", shellID))
 }
 
 func getStringSlice(args map[string]any, key string) []string {
@@ -212,25 +209,42 @@ func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolReq
 	time.Sleep(100 * time.Millisecond)
 
 	result := map[string]any{
-		"session_id":     sess.ID,
-		"pid":            sess.PID,
-		"ssh_config":     cfgName,
-		"initial_output": "",
+		"session_id": sess.ID,
+		"shell_id":   sess.PrimaryShellID(),
+		"pid":        sess.PID,
+		"ssh_config": cfgName,
 	}
 	return jsonResult(result), nil
 }
 
 func (s *Server) handleSendInput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
+	shellID := getString(args, "shell_id", "")
 	text := getString(args, "text", "")
-	pressEnter := getBool(args, "press_enter", false)
 
-	shell, bad := s.requireTerminalShell(sessionID)
+	shell, bad := s.requireShell(shellID)
 	if bad != nil {
 		return bad, nil
 	}
-	if err := shell.SendTerminalBytes([]byte(text), pressEnter); err != nil {
+	if err := shell.SendTerminalBytes([]byte(text), false); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handlePressKey(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	shellID := getString(args, "shell_id", "")
+	key := getString(args, "key", "")
+	repeat := int(getFloat64(args, "repeat", 1))
+	if key == "" {
+		return mcpgo.NewToolResultError("key is required"), nil
+	}
+	shell, bad := s.requireShell(shellID)
+	if bad != nil {
+		return bad, nil
+	}
+	if err := shell.PressKey(key, repeat); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	return successResult(), nil
@@ -238,7 +252,7 @@ func (s *Server) handleSendInput(ctx context.Context, request mcpgo.CallToolRequ
 
 func (s *Server) handleStartSubShell(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	parentID := getString(args, "parent_session_id", "")
+	parentID := getString(args, "session_id", "")
 	name := getString(args, "name", "")
 	command := getString(args, "command", "")
 	mode := strings.TrimSpace(getString(args, "mode", "pty"))
@@ -253,19 +267,19 @@ func (s *Server) handleStartSubShell(_ context.Context, request mcpgo.CallToolRe
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(map[string]any{"session_id": cs.ID, "parent_session_id": parentID, "name": cs.Name}), nil
+	return jsonResult(map[string]any{"shell_id": cs.ID, "session_id": parentID, "name": cs.Name}), nil
 }
 
 func (s *Server) handleListSubshells(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	parentID := getString(args, "parent_session_id", "")
+	parentID := getString(args, "session_id", "")
 
 	sess, bad := s.requireSession(parentID)
 	if bad != nil {
 		return bad, nil
 	}
 	all := sess.ListChildShells()
-	return jsonResult(map[string]any{"parent_session_id": parentID, "subshells": filterRunning(all)}), nil
+	return jsonResult(map[string]any{"session_id": parentID, "shells": filterRunning(all)}), nil
 }
 
 // handleCloseShell closes a single shell channel without tearing down the parent session.
@@ -274,11 +288,12 @@ func (s *Server) handleListSubshells(_ context.Context, request mcpgo.CallToolRe
 // just that channel. Use terminate_session to fully stop a session.
 func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	shellID := getString(args, "session_id", "")
-
-	if sess := s.sessMgr.Get(shellID); sess != nil {
-		sess.TerminateShellOnly()
-		s.sessMgr.NotifyChange()
+	shellID := getString(args, "shell_id", "")
+	if shellID == "" {
+		return mcpgo.NewToolResultError("shell_id is required"), nil
+	}
+	// Internal primary shell: tab close is a no-op (process outlives the tab).
+	if sess := s.sessMgr.GetByShellID(shellID); sess != nil && sess.PrimaryShellID() == shellID && sess.SSHEndpoint == "internal" {
 		return successResult(), nil
 	}
 	found, err := s.sessMgr.CloseChildShell(shellID)
@@ -288,22 +303,21 @@ func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolReque
 	if !found {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", shellID)), nil
 	}
-	// CloseChildShell already triggers onChildChange → notifyListChange.
 	return successResult(), nil
 }
 
 func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
+	sessionID := getString(args, "shell_id", "")
 	stripAnsi := getBool(args, "strip_ansi", true)
-	timeout := getFloat64(args, "timeout", 5.0)
+	timeout := getFloat64(args, "timeout", 3.0)
 	if timeout < 0.1 || timeout > 60 {
 		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
 	}
 	maxLines := int(getFloat64(args, "max_lines", 0)); maxBytes := int(getFloat64(args, "max_bytes", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
-	shell, bad := s.requireTerminalShell(sessionID)
+	shell, bad := s.requireShell(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
@@ -323,39 +337,6 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	return jsonResult(result), nil
 }
 
-func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	text := getString(args, "text", "")
-	pressEnter := getBool(args, "press_enter", false)
-	stripAnsi := getBool(args, "strip_ansi", true)
-	timeout := getFloat64(args, "timeout", 5.0)
-	if timeout < 0.1 || timeout > 60 {
-		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
-	}
-	maxLines := int(getFloat64(args, "max_lines", 0)); maxBytes := int(getFloat64(args, "max_bytes", 0))
-	readerID := int(getFloat64(args, "reader_id", 0))
-
-	shell, bad := s.requireTerminalShell(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	if err := shell.SendTerminalBytes([]byte(text), pressEnter); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	output, err := shell.ReadTerminalStream(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines, maxBytes)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	result := map[string]any{
-		"output":         output,
-		"has_more":       shell.HasMoreOutput(readerID),
-		"lines_returned": strings.Count(output, "\n"),
-		"bytes_returned": len(output),
-	}
-	return jsonResult(result), nil
-}
-
 func (s *Server) handleListSessions(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	all := s.sessMgr.ListAll()
 	return jsonResult(map[string]any{"sessions": filterRunning(all)}), nil
@@ -365,7 +346,7 @@ func (s *Server) handleGetSessionInfo(ctx context.Context, request mcpgo.CallToo
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
 
-	sess, bad := s.requireTerminalShell(sessionID)
+	sess, bad := s.requireSession(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
@@ -394,32 +375,13 @@ func (s *Server) handleTerminateSession(ctx context.Context, request mcpgo.CallT
 	return successResult(), nil
 }
 
-func (s *Server) handleDeleteSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id is required"), nil
-	}
-
-	// Terminate + disconnect first (keep-alive sessions won't delete while "running").
-	s.sessMgr.Terminate(sessionID, true, 0)
-	if sess := s.sessMgr.Get(sessionID); sess != nil {
-		sess.Disconnect()
-	}
-
-	if err := s.sessMgr.Delete(sessionID); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return successResult(), nil
-}
-
 func (s *Server) handleResizePty(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
+	sessionID := getString(args, "shell_id", "")
 	rows := int(getFloat64(args, "rows", 24))
 	cols := int(getFloat64(args, "cols", 80))
 
-	shell, bad := s.requireTerminalShell(sessionID)
+	shell, bad := s.requireShell(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
@@ -462,9 +424,9 @@ func (s *Server) handleGetMessage(ctx context.Context, request mcpgo.CallToolReq
 
 func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
+	sessionID := getString(args, "shell_id", "")
 
-	shell, bad := s.requireTerminalShell(sessionID)
+	shell, bad := s.requireShell(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
@@ -478,19 +440,15 @@ func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToo
 
 func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
+	sessionID := getString(args, "shell_id", "")
 	readerID := int(getFloat64(args, "reader_id", 0))
 
-	shell, bad := s.requireTerminalShell(sessionID)
+	shell, bad := s.requireShell(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
 	shell.UnregisterReader(readerID)
 	return successResult(), nil
-}
-
-func (s *Server) handleBackgroundSend(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	return s.handleSendInput(ctx, request)
 }
 
 func (s *Server) handleListSSHConfigs(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -526,7 +484,7 @@ func (s *Server) handleDetectShell(ctx context.Context, request mcpgo.CallToolRe
 
 // --- Port forwarding tool handlers ---
 
-func (s *Server) handleForwardPort(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
 	remoteHost := getString(args, "remote_host", "localhost")
@@ -558,7 +516,7 @@ func (s *Server) handleForwardPort(ctx context.Context, request mcpgo.CallToolRe
 	}), nil
 }
 
-func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleRemoteForward(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
 	localHost := getString(args, "local_host", "0.0.0.0")

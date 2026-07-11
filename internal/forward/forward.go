@@ -200,7 +200,7 @@ func RemoteForwardSSH(ctx context.Context, client *ssh.Client, agentHost string,
 	return fw, listener, nil
 }
 
-// CreateLocal creates a remote forward via the best available path.
+// CreateLocal creates a local forward (ssh -L) via the best available path.
 func (fm *ForwardManager) CreateLocal(sshConfig string, remoteHost string, remotePort int, localPort int, sshClient *ssh.Client) (*ForwardInfo, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("no SSH client available for %q", sshConfig)
@@ -219,7 +219,7 @@ func (fm *ForwardManager) CreateLocal(sshConfig string, remoteHost string, remot
 	return fw, nil
 }
 
-// CreateRemote creates a local forward via the best available path.
+// CreateRemote creates a remote forward (ssh -R) via the best available path.
 func (fm *ForwardManager) CreateRemote(sshConfig string, localHost string, localPort int, remoteHost string, remotePort int, sshClient *ssh.Client) (*ForwardInfo, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("no SSH client available for %q", sshConfig)

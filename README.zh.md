@@ -227,42 +227,32 @@ AI Agent 原生只能执行一次性命令——执行完毕后立刻返回结�
 AI Agent 操作流程                              进程输出
 ─────────────────                              ────────────────
 
-start_session(
-  command="ssh",
-  args=["deploy@192.168.1.100"],
-  ssh_config="my-server"
-)
-                                    ←    "deploy@192.168.1.100's password: "
+start_session(ssh_config="my-server")
+  → session_id, shell_id
+                                    ←    (用 read_output 读提示)
 
-send_and_read(
-  text="my_secret_pass",
-  press_enter=true
-)
-                                    ←    "Welcome to Ubuntu 22.04 LTS
-                                          deploy@web-server:~$ "
+send_input(shell_id, text="df -h")
+press_key(shell_id, key="enter")
+read_output(shell_id, timeout=3)
+                                    ←    "Filesystem ... Use% Mounted on ..."
 
-send_and_read(
-  text="df -h",
-  press_enter=true
-)
-                                    ←    "Filesystem      Size  Used Avail Use% Mounted on
-                                          /dev/sda1       100G   45G   55G  45% /
-                                          deploy@web-server:~$ "
-
-terminate_session(session_id="abc123")
+terminate_session(session_id)
 ```
 
 ### 示例 2：Python REPL 调试
 
 ```
 start_session(command="python3", mode="pty")
-                                    ←    "Python 3.10.12\n>>> "
+  → session_id, shell_id
 
-send_and_read(text="data = [1, 2, 3, 4, 5]", press_enter=true)
-                                    ←    ">>> "
+send_input(shell_id, text="data = [1, 2, 3, 4, 5]")
+press_key(shell_id, key="enter")
+read_output(shell_id)
 
-send_and_read(text="sum(data)", press_enter=true)
-                                    ←    "15\n>>> "
+send_input(shell_id, text="sum(data)")
+press_key(shell_id, key="enter")
+read_output(shell_id)
+                                    ←    "15"
 ```
 
 ### 示例 3：多 Agent 协作
@@ -270,60 +260,58 @@ send_and_read(text="sum(data)", press_enter=true)
 ```
 # Agent A 启动监控进程
 start_session(command="top", mode="pty")
-  → session_id: "sess-001"
+  → session_id, shell_id
 
-# Agent B 加入同一会话，不窃取输出
-register_reader(session_id="sess-001")
+# Agent B 加入同一 shell，不窃取输出
+register_reader(shell_id=...)
   → reader_id: 2
 
 # Agent A 读取自己的游标位置
-read_output(session_id="sess-001", reader_id=1)
+read_output(shell_id=..., reader_id=1)
   → "PID USER  PR  NI  VIRT  RES  SHR S %CPU %MEM   TIME+ COMMAND..."
 
 # Agent B 从头独立读取
-read_output(session_id="sess-001", reader_id=2)
+read_output(shell_id=..., reader_id=2)
   → "top - 14:32:10 up 3 days,  2:15,  1 user,  load average: 0.52, 0.58, 0.59..."
 
 # Agent B 完成
-unregister_reader(session_id="sess-001", reader_id=2)
+unregister_reader(shell_id=..., reader_id=2)
 
 # Agent A 终止会话
-terminate_session(session_id="sess-001")
-delete_session(session_id="sess-001")
+terminate_session(session_id=...)
 ```
 
 ### 示例 4：多会话并行管理
 
 ```
 start_session(command="ping", args=["-c", "5", "google.com"], name="ping-test")
-  → session_id: "a1b2c3"
+  → session_id, shell_id
 
 start_session(command="python3", args=["-m", "http.server", "8080"], name="web-server")
-  → session_id: "d4e5f6"
+  → session_id, shell_id
 
 list_sessions()
-  → [{id: "a1b2c3", status: "running"}, {id: "d4e5f6", status: "running"}]
+  → [{id: "...", status: "running"}, ...]
 
-read_output(session_id="a1b2c3")  → ping 统计信息
+read_output(shell_id=..., timeout=1)  # 轮询各 shell，timeout ≤ 3
 
-terminate_session(session_id="a1b2c3")
-terminate_session(session_id="d4e5f6")
+terminate_session(session_id=...)
 ```
 
 ---
 
 ## 工具参考
 
-完整工具参考见 [`docs/mcp-tools.md`](docs/mcp-tools.md)，共 31 个工具。
+完整工具参考见 [`docs/mcp-tools.md`](docs/mcp-tools.md)。
 
 | 分组 | 工具 |
 |------|------|
-| 会话生命周期 | `start_session`、`send_input`、`read_output`、`send_and_read`、`background_send`、`list_sessions`、`get_session_info`、`terminate_session`、`delete_session` |
+| 会话生命周期 | `start_session`、`list_sessions`、`get_session_info`、`terminate_session` |
+| Shell I/O | `send_input`、`press_key`、`read_output`、`resize_pty` |
 | Shell 通道复用 | `start_subshell`、`list_subshells`、`close_shell` |
 | 多 Agent 共读 | `register_reader`、`unregister_reader` |
-| PTY 控制 | `resize_pty` |
-| 端口转发 | `forward_port`、`local_forward`、`dynamic_forward`、`list_forwards`、`close_forward` |
-| 文件操作（SFTP） | `file_read`、`file_write`、`file_stat`、`file_delete`、`file_rename`、`file_mkdir`、`get_file_urls` |
+| 端口转发 | `local_forward`（-L）、`remote_forward`（-R）、`dynamic_forward`（-D）、`list_forwards`、`close_forward` |
+| 文件操作（SFTP） | `file_read`、`file_write`、`file_stat`、`file_delete`、`file_rename`、`file_mkdir`、`get_file_urls` 等 |
 | 服务端发现 | `detect_shell`、`list_ssh_configs` |
 | 消息持久化 | `list_messages`、`get_message` |
 

@@ -57,7 +57,7 @@ Response: 204 No Content
 
 ## 2. Session
 
-**概念：** Session = SSH 连接容器，包含 0~N 个 Shell + 0~N 个 Forward。第一个 Shell 的 ID = Session ID。
+**概念：** Session = SSH 连接容器，包含 0~N 个 Shell + 0~N 个 Forward。Shell ID 与 Session ID 分离，第一个 Shell 也有独立 ID。
 
 ### `GET /api/sessions`
 
@@ -90,7 +90,7 @@ Request:
 }
 
 Response 200:
-{ "session_id": "abc123", "pid": 12345, "ssh_config": "pi" }
+{ "session_id": "abc123", "shell_id": "def456", "pid": 12345, "ssh_config": "pi" }
 ```
 
 ### `GET /api/sessions/{id}`
@@ -138,15 +138,12 @@ Request:
 { "command": "", "name": "shell-2", "mode": "pty", "rows": 24, "cols": 80 }
 
 Response 200:
-{ "session_id": "def456", "parent_session_id": "abc123", "name": "shell-2" }
+{ "shell_id": "def456", "session_id": "abc123", "name": "shell-2" }
 ```
 
 ### `DELETE /api/shells/{id}`
 
-关闭指定 Shell channel。不中断 SSH 连接，不影响同 Session 的其他 Shell。
-
-- 传 Session ID → 关闭第一个 Shell
-- 传 Shell ID → 关闭该 Shell
+关闭指定 Shell channel（参数为 **shell_id**）。不中断 SSH 连接，不影响同 Session 的其他 Shell。internal 主 shell 关闭为 no-op。
 
 ```
 Response: 204 No Content
@@ -177,7 +174,7 @@ Response: 204 No Content
 | `terminal` | `id`, `d`(base64) | 终端输出块 |
 | `terminal_done` | `id` | Shell 已退出 |
 
-> `id` 可以是 Session ID 或任意 Shell ID，Server 自动解析。
+> 终端 I/O 的 `id` 使用 Shell ID；Session ID 只用于连接级 REST 资源。
 
 ### `GET /api/sessions/{id}/output-range`
 

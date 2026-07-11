@@ -11,11 +11,11 @@
     ┌──────────────────────────┼──────────────────────────┐
     │               internal/mcp/ (server.go)               │
     │                                                       │
-    │  31 个工具: start_session / start_subshell / close_shell, │
-    │  send_input / read_output / send_and_read / background_send, │
-    │  list_sessions / get_session_info / terminate_session / delete_session, │
+    │  工具: start_session / start_subshell / close_shell, │
+    │  send_input / press_key / read_output, │
+    │  list_sessions / get_session_info / terminate_session, │
     │  resize_pty / register_reader / unregister_reader,    │
-    │  forward_port / local_forward / dynamic_forward / list_forwards / close_forward, │
+    │  local_forward / remote_forward / dynamic_forward / list_forwards / close_forward, │
     │  file_read / file_write / file_stat / file_delete / file_rename / file_mkdir / get_file_urls, │
     │  detect_shell / list_ssh_configs / list_messages / get_message │
     │                                                       │
@@ -130,37 +130,24 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │                            │  ← Session{ID,PID,...}  │                     │                      │                     │
   │                            │                         │                     │                      │                     │
   │                            │  sleep(100ms)            │                     │                      │                     │
-  │  ← {session_id, pid,       │                         │                     │                      │                     │
-  │     ssh_config,            │                         │                     │                      │                     │
-  │     initial_output:""}   │                         │                     │                      │                     │
-  │     (首包不读终端输出)      │                         │                     │                      │                     │
+  │  ← {session_id, shell_id,  │                         │                     │                      │                     │
+  │     pid, ssh_config}       │                         │                     │                      │                     │
+  │     (双 ID：连接 vs 终端)   │                         │                     │                      │                     │
 ```
 
-## 三、输入流向（send_input）
+## 三、输入流向（send_input + press_key）
 
 ```
-AI Agent                    Session                    sshclient              sshserver              OS/进程
+AI Agent                    ChildShell                 sshclient              sshserver              OS/进程
   │                            │                          │                      │                     │
-  │  send_input(               │                          │                      │                     │
-  │    session_id, text,       │                          │                      │                     │
-  │    press_enter=true)       │                          │                      │                     │
-  │ ─────────────────────────> │                          │                      │                     │
-  │                            │  SendInput(text, true)   │                      │                     │
-  │                            │  ┌─ stdinMu.Lock()       │                      │                     │
-  │                            │  │  确保串行写入          │                      │                     │
-  │                            │  └─ ExecSession.Stdin ──>│                      │                     │
-  │                            │                          │  session.StdinPipe   │                     │
-  │                            │                          │ ───── SSH data ────>│                     │
-  │                            │                          │                      │  [PTY] io.Copy(f, sess)
-  │                            │                          │                      │  [pipe] cmd.Stdin    │
-  │                            │                          │                      │ ───── stdin ───────>│
-  │                            │                          │                      │                     │
-  │                            │  message.Append(Input)   │                      │                     │
-  │                            │ ──────────────> storage  │                      │                     │
+  │  send_input(shell_id,text) │                          │                      │                     │
+  │ ─────────────────────────> │  SendTerminalBytes       │                      │                     │
+  │  press_key(shell_id,enter) │  PressKey → \r / \n      │                      │                     │
+  │ ─────────────────────────> │ ── Stdin.Write ─────────>│ ───── SSH data ────>│ ───── stdin ───────>│
   │  ← {"success":true}        │                          │                      │                     │
 ```
 
-**关键设计**：`stdinMu` 串行化所有 stdin 写入，防止并发 Agent 交替写入导致输入错乱。
+**关键设计**：shell 级 stdin 串行写入，防止并发 Agent 交替写入导致输入错乱。I/O 一律按 `shell_id`，不再用 session id 当默认 shell。
 
 ## 四、输出流向（read_output）
 
@@ -342,7 +329,7 @@ message.Manager.Append(sessionID, type, content)
                   │       │
                   ▼       ▼
               ┌──────────────┐
-              │   exited     │──── delete_session() ────> [从注册表移除]
+              │   exited     │──── 自动从注册表移除 ────> [gone]
               └──────────────┘
                   │
          启动失败时

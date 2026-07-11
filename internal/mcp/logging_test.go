@@ -370,19 +370,20 @@ func TestWithLogging_ExtractsRowsAndCols(t *testing.T) {
 	}
 }
 
-func TestWithLogging_ExtractsTimeoutAndPressEnter(t *testing.T) {
+func TestWithLogging_ExtractsTimeoutAndShellKey(t *testing.T) {
 	cap := withCapturedLogger(t)
 
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("send_and_read", h)
+	wrapped := withLogging("press_key", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
-		"session_id":  "abc",
-		"timeout":     float64(3.5),
-		"press_enter": true,
+		"shell_id": "sh-1",
+		"timeout":  float64(3.5),
+		"key":      "enter",
+		"repeat":   float64(2),
 	}
 
 	if _, err := wrapped(context.Background(), req); err != nil {
@@ -398,10 +399,16 @@ func TestWithLogging_ExtractsTimeoutAndPressEnter(t *testing.T) {
 		t.Fatalf("entry: expected timeout=3.5, got %v", v)
 	}
 
-	if v, ok := attrValue(entry, "press_enter"); !ok {
-		t.Fatal("entry: expected press_enter attr")
-	} else if !v.Bool() {
-		t.Fatal("entry: expected press_enter=true")
+	if v, ok := attrValue(entry, "shell_id"); !ok {
+		t.Fatal("entry: expected shell_id attr")
+	} else if v.String() != "sh-1" {
+		t.Fatalf("entry: expected shell_id=sh-1, got %q", v.String())
+	}
+
+	if v, ok := attrValue(entry, "key"); !ok {
+		t.Fatal("entry: expected key attr")
+	} else if v.String() != "enter" {
+		t.Fatalf("entry: expected key=enter, got %q", v.String())
 	}
 }
 
