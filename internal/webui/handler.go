@@ -304,6 +304,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(100 * time.Millisecond)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sess.ID,
+		"shell_id":   sess.PrimaryShellID(),
 		"pid":        sess.PID,
 		"ssh_config": cfgName,
 	})
@@ -373,9 +374,9 @@ func (h *Handler) handleCreateShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":        cs.ID,
-		"parent_session_id": parentID,
-		"name":              cs.Name,
+		"shell_id":   cs.ID,
+		"session_id": parentID,
+		"name":       cs.Name,
 	})
 }
 
@@ -392,12 +393,7 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := r.PathValue("id")
-	var shell session.TerminalShell
-	if sess := h.Sessions.Get(id); sess != nil {
-		shell = sess
-	} else if cs := h.Sessions.GetChildShell(id); cs != nil {
-		shell = cs
-	}
+	shell := h.Sessions.GetChildShell(id)
 	if shell == nil {
 		http.NotFound(w, r)
 		return
@@ -453,12 +449,8 @@ func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Return all shells: the root shell (if alive) + child shells.
-	var shells []api.Session
-	if !sess.IsBufferClosed() {
-		shells = append(shells, sess.Info())
-	}
-	shells = append(shells, sess.ListChildShells()...)
+	// All shells are peers in the session's shell map (including primary).
+	shells := sess.ListChildShells()
 	if shells == nil {
 		shells = []api.Session{}
 	}
@@ -469,10 +461,12 @@ func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCloseShell(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// Check regular session first.
-	if sess := h.Sessions.Get(id); sess != nil {
-		sess.TerminateShellOnly()
-		h.Sessions.NotifyChange()
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	// Internal primary shell: tab close is a no-op (process outlives the tab).
+	if sess := h.Sessions.GetByShellID(id); sess != nil && sess.PrimaryShellID() == id && sess.SSHEndpoint == "internal" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

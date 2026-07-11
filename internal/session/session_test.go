@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-mcp-ai/termcp/internal/buffer"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
@@ -307,7 +308,7 @@ func TestManager_ListAll(t *testing.T) {
 func TestManager_CleanupAll(t *testing.T) {
 	srv := startTestServer(t)
 
-	mgr := NewManager( nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
 	command, args := testSleepCommand("60")
 	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
@@ -365,22 +366,20 @@ func TestManager_Delete(t *testing.T) {
 func TestManager_DeleteRunningSession(t *testing.T) {
 	srv := startTestServer(t)
 
-	mgr := NewManager( nil, nil, srv)
+	mgr := NewManager(nil, nil, srv)
 
 	command, args := testSleepCommand("60")
 	s, err := mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Terminate(true, 0)
+	sid := s.ID
 
-	err = mgr.Delete(s.ID)
-	if err == nil {
-		t.Fatal("expected error when deleting running session")
+	if err := mgr.Delete(sid); err != nil {
+		t.Fatal(err)
 	}
-
-	if mgr.Get(s.ID) == nil {
-		t.Fatal("running session should not be removed from registry")
+	if mgr.Get(sid) != nil {
+		t.Fatal("expected running session to be force-removed by Delete")
 	}
 }
 
@@ -447,6 +446,115 @@ func TestSession_ReadOutputWithMaxBytes(t *testing.T) {
 	// Should still have more data available
 	if !s.HasMoreOutput(s.DefaultOutputReaderID()) {
 		t.Fatal("expected HasMoreOutput=true after partial read")
+	}
+}
+
+func TestSession_ReadOutputWithMaxLinesPreservesUnreadData(t *testing.T) {
+	b := buffer.New(1024)
+	r, _ := b.NewReader()
+	s := &Session{
+		Session:  api.Session{ID: "test-session"},
+		buf:      b,
+		readerID: r,
+	}
+
+	if err := b.Write([]byte("one\ntwo\nthree\nfour\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := s.ReadOutput(context.Background(), 0, false, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "one\ntwo\n" {
+		t.Fatalf("expected first two lines, got %q", output)
+	}
+	if !s.HasMoreOutput(s.DefaultOutputReaderID()) {
+		t.Fatal("expected unread output after max_lines read")
+	}
+
+	output, err = s.ReadOutput(context.Background(), 0, false, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "three\nfour\n" {
+		t.Fatalf("expected remaining lines, got %q", output)
+	}
+	if s.HasMoreOutput(s.DefaultOutputReaderID()) {
+		t.Fatal("expected no unread output after draining")
+	}
+}
+
+func TestChildShell_ReadTerminalStreamWithMaxLinesPreservesUnreadData(t *testing.T) {
+	b := buffer.New(1024)
+	r, _ := b.NewReader()
+	cs := &ChildShell{buf: b}
+
+	if err := b.Write([]byte("one\ntwo\nthree\nfour\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := cs.ReadTerminalStream(context.Background(), r, 0, false, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "one\ntwo\n" {
+		t.Fatalf("expected first two lines, got %q", output)
+	}
+	if !cs.HasMoreOutput(r) {
+		t.Fatal("expected unread output after max_lines read")
+	}
+
+	output, err = cs.ReadTerminalStream(context.Background(), r, 0, false, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "three\nfour\n" {
+		t.Fatalf("expected remaining lines, got %q", output)
+	}
+	if cs.HasMoreOutput(r) {
+		t.Fatal("expected no unread output after draining")
+	}
+}
+
+func TestManager_CloseInternalChildShellKeepsParentSession(t *testing.T) {
+	srv := startTestServer(t)
+	mgr := NewManager(nil, nil, srv)
+
+	s, err := mgr.Create(testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "parent"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Delete(s.ID)
+
+	child, err := s.CreateChildShell(testShell(), testInteractiveShellArgs(), true, 24, 80, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := mgr.CloseChildShell(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected child shell to be found")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && s.GetChildShell(child.ID) != nil {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if s.GetChildShell(child.ID) != nil {
+		t.Fatal("expected child shell to be removed")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if mgr.Get(s.ID) == nil {
+		t.Fatal("expected parent session to remain registered after closing child shell")
+	}
+	if s.IsBufferClosed() {
+		t.Fatal("expected parent output buffer to remain open after closing child shell")
 	}
 }
 

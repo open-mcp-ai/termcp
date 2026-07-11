@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -56,19 +57,21 @@ type Config struct {
 }
 
 // Session wraps an interactive process session managed over SSH.
+// Session is a connection container; terminal I/O is addressed by shell_id via ChildShell.
 type Session struct {
 	api.Session
-	mu            sync.RWMutex
-	stdinMu       sync.Mutex
-	terminateOnce sync.Once
-	exitOnce      sync.Once
-	execSession   *sshclient.ExecSession
-	buf           *buffer.Buffer
-	readerID      int
+	mu             sync.RWMutex
+	stdinMu        sync.Mutex
+	terminateOnce  sync.Once
+	exitOnce       sync.Once
+	execSession    *sshclient.ExecSession
+	buf            *buffer.Buffer
+	readerID       int
 	msgMgr         *message.Manager
 	onExit         func()
 	onChildChange  func() // called when child shells are added/removed
-	enterCRLF     bool   // line-ending for press_enter (\r\n for cmd/powershell, \n for unix)
+	enterCRLF      bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
+	primaryShellID string // first shell id (≠ session id); used for legacy Session-level helpers
 
 	shells sync.Map // *ChildShell by ID
 }
@@ -76,10 +79,11 @@ type Session struct {
 // New creates and starts a new Session.
 // internal must be the built-in sshserver.Server (after Start) when cfg.Remote is nil; it may be nil for remote-only callers.
 func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Session, error) {
-	id := uuid.New().String()[:12]
+	sessionID := uuid.New().String()[:12]
+	shellID := uuid.New().String()[:12]
 	name := cfg.Name
 	if name == "" {
-		name = fmt.Sprintf("session-%s", id)
+		name = fmt.Sprintf("session-%s", sessionID)
 	}
 
 	usePty := cfg.Mode == api.ModePTY
@@ -149,9 +153,9 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		}
 	}
 
-	// Wrap the exec session in a ChildShell so root and child shells share the same lifecycle.
+	// First shell is a peer in shells map; its id is never equal to session id.
 	root := &ChildShell{
-		ID:          id,
+		ID:          shellID,
 		Name:        name,
 		execSession: execSession,
 		buf:         buf,
@@ -161,12 +165,13 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		Cols:        cfg.Cols,
 		CreatedAt:   time.Now().UTC(),
 		enterCRLF:   enterCRLF,
+		mode:        cfg.Mode,
 	}
 	root.startReaders()
 
 	s := &Session{
 		Session: api.Session{
-			ID:          id,
+			ID:          sessionID,
 			Name:        name,
 			Command:     cfg.Command,
 			Args:        cfg.Args,
@@ -178,22 +183,21 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 			Cols:        cfg.Cols,
 			SSHEndpoint: sshEndpointPublic,
 		},
-		enterCRLF:   enterCRLF,
-		execSession: execSession,
-		buf:         buf,
-		readerID:    rid,
-		msgMgr:      msgMgr,
+		enterCRLF:      enterCRLF,
+		execSession:    execSession,
+		buf:            buf,
+		readerID:       rid,
+		msgMgr:         msgMgr,
+		primaryShellID: shellID,
 	}
 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
 	root.parent = s
-	// Register primary shell in the same map as child shells so lifecycle
-	// management is uniform; removeChildShell / terminateChildren handle all.
 	s.shells.Store(root.ID, root)
 
-	slog.Debug("session started", "session_id", id, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
+	slog.Debug("session started", "session_id", sessionID, "shell_id", shellID, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
 	return s, nil
 }
@@ -290,13 +294,23 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 	return s.sendInput([]byte(text), pressEnter, true)
 }
 
-// SendTerminalBytes writes raw keystrokes to stdin without appending to the message log (web UI).
+// PrimaryShellID returns the first shell created with this session.
+func (s *Session) PrimaryShellID() string {
+	return s.primaryShellID
+}
+
+// PrimaryShell returns the first shell if still registered.
+func (s *Session) PrimaryShell() *ChildShell {
+	return s.GetChildShell(s.primaryShellID)
+}
+
+// SendTerminalBytes writes raw keystrokes to the primary shell stdin (web UI / legacy).
 func (s *Session) SendTerminalBytes(data []byte, pressEnter bool) error {
-	v, _ := s.shells.Load(s.ID)
-	if v == nil {
+	cs := s.PrimaryShell()
+	if cs == nil {
 		return fmt.Errorf("session shell has exited")
 	}
-	return v.(*ChildShell).SendTerminalBytes(data, pressEnter)
+	return cs.SendTerminalBytes(data, pressEnter)
 }
 
 // appendEnter returns data with the line ending appropriate for the shell family.
@@ -344,7 +358,7 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 }
 
 func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, persist bool, maxBytes int) (string, error) {
-	data, err := s.buf.Read(ctx, readerID, timeout, maxBytes)
+	data, err := s.buf.ReadLimited(ctx, readerID, timeout, maxBytes, maxLines)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -352,12 +366,6 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 	if stripAnsi {
 		output = ansi.Strip(output)
 		output = ansi.Compact(output)
-	}
-	if maxLines > 0 {
-		lines := strings.Split(output, "\n")
-		if len(lines) > maxLines {
-			output = strings.Join(lines[:maxLines], "\n")
-		}
 	}
 	if output != "" && persist && s.msgMgr != nil {
 		s.msgMgr.Append(s.ID, api.MsgOutput, output)
@@ -380,8 +388,11 @@ func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout
 // ReadTerminalStream reads PTY output for a reader without appending to the message log (high-frequency UI streaming).
 // If maxBytes > 0, each call returns at most that many raw bytes (for WebSocket/SSE chunking); 0 means one full drain to end of buffer.
 func (s *Session) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
-	v, _ := s.shells.Load(s.ID)
-	return v.(*ChildShell).ReadTerminalStream(ctx, readerID, timeout, stripAnsi, maxLines, maxBytes)
+	cs := s.PrimaryShell()
+	if cs == nil {
+		return "", fmt.Errorf("session shell has exited")
+	}
+	return cs.ReadTerminalStream(ctx, readerID, timeout, stripAnsi, maxLines, maxBytes)
 }
 
 // OutputByteRange returns a copy of retained raw output bytes [start, start+max) and total retained length.
@@ -454,15 +465,15 @@ func (s *Session) done() {
 	}
 }
 
-// TerminateShellOnly closes the root tab shell channel. For internal sessions this is a no-op
-// — the process outlives the tab (like detaching from screen/tmux). For remote sessions only the
-// SSH session channel is closed; child shells on the same TCP connection are unaffected.
+// TerminateShellOnly closes the primary shell channel by shell id. For internal sessions this is a
+// no-op — the process outlives the tab (like detaching from screen/tmux). For remote sessions only
+// that SSH session channel is closed; other shells on the same TCP connection are unaffected.
 func (s *Session) TerminateShellOnly() {
 	if s.SSHEndpoint == "internal" {
 		return // tab close doesn't kill the process
 	}
-	if v, ok := s.shells.Load(s.ID); ok {
-		v.(*ChildShell).TerminateShell()
+	if cs := s.PrimaryShell(); cs != nil {
+		cs.TerminateShell()
 	}
 }
 
@@ -492,13 +503,16 @@ func (s *Session) terminateChildren() {
 	}
 }
 
-// ResizePty adjusts the terminal dimensions (pty mode only).
+// ResizePty adjusts the terminal dimensions (pty mode only) on the primary shell.
 func (s *Session) ResizePty(rows, cols int) error {
 	if s.Mode != api.ModePTY {
 		return fmt.Errorf("PTY resize only available in pty mode")
 	}
-	v, _ := s.shells.Load(s.ID)
-	if err := v.(*ChildShell).ResizePty(rows, cols); err != nil {
+	cs := s.PrimaryShell()
+	if cs == nil {
+		return fmt.Errorf("session shell has exited")
+	}
+	if err := cs.ResizePty(rows, cols); err != nil {
 		return err
 	}
 	s.Rows = rows
@@ -600,10 +614,14 @@ type ChildShell struct {
 	ExitCode    *int
 	Rows        int
 	Cols        int
-	// enterCRLF selects the byte sequence appended on press_enter: true.
+	// enterCRLF selects the byte sequence for pipe-mode enter.
 	// It reflects the target shell family (unix vs cmd/powershell), not the
 	// termcp host OS, so cross-OS SSH sessions send the right line ending.
 	enterCRLF bool
+	mode      api.SessionMode // pty or pipe; affects press_key("enter")
+	// deliberateClose is set by TerminateShell/CloseChildShell so the exit
+	// watcher does not treat an intentional channel close as SSH disconnect.
+	deliberateClose bool
 }
 
 // Info returns a snapshot of the child shell's public metadata.
@@ -613,7 +631,7 @@ func (cs *ChildShell) Info() api.Session {
 	s := api.Session{
 		ID:        cs.ID,
 		Name:      cs.Name,
-		Mode:      api.ModePTY,
+		Mode:      cs.mode,
 		Status:    cs.Status,
 		Rows:      cs.Rows,
 		Cols:      cs.Cols,
@@ -633,6 +651,7 @@ func (cs *ChildShell) Done() <-chan struct{} {
 }
 
 // SendTerminalBytes writes raw keystrokes to the child shell's stdin.
+// pressEnter is kept for WebUI NL flag; MCP should use PressKey instead.
 func (cs *ChildShell) SendTerminalBytes(data []byte, pressEnter bool) error {
 	cs.mu.RLock()
 	running := cs.Status == api.SessionRunning
@@ -648,6 +667,31 @@ func (cs *ChildShell) SendTerminalBytes(data []byte, pressEnter bool) error {
 	}
 	cs.stdinMu.Lock()
 	_, err := cs.execSession.Stdin.Write(toWrite)
+	cs.stdinMu.Unlock()
+	return err
+}
+
+// PressKey writes a named key sequence (enter, ctrl+c, arrows, …) repeat times.
+func (cs *ChildShell) PressKey(key string, repeat int) error {
+	if repeat < 1 {
+		repeat = 1
+	}
+	if repeat > 20 {
+		return fmt.Errorf("repeat must be between 1 and 20, got %d", repeat)
+	}
+	seq, err := KeyBytes(key, cs.mode == api.ModePTY, cs.enterCRLF)
+	if err != nil {
+		return err
+	}
+	cs.mu.RLock()
+	running := cs.Status == api.SessionRunning
+	cs.mu.RUnlock()
+	if !running {
+		return fmt.Errorf("process has %s, cannot send input", cs.Status)
+	}
+	payload := bytes.Repeat(seq, repeat)
+	cs.stdinMu.Lock()
+	_, err = cs.execSession.Stdin.Write(payload)
 	cs.stdinMu.Unlock()
 	return err
 }
@@ -684,7 +728,7 @@ func (cs *ChildShell) UnregisterReader(id int) {
 
 // ReadTerminalStream reads PTY output for a reader without appending to the message log.
 func (cs *ChildShell) ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error) {
-	data, err := cs.buf.Read(ctx, readerID, timeout, maxBytes)
+	data, err := cs.buf.ReadLimited(ctx, readerID, timeout, maxBytes, maxLines)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -692,12 +736,6 @@ func (cs *ChildShell) ReadTerminalStream(ctx context.Context, readerID int, time
 	if stripAnsi {
 		output = ansi.Strip(output)
 		output = ansi.Compact(output)
-	}
-	if maxLines > 0 {
-		lines := strings.Split(output, "\n")
-		if len(lines) > maxLines {
-			output = strings.Join(lines[:maxLines], "\n")
-		}
 	}
 	return output, nil
 }
@@ -740,6 +778,7 @@ func (cs *ChildShell) TerminateShell() {
 		cs.mu.Unlock()
 		return // already terminated
 	}
+	cs.deliberateClose = true
 	cs.mu.Unlock()
 
 	cs.execSession.CloseSessionOnly()
@@ -806,10 +845,12 @@ func (cs *ChildShell) startReaders() {
 				cs.parent.removeChildShell(cs.ID)
 			}
 		})
-		// If the shell ended due to SSH disconnect (not clean exit),
-		// tear down the session. Any shell can detect this — exitOnce
-		// ensures cleanup runs once.
-		if cs.parent != nil && cs.execSession.Aborted() {
+		// If the shell ended due to SSH disconnect (not deliberate close and not
+		// clean process exit), tear down the session. exitOnce ensures once.
+		cs.mu.RLock()
+		deliberate := cs.deliberateClose
+		cs.mu.RUnlock()
+		if cs.parent != nil && !deliberate && cs.execSession.Aborted() {
 			cs.parent.exitOnce.Do(func() {
 				cs.parent.done()
 			})
@@ -838,6 +879,10 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 	buf := buffer.New(1024 * 1024)
 	buf.NewReader() // default reader 0 for MCP read_output
 
+	mode := api.ModePipe
+	if pty {
+		mode = api.ModePTY
+	}
 	cs := &ChildShell{
 		ID:          id,
 		Name:        name,
@@ -850,6 +895,7 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 		Rows:        rows,
 		Cols:        cols,
 		enterCRLF:   s.enterCRLF,
+		mode:        mode,
 	}
 
 	cs.startReaders()

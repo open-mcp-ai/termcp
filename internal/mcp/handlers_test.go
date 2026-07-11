@@ -92,14 +92,14 @@ func testShellEchoArgs(s string) []any {
 	return testShellArgs("-c", "echo "+s)
 }
 
-func testReadOutputUntil(t *testing.T, s *Server, sessionID, marker string, timeout time.Duration) string {
+func testReadOutputUntil(t *testing.T, s *Server, shellID, marker string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var output string
 	for time.Now().Before(deadline) {
 		readReq := makeRequest(map[string]any{
-			"session_id": sessionID,
-			"timeout":    0.5,
+			"shell_id": shellID,
+			"timeout":  0.5,
 		})
 		readResult, err := s.handleReadOutput(context.Background(), readReq)
 		if err != nil {
@@ -115,6 +115,26 @@ func testReadOutputUntil(t *testing.T, s *Server, sessionID, marker string, time
 		}
 	}
 	return output
+}
+
+func testRunLine(t *testing.T, s *Server, shellID, text string) {
+	t.Helper()
+	sendReq := makeRequest(map[string]any{"shell_id": shellID, "text": text})
+	sendResult, err := s.handleSendInput(context.Background(), sendReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sendResult.IsError {
+		t.Fatalf("send_input error: %s", sendResult.Content[0].(mcpgo.TextContent).Text)
+	}
+	keyReq := makeRequest(map[string]any{"shell_id": shellID, "key": "enter"})
+	keyResult, err := s.handlePressKey(context.Background(), keyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyResult.IsError {
+		t.Fatalf("press_key error: %s", keyResult.Content[0].(mcpgo.TextContent).Text)
+	}
 }
 
 func TestHandleDetectShell_Auto(t *testing.T) {
@@ -198,16 +218,19 @@ func TestHandleStartSession_Success(t *testing.T) {
 	if m["ssh_config"] != "internal" {
 		t.Fatalf("expected ssh_config internal, got %v", m["ssh_config"])
 	}
-	if m["initial_output"] != "" {
-		t.Fatalf("expected empty initial_output, got %v", m["initial_output"])
+	if m["shell_id"] == nil || m["shell_id"] == "" {
+		t.Fatal("expected shell_id in result")
+	}
+	if m["shell_id"] == m["session_id"] {
+		t.Fatal("shell_id must differ from session_id")
 	}
 }
 
-func TestHandleSendInput_SessionNotFound(t *testing.T) {
+func TestHandleSendInput_ShellNotFound(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{
-		"session_id": "nonexistent",
-		"text":       "hello",
+		"shell_id": "nonexistent",
+		"text":     "hello",
 	})
 
 	result, err := s.handleSendInput(context.Background(), req)
@@ -215,7 +238,7 @@ func TestHandleSendInput_SessionNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for nonexistent session")
+		t.Fatal("expected error for nonexistent shell")
 	}
 }
 
@@ -268,9 +291,9 @@ func TestHandleGetSessionInfo_NotFound(t *testing.T) {
 func TestHandleResizePty_NotFound(t *testing.T) {
 	s := newTestServer(t)
 	req := makeRequest(map[string]any{
-		"session_id": "nonexistent",
-		"rows":       float64(50),
-		"cols":       float64(120),
+		"shell_id": "nonexistent",
+		"rows":     float64(50),
+		"cols":     float64(120),
 	})
 
 	result, err := s.handleResizePty(context.Background(), req)
@@ -278,14 +301,13 @@ func TestHandleResizePty_NotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for nonexistent session")
+		t.Fatal("expected error for nonexistent shell")
 	}
 }
 
-func TestHandleStartAndReadOutput(t *testing.T) {
+func TestHandleStartSendPressKeyRead(t *testing.T) {
 	s := newTestServer(t)
 
-	// Start a bash session
 	startReq := makeRequest(map[string]any{
 		"command": testShell(),
 		"args":    testInteractiveShellArgs(),
@@ -297,34 +319,16 @@ func TestHandleStartAndReadOutput(t *testing.T) {
 	}
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
 	time.Sleep(300 * time.Millisecond)
 
-	// Send input and read
-	sarReq := makeRequest(map[string]any{
-		"session_id":  sessionID,
-		"text":        testShellInput(testInteractiveOutputCommand("handler_test")),
-		"press_enter": false,
-		"timeout":     3.0,
-	})
-	sarResult, err := s.handleSendAndRead(context.Background(), sarReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sarResult.IsError {
-		t.Fatalf("unexpected error: %s", sarResult.Content[0].(mcpgo.TextContent).Text)
-	}
-
-	sarM := parseResult(t, sarResult)
-	output := sarM["output"].(string)
-	if !strings.Contains(output, "handler_test") {
-		output += testReadOutputUntil(t, s, sessionID, "handler_test", 3*time.Second)
-	}
+	testRunLine(t, s, shellID, testInteractiveOutputCommand("handler_test"))
+	output := testReadOutputUntil(t, s, shellID, "handler_test", 3*time.Second)
 	if !strings.Contains(output, "handler_test") {
 		t.Fatalf("expected output containing 'handler_test', got %q", output)
 	}
 
-	// Cleanup
 	termReq := makeRequest(map[string]any{
 		"session_id": sessionID,
 		"force":      true,
@@ -362,7 +366,7 @@ func TestHandleListMessages(t *testing.T) {
 	}
 }
 
-func TestHandleBackgroundSend_Success(t *testing.T) {
+func TestHandleSendInput_ReturnsImmediately(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{
@@ -376,45 +380,42 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	}
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
 	time.Sleep(300 * time.Millisecond)
 
-	// background_send should return immediately without reading output
 	start := time.Now()
-	bgReq := makeRequest(map[string]any{
-		"session_id":  sessionID,
-		"text":        testShellInput(testInteractiveOutputCommand("bg_test")),
-		"press_enter": false,
+	sendReq := makeRequest(map[string]any{
+		"shell_id": shellID,
+		"text":     testInteractiveOutputCommand("bg_test"),
 	})
-	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
+	sendResult, err := s.handleSendInput(context.Background(), sendReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bgResult.IsError {
-		t.Fatalf("unexpected error: %s", bgResult.Content[0].(mcpgo.TextContent).Text)
+	if sendResult.IsError {
+		t.Fatalf("unexpected error: %s", sendResult.Content[0].(mcpgo.TextContent).Text)
 	}
 	elapsed := time.Since(start)
 	if elapsed > 500*time.Millisecond {
-		t.Fatalf("background_send took %v — should return immediately", elapsed)
+		t.Fatalf("send_input took %v — should return immediately", elapsed)
 	}
 
-	bgM := parseResult(t, bgResult)
-	if bgM["success"] != true {
-		t.Fatal("expected success=true")
+	keyReq := makeRequest(map[string]any{"shell_id": shellID, "key": "enter"})
+	if _, err := s.handlePressKey(context.Background(), keyReq); err != nil {
+		t.Fatal(err)
 	}
 
-	// Verify the input was actually delivered by reading output
-	output := testReadOutputUntil(t, s, sessionID, "bg_test", 3*time.Second)
+	output := testReadOutputUntil(t, s, shellID, "bg_test", 3*time.Second)
 	if !strings.Contains(output, "bg_test") {
 		t.Fatalf("expected output containing 'bg_test', got %q", output)
 	}
 
-	// Cleanup
 	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
 	s.handleTerminateSession(context.Background(), termReq)
 }
 
-func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
+func TestHandleReadOutput_ContextCancelled(t *testing.T) {
 	s := newTestServer(t)
 
 	startReq := makeRequest(map[string]any{
@@ -428,10 +429,10 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 	}
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
 	time.Sleep(300 * time.Millisecond)
 
-	// Cancel context after 200ms — send_and_read should return quickly
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(200 * time.Millisecond)
@@ -439,34 +440,26 @@ func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
 	}()
 
 	start := time.Now()
-	sarReq := makeRequest(map[string]any{
-		"session_id":  sessionID,
-		"text":        testShellInput("sleep 10"),
-		"press_enter": false,
-		"timeout":     30.0,
+	readReq := makeRequest(map[string]any{
+		"shell_id": shellID,
+		"timeout":  30.0,
 	})
-	sarResult, err := s.handleSendAndRead(ctx, sarReq)
+	readResult, err := s.handleReadOutput(ctx, readReq)
 	if err != nil {
 		t.Fatal(err)
 	}
 	elapsed := time.Since(start)
 
-	// Should return within 500ms after cancellation, not wait 30s
 	if elapsed > 2*time.Second {
-		t.Fatalf("send_and_read should return on ctx cancel, took %v", elapsed)
+		t.Fatalf("read_output should return on ctx cancel, took %v", elapsed)
 	}
+	_ = readResult
 
-	// Result should not be an error — just empty output from cancelled read
-	if sarResult.IsError {
-		// Could be error from send or read — both are acceptable on cancel
-	}
-
-	// Cleanup
 	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
 	s.handleTerminateSession(context.Background(), termReq)
 }
 
-func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
+func TestHandleSendInput_ExitedShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PowerShell -Command under ConPTY stays interactive after command completion")
 	}
@@ -479,23 +472,49 @@ func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 	})
 	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
-	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
-	// Wait for process to exit
 	time.Sleep(2 * time.Second)
 
-	bgReq := makeRequest(map[string]any{
-		"session_id":  sessionID,
-		"text":        "should fail",
-		"press_enter": true,
+	sendReq := makeRequest(map[string]any{
+		"shell_id": shellID,
+		"text":     "should fail",
 	})
-	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
+	sendResult, err := s.handleSendInput(context.Background(), sendReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bgResult.IsError {
-		t.Fatal("expected error when sending to exited session")
+	if !sendResult.IsError {
+		t.Fatal("expected error when sending to exited shell")
 	}
+}
+
+func TestHandlePressKey_UnknownKey(t *testing.T) {
+	s := newTestServer(t)
+	startReq := makeRequest(map[string]any{
+		"command": testShell(),
+		"args":    testInteractiveShellArgs(),
+		"mode":    "pty",
+	})
+	startResult, err := s.handleStartSession(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
+
+	keyReq := makeRequest(map[string]any{"shell_id": shellID, "key": "f99"})
+	keyResult, err := s.handlePressKey(context.Background(), keyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keyResult.IsError {
+		t.Fatal("expected error for unknown key")
+	}
+
+	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
+	s.handleTerminateSession(context.Background(), termReq)
 }
 
 func TestHandleStartSession_InvalidMode(t *testing.T) {
@@ -538,12 +557,12 @@ func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
 	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
 	startResult, _ := s.handleStartSession(context.Background(), startReq)
 	m := parseResult(t, startResult)
-	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
 	for _, timeout := range []float64{-1, 0.001, 61, 999} {
 		req := makeRequest(map[string]any{
-			"session_id": sessionID,
-			"timeout":    timeout,
+			"shell_id": shellID,
+			"timeout":  timeout,
 		})
 		result, _ := s.handleReadOutput(context.Background(), req)
 		if !result.IsError {
@@ -586,11 +605,12 @@ func TestHandleReadOutput_ReturnsSessionStatus(t *testing.T) {
 	}
 	m := parseResult(t, startResult)
 	sessionID := m["session_id"].(string)
+	shellID := m["shell_id"].(string)
 
 	time.Sleep(300 * time.Millisecond)
 
 	readReq := makeRequest(map[string]any{
-		"session_id": sessionID,
+		"shell_id": shellID,
 		"timeout":    1.0,
 	})
 	result, err := s.handleReadOutput(context.Background(), readReq)

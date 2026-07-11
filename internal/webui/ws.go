@@ -58,11 +58,8 @@ type uiWS struct {
 
 var errWSSessionNotFound = errors.New("session not found")
 
-// getTerminalShell looks up a session or child shell by ID and returns it as a TerminalShell.
+// getTerminalShell looks up a shell channel by shell_id.
 func (c *uiWS) getTerminalShell(sid string) session.TerminalShell {
-	if sess := c.h.Sessions.Get(sid); sess != nil {
-		return sess
-	}
 	if cs := c.h.Sessions.GetChildShell(sid); cs != nil {
 		return cs
 	}

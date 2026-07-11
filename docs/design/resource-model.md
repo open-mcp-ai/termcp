@@ -17,7 +17,7 @@ SSH 连接
 **创建**：`start_session` → 建立 SSH 连接 → 创建 Session 实例。
 
 **销毁时机**：
-- 用户显式 `terminate_session` / `delete_session` / `disconnect`
+- 用户显式 `terminate_session` / REST `DELETE /api/sessions/{id}` / `disconnect`
 - SSH 连接意外断开（被动检测，见下文）
 
 **销毁行为**：级联关闭所有 Shell → 关闭所有 Forward → 关闭 SSH Client → 从 registry 移除。
@@ -47,7 +47,7 @@ SSH 连接
 
 **定义**：基于 SSH 连接的端口转发 tunnel。属于 Session，不绑定特定 Shell。
 
-**创建/销毁**：通过 `forward_port` / `close_forward` 等 MCP 工具操作。
+**创建/销毁**：通过 `local_forward` / `remote_forward` / `dynamic_forward` / `close_forward` 等 MCP 工具操作（OpenSSH 语义：-L / -R / -D）。
 
 **级联清理**：Session 终止（显式或 SSH 断开）时，Session 持有的所有 Forward 一并关闭。
 

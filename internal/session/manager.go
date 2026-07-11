@@ -1,7 +1,6 @@
 package session
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -109,6 +108,20 @@ func (m *Manager) GetChildShell(id string) *ChildShell {
 	return found
 }
 
+// GetByShellID returns the parent session that owns the given shell_id.
+func (m *Manager) GetByShellID(shellID string) *Session {
+	var found *Session
+	m.sessions.Range(func(_, v any) bool {
+		s := v.(*Session)
+		if s.GetChildShell(shellID) != nil {
+			found = s
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // CloseChildShell terminates a child shell by its ID and removes it from the owning
 // parent session's map. Returns found=false if no such child shell exists.
 // The parent session and its SSH connection are unaffected.
@@ -155,20 +168,24 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	}
 }
 
-// Delete removes an exited session from the registry.
-// Returns error if the session is still running.
+// Delete forcefully removes a session. Running sessions are terminated and disconnected first.
 func (m *Manager) Delete(id string) error {
 	v, ok := m.sessions.Load(id)
 	if !ok {
 		return nil
 	}
 	s := v.(*Session)
-	if s.Info().Status == api.SessionRunning {
-		return fmt.Errorf("cannot delete running session %q, terminate it first", id)
-	}
+	s.Terminate(true, 0)
+	s.Disconnect()
 	m.sessions.Delete(id)
 	m.persist()
 	m.notifyListChange()
+	m.listChangeMu.RLock()
+	fn := m.onTerminate
+	m.listChangeMu.RUnlock()
+	if fn != nil {
+		fn(id)
+	}
 	return nil
 }
 

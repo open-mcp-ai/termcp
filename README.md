@@ -232,42 +232,32 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 AI Agent Flow                                   Process Output
 ─────────────────                              ────────────────
 
-start_session(
-  command="ssh",
-  args=["deploy@192.168.1.100"],
-  ssh_config="my-server"
-)
-                                    ←    "deploy@192.168.1.100's password: "
+start_session(ssh_config="my-server")
+  → session_id, shell_id
+                                    ←    (read_output for prompts)
 
-send_and_read(
-  text="my_secret_pass",
-  press_enter=true
-)
-                                    ←    "Welcome to Ubuntu 22.04 LTS
-                                          deploy@web-server:~$ "
+send_input(shell_id, text="df -h")
+press_key(shell_id, key="enter")
+read_output(shell_id, timeout=3)
+                                    ←    "Filesystem ... Use% Mounted on ..."
 
-send_and_read(
-  text="df -h",
-  press_enter=true
-)
-                                    ←    "Filesystem      Size  Used Avail Use% Mounted on
-                                          /dev/sda1       100G   45G   55G  45% /
-                                          deploy@web-server:~$ "
-
-terminate_session(session_id="abc123")
+terminate_session(session_id)
 ```
 
 ### Example 2: Python REPL Debugging
 
 ```
 start_session(command="python3", mode="pty")
-                                    ←    "Python 3.10.12\n>>> "
+  → session_id, shell_id
 
-send_and_read(text="data = [1, 2, 3, 4, 5]", press_enter=true)
-                                    ←    ">>> "
+send_input(shell_id, text="data = [1, 2, 3, 4, 5]")
+press_key(shell_id, key="enter")
+read_output(shell_id)
 
-send_and_read(text="sum(data)", press_enter=true)
-                                    ←    "15\n>>> "
+send_input(shell_id, text="sum(data)")
+press_key(shell_id, key="enter")
+read_output(shell_id)
+                                    ←    "15"
 ```
 
 ### Example 3: Multi-Agent Collaboration
@@ -275,60 +265,58 @@ send_and_read(text="sum(data)", press_enter=true)
 ```
 # Agent A starts a monitoring process
 start_session(command="top", mode="pty")
-  → session_id: "sess-001"
+  → session_id, shell_id
 
-# Agent B joins the same session without stealing output
-register_reader(session_id="sess-001")
+# Agent B joins the same shell without stealing output
+register_reader(shell_id=...)
   → reader_id: 2
 
 # Agent A reads its own cursor
-read_output(session_id="sess-001", reader_id=1)
+read_output(shell_id=..., reader_id=1)
   → "PID USER  PR  NI  VIRT  RES  SHR S %CPU %MEM   TIME+ COMMAND..."
 
-# Agent B reads from the beginning independently
-read_output(session_id="sess-001", reader_id=2)
+# Agent B reads independently
+read_output(shell_id=..., reader_id=2)
   → "top - 14:32:10 up 3 days,  2:15,  1 user,  load average: 0.52, 0.58, 0.59..."
 
 # Agent B is done
-unregister_reader(session_id="sess-001", reader_id=2)
+unregister_reader(shell_id=..., reader_id=2)
 
 # Agent A terminates the session
-terminate_session(session_id="sess-001")
-delete_session(session_id="sess-001")
+terminate_session(session_id=...)
 ```
 
 ### Example 4: Multi-session Parallel Management
 
 ```
 start_session(command="ping", args=["-c", "5", "google.com"], name="ping-test")
-  → session_id: "a1b2c3"
+  → session_id, shell_id
 
 start_session(command="python3", args=["-m", "http.server", "8080"], name="web-server")
-  → session_id: "d4e5f6"
+  → session_id, shell_id
 
 list_sessions()
-  → [{id: "a1b2c3", status: "running"}, {id: "d4e5f6", status: "running"}]
+  → [{id: "...", status: "running"}, ...]
 
-read_output(session_id="a1b2c3")  → ping statistics
+read_output(shell_id=..., timeout=1)  # poll shells, timeout ≤ 3
 
-terminate_session(session_id="a1b2c3")
-terminate_session(session_id="d4e5f6")
+terminate_session(session_id=...)
 ```
 
 ---
 
 ## Tool Reference
 
-Full tool reference: [`docs/mcp-tools.md`](docs/mcp-tools.md). 31 tools total.
+Full tool reference: [`docs/mcp-tools.md`](docs/mcp-tools.md).
 
 | Category | Tools |
 |----------|-------|
-| Session lifecycle | `start_session`, `send_input`, `read_output`, `send_and_read`, `background_send`, `list_sessions`, `get_session_info`, `terminate_session`, `delete_session` |
+| Session lifecycle | `start_session`, `list_sessions`, `get_session_info`, `terminate_session` |
+| Shell I/O | `send_input`, `press_key`, `read_output`, `resize_pty` |
 | Shell multiplexing | `start_subshell`, `list_subshells`, `close_shell` |
 | Multi-agent reading | `register_reader`, `unregister_reader` |
-| PTY control | `resize_pty` |
-| Port forwarding | `forward_port`, `local_forward`, `dynamic_forward`, `list_forwards`, `close_forward` |
-| File operations (SFTP) | `file_read`, `file_write`, `file_stat`, `file_delete`, `file_rename`, `file_mkdir`, `get_file_urls` |
+| Port forwarding | `local_forward` (-L), `remote_forward` (-R), `dynamic_forward` (-D), `list_forwards`, `close_forward` |
+| File operations (SFTP) | `file_read`, `file_write`, `file_stat`, `file_delete`, `file_rename`, `file_mkdir`, `get_file_urls`, … |
 | Server discovery | `detect_shell`, `list_ssh_configs` |
 | Message persistence | `list_messages`, `get_message` |
 
