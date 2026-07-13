@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>termcp · API &amp; MCP</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; font-family: ui-sans-serif, system-ui, sans-serif; background: #f6f8fa; color: #24292f; }
+    .app-header {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid #d0d7de; background: #fff;
+      box-shadow: 0 1px 0 rgba(27,31,36,.04);
+    }
+    .app-header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; color: #1f2328; }
+    .app-header .nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .app-header a {
+      font-size: 0.85rem; color: #0969da; text-decoration: none;
+      padding: 6px 10px; border-radius: 6px; border: 1px solid transparent;
+    }
+    .app-header a:hover { background: #f0f6fc; border-color: #d0d7de; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; }
+    h2 { margin: 28px 0 10px; font-size: 1.15rem; color: #1f2328; border-bottom: 1px solid #d0d7de; padding-bottom: 6px; }
+    h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2328; }
+    h4 { margin: 14px 0 6px; font-size: 0.88rem; color: #57606a; font-weight: 600; }
+    p, li { font-size: 0.9rem; line-height: 1.55; color: #24292f; }
+    .lead { color: #57606a; margin-top: 0; }
+    .card {
+      background: #fff; border: 1px solid #d0d7de; border-radius: 10px;
+      padding: 16px 18px; margin: 12px 0 16px; box-shadow: 0 1px 0 rgba(27,31,36,.04);
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .meta {
+      display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; font-size: 0.82rem; color: #57606a;
+    }
+    .meta span {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px; border-radius: 999px; background: #f6f8fa; border: 1px solid #d0d7de;
+    }
+    .meta code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #1f2328; }
+    .ep {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 8px 0 10px; padding: 8px 10px; border-radius: 8px;
+      background: #f6f8fa; border: 1px solid #d0d7de;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem; word-break: break-all;
+    }
+    .ep code { flex: 1; min-width: 0; color: #1f2328; }
+    .copy-btn {
+      flex-shrink: 0; font: inherit; font-size: 0.75rem; padding: 4px 10px;
+      border-radius: 6px; border: 1px solid #d0d7de; background: #fff; color: #24292f; cursor: pointer;
+    }
+    .copy-btn:hover { background: #eaeef2; }
+    .copy-btn.ok { background: #dafbe1; border-color: #aceebb; color: #1a7f37; }
+    .block { position: relative; margin: 8px 0 0; }
+    .block pre {
+      margin: 0; padding: 12px 14px; padding-right: 72px; border-radius: 8px; overflow: auto;
+      background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.45;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .block .copy-btn {
+      position: absolute; top: 8px; right: 8px; background: #21262d; color: #c9d1d9; border-color: #30363d;
+    }
+    .block .copy-btn:hover { background: #30363d; color: #fff; }
+    .block .copy-btn.ok { background: #238636; border-color: #2ea043; color: #fff; }
+    .muted { color: #656d76; font-size: 0.82rem; margin: 6px 0 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #d0d7de; vertical-align: top; }
+    th { background: #f6f8fa; color: #57606a; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    code.inline {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.84em; background: #eff1f3; padding: 1px 5px; border-radius: 4px;
+    }
+    .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+    .toc a {
+      font-size: 0.8rem; color: #0969da; text-decoration: none; padding: 4px 10px;
+      border: 1px solid #d0d7de; border-radius: 999px; background: #fff;
+    }
+    .toc a:hover { background: #f0f6fc; }
+    .note {
+      margin: 10px 0 0; padding: 10px 12px; border-radius: 8px;
+      background: #fff8c5; border: 1px solid #d4a72c55; color: #3b3200; font-size: 0.85rem;
+    }
+    #toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      background: #24292f; color: #fff; padding: 8px 14px; border-radius: 8px;
+      font-size: 0.82rem; opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <h1>termcp · API &amp; MCP</h1>
+    <nav class="nav">
+      <a href="/">← Web UI</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <p class="lead">
+      Copy MCP client settings for this termcp instance, or look up the HTTP/WebSocket API paths.
+      URLs below use the current browser origin.
+    </p>
+
+    <div class="toc">
+      <a href="#mcp">MCP endpoints</a>
+      <a href="#clients">Client config</a>
+      <a href="#api">HTTP API list</a>
+    </div>
+
+    <h2 id="mcp">1. MCP endpoints</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>SSE</h3>
+        <div class="meta">
+          <span>Path <code>/sse</code></span>
+          <span>Claude <code>--transport sse</code></span>
+        </div>
+        <div class="ep">
+          <code id="url-sse"></code>
+          <button type="button" class="copy-btn" data-copy="url-sse">Copy</button>
+        </div>
+        <p class="muted">Configure only <code class="inline">/sse</code>; JSON-RPC uses <code class="inline" id="url-message"></code> automatically.</p>
+      </div>
+
+      <div class="card">
+        <h3>Streamable HTTP</h3>
+        <div class="meta">
+          <span>Path <code>/stream</code></span>
+          <span>Claude <code>--transport http</code></span>
+        </div>
+        <div class="ep">
+          <code id="url-stream"></code>
+          <button type="button" class="copy-btn" data-copy="url-stream">Copy</button>
+        </div>
+        <p class="muted">Single MCP endpoint. Use this for Open WebUI and HTTP/Streamable HTTP clients.</p>
+      </div>
+    </div>
+    <div class="note">Both transports expose the same tools. The most common connection bug is using <code class="inline">/sse</code> where the client expects <code class="inline">/stream</code>, or the reverse.</div>
+
+    <h2 id="clients">2. Client config</h2>
+    <div class="card">
+      <h3>Claude Code CLI</h3>
+      <h4>SSE</h4>
+      <div class="block">
+        <button type="button" class="copy-btn" data-copy="cfg-sse-cli">Copy</button>
+        <pre id="cfg-sse-cli"></pre>
+      </div>
+      <h4>Streamable HTTP</h4>
+      <div class="block">
+        <button type="button" class="copy-btn" data-copy="cfg-stream-cli">Copy</button>
+        <pre id="cfg-stream-cli"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>JSON <code class="inline">mcpServers</code></h3>
+      <p class="muted" style="margin-top:0">Use this shape for Claude config and many IDE agents. Some clients call <code class="inline">type</code> <code class="inline">transport</code>.</p>
+      <h4>SSE</h4>
+      <div class="block">
+        <button type="button" class="copy-btn" data-copy="cfg-sse-json">Copy</button>
+        <pre id="cfg-sse-json"></pre>
+      </div>
+      <h4>Streamable HTTP</h4>
+      <div class="block">
+        <button type="button" class="copy-btn" data-copy="cfg-stream-json">Copy</button>
+        <pre id="cfg-stream-json"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>URL-only clients</h3>
+      <table>
+        <thead>
+          <tr><th>Client option</th><th>Paste this URL</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>SSE</td><td><code class="inline" id="url-sse-2"></code></td></tr>
+          <tr><td>HTTP / Streamable HTTP</td><td><code class="inline" id="url-stream-2"></code></td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Open WebUI usually uses Streamable HTTP: <code class="inline">/stream</code>.</p>
+    </div>
+
+    <h2 id="api">3. HTTP API list</h2>
+    <div class="card">
+      <h3>Public surfaces</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>GET</td><td><code class="inline">/</code></td><td>Web UI</td></tr>
+          <tr><td>GET / POST</td><td><code class="inline">/sse</code> + <code class="inline">/message</code></td><td>MCP SSE</td></tr>
+          <tr><td>—</td><td><code class="inline">/stream</code></td><td>MCP Streamable HTTP</td></tr>
+          <tr><td>GET</td><td><code class="inline">/api/ui/ws</code></td><td>Browser terminal WebSocket</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>REST endpoints</h3>
+      <table>
+        <thead>
+          <tr><th>Resource</th><th>Method</th><th>Path</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Connection templates</td><td>GET</td><td><code class="inline">/api/connection-templates</code></td></tr>
+          <tr><td>Connections</td><td>GET</td><td><code class="inline">/api/connections</code></td></tr>
+          <tr><td>Connection</td><td>GET / PUT / DELETE</td><td><code class="inline">/api/connections/{name}</code></td></tr>
+          <tr><td>Sessions</td><td>GET / POST</td><td><code class="inline">/api/sessions</code></td></tr>
+          <tr><td>Session</td><td>GET / DELETE</td><td><code class="inline">/api/sessions/{id}</code></td></tr>
+          <tr><td>Shells</td><td>GET / POST</td><td><code class="inline">/api/sessions/{id}/shells</code></td></tr>
+          <tr><td>Shell</td><td>DELETE</td><td><code class="inline">/api/shells/{id}</code></td></tr>
+          <tr><td>Output history</td><td>GET</td><td><code class="inline">/api/sessions/{id}/output-range</code></td></tr>
+          <tr><td>Forwards</td><td>GET</td><td><code class="inline">/api/forwards</code></td></tr>
+          <tr><td>Forward</td><td>DELETE</td><td><code class="inline">/api/forwards/{id}</code></td></tr>
+          <tr><td>Session forwards</td><td>GET / POST</td><td><code class="inline">/api/sessions/{id}/forwards</code></td></tr>
+          <tr><td>Files</td><td>GET / PUT / DELETE</td><td><code class="inline">/api/sessions/{id}/files</code></td></tr>
+          <tr><td>Download file</td><td>GET</td><td><code class="inline">/api/sessions/{id}/files/download?path=...</code></td></tr>
+          <tr><td>Upload file</td><td>POST</td><td><code class="inline">/api/sessions/{id}/files/upload</code></td></tr>
+          <tr><td>Create directory</td><td>POST</td><td><code class="inline">/api/sessions/{id}/files/dir</code></td></tr>
+          <tr><td>Admin SSH configs</td><td>GET</td><td><code class="inline">/api/ssh-configs</code> (admin port only)</td></tr>
+          <tr><td>Admin SSH config</td><td>PUT / DELETE</td><td><code class="inline">/api/ssh-configs/{name}</code> (admin port only)</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Request and response examples live in repo <code class="inline">docs/api.md</code>.</p>
+    </div>
+  </main>
+
+  <div id="toast" role="status">Copied</div>
+
+  <script>
+  (function () {
+    var origin = location.origin.replace(/\/$/, '');
+    var sse = origin + '/sse';
+    var message = origin + '/message';
+    var stream = origin + '/stream';
+
+    function setText(id, text) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    setText('url-sse', sse);
+    setText('url-sse-2', sse);
+    setText('url-message', message);
+    setText('url-stream', stream);
+    setText('url-stream-2', stream);
+
+    setText('cfg-sse-cli', 'claude mcp add --transport sse termcp ' + sse);
+    setText('cfg-stream-cli', 'claude mcp add --transport http termcp ' + stream);
+
+    setText('cfg-sse-json', JSON.stringify({
+      mcpServers: {
+        termcp: {
+          type: 'sse',
+          url: sse
+        }
+      }
+    }, null, 2));
+
+    setText('cfg-stream-json', JSON.stringify({
+      mcpServers: {
+        termcp: {
+          type: 'http',
+          url: stream
+        }
+      }
+    }, null, 2));
+
+    function toast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg || 'Copied';
+      t.classList.add('show');
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1200);
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          if (!document.execCommand('copy')) reject(new Error('copy failed'));
+          else resolve();
+        } catch (e) { reject(e); }
+        document.body.removeChild(ta);
+      });
+    }
+
+    document.querySelectorAll('.copy-btn[data-copy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-copy');
+        var el = document.getElementById(id);
+        if (!el) return;
+        var text = el.textContent || '';
+        copyText(text).then(function () {
+          btn.classList.add('ok');
+          btn.textContent = 'Copied';
+          toast('Copied');
+          setTimeout(function () {
+            btn.classList.remove('ok');
+            btn.textContent = 'Copy';
+          }, 1200);
+        }).catch(function () {
+          toast('Copy failed');
+        });
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

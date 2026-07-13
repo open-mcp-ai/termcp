@@ -80,7 +80,22 @@ termcp ssh-config list -data-dir <目录>          # 列出所有 SSH 配置名�
 
 ## MCP 配置
 
+termcp 在同一端口暴露 **同一套 MCP 工具** 的两种传输。按客户端能力选择，不是两套服务。
+
+| 客户端支持… | 使用 | URL |
+|-------------|------|-----|
+| **SSE** | SSE | `http://<host>:<port>/sse` |
+| **HTTP / streamable HTTP** | Streamable HTTP | `http://<host>:<port>/stream` |
+
+浏览器 Web UI → **API / MCP**（`/api.html`）可按当前 origin 复制 MCP 配置，并查看 HTTP API 列表。
+
 ### Claude Code
+
+**SSE**（常用）：
+
+```bash
+claude mcp add --transport sse termcp http://localhost:18765/sse
+```
 
 ```json
 {
@@ -93,22 +108,34 @@ termcp ssh-config list -data-dir <目录>          # 列出所有 SSH 配置名�
 }
 ```
 
-或通过 CLI：
+只配置 `/sse` 即可；SSE 客户端会自动用 `POST /message` 发 JSON-RPC。
+
+**Streamable HTTP**（Claude CLI 的 transport 名是 `http`）：
 
 ```bash
-claude mcp add --transport sse termcp http://localhost:18765/sse
+claude mcp add --transport http termcp http://localhost:18765/stream
 ```
 
-### Open WebUI（Streamable HTTP）
+```json
+{
+  "mcpServers": {
+    "termcp": {
+      "type": "http",
+      "url": "http://your-server:18765/stream"
+    }
+  }
+}
+```
 
-Open WebUI 通过 streamable HTTP 连接 MCP，地址为 `http://<host>:18765/stream`。
+单路径，**不要**再拼 `/sse` 或 `/message`。
 
-termcp 与 Open WebUI 同机运行时：`http://127.0.0.1:18765/stream`。Open WebUI 在 Docker 内、termcp 在宿主机时：`http://host.docker.internal:18765/stream`（macOS/Windows）或宿主机 LAN IP。
+### 其他客户端
 
-### 其他 MCP 客户端
+- Open WebUI 和其他 HTTP / Streamable HTTP 客户端：`http://<host>:18765/stream`
+- SSE 客户端：`http://<host>:18765/sse`
+- JSON 配置客户端：使用 Web UI **API / MCP**（`/api.html`）里的 `mcpServers` 片段
 
-支持 **SSE** 传输的客户端 → `http://<host>:<port>/sse`。  
-支持 **streamable HTTP** 的客户端 → `http://<host>:<port>/stream`。
+两套传输共用工具与 `instructions`。连不上时优先检查路径是否选错（`/sse` vs `/stream`）。
 
 ---
 

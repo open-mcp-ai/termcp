@@ -1,12 +1,23 @@
 # MCP 工具参考
 
-termcp 通过 SSE（`/sse`）或 Streamable HTTP（`/stream`）暴露 MCP 工具。
+termcp 通过 **SSE** 与 **Streamable HTTP** 两套对等传输暴露同一套 MCP 工具（同一监听端口）。
 
+## 对接方式（传输）
+
+| 传输 | 端点 | 配套 | 说明 |
+|------|------|------|------|
+| SSE | `GET /sse` | `POST /message` | 客户端只配置 `/sse`；SDK 自动用 `/message` 发 JSON-RPC |
+| Streamable HTTP | `/stream` | — | 单路径；不要拼 `/sse` 或 `/message` |
+
+- SSE：`http://<host>:18765/sse`（Claude：`--transport sse` / `type: "sse"`）
+- Streamable HTTP：`http://<host>:18765/stream`（Claude：`--transport http` / `type: "http"`）
+
+可复制配置与 HTTP API 速查：Web UI **`/api.html`**。完整客户端样例见 `README.md` / `README.zh.md`。
 **ID 规则（硬）：**
 
 | 资源 | 参数名 | 谁用 |
 |------|--------|------|
-| Session（SSH 连接容器） | `session_id` | start_subshell、forwards、files、terminate、delete、list_sessions、get_session_info |
+| Session（SSH 连接容器） | `session_id` | start_subshell、forwards、files、terminate、list_sessions、get_session_info |
 | Shell（终端 channel） | `shell_id` | send_input、press_key、read_output、resize_pty、register/unregister_reader、close_shell |
 
 `start_session` 返回 **两个不同** 的 id：`session_id` 与 `shell_id`（首个 shell 不再与 session 共用 id）。

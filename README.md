@@ -85,7 +85,22 @@ termcp ssh-config list -data-dir <dir>          # list all SSH config names
 
 ## MCP Configuration
 
+termcp exposes the **same MCP tools** on one port over two transports. Pick by client capability — not different servers.
+
+| If the client supports… | Use | URL |
+|-------------------------|-----|-----|
+| **SSE** | SSE | `http://<host>:<port>/sse` |
+| **HTTP / streamable HTTP** | Streamable HTTP | `http://<host>:<port>/stream` |
+
+Browser Web UI → **API / MCP** (`/api.html`) provides live MCP config snippets and an HTTP API list for the current origin.
+
 ### Claude Code
+
+**SSE** (usual choice):
+
+```bash
+claude mcp add --transport sse termcp http://localhost:18765/sse
+```
 
 ```json
 {
@@ -98,22 +113,34 @@ termcp ssh-config list -data-dir <dir>          # list all SSH config names
 }
 ```
 
-Or via CLI:
+Configure only `/sse`. The SSE client uses `POST /message` for JSON-RPC automatically.
+
+**Streamable HTTP** (Claude CLI transport name is `http`):
 
 ```bash
-claude mcp add --transport sse termcp http://localhost:18765/sse
+claude mcp add --transport http termcp http://localhost:18765/stream
 ```
 
-### Open WebUI (Streamable HTTP)
+```json
+{
+  "mcpServers": {
+    "termcp": {
+      "type": "http",
+      "url": "http://your-server:18765/stream"
+    }
+  }
+}
+```
 
-Point Open WebUI at `http://<host>:18765/stream`.
+One path only — do **not** append `/sse` or `/message`.
 
-Example when termcp runs on the same machine: `http://127.0.0.1:18765/stream`. When Open WebUI runs in Docker and termcp on the host: `http://host.docker.internal:18765/stream` (macOS/Windows) or the host LAN IP.
+### Other clients
 
-### Other MCP Clients
+- Open WebUI and other HTTP / Streamable HTTP clients: `http://<host>:18765/stream`
+- SSE clients: `http://<host>:18765/sse`
+- JSON config clients: use the `mcpServers` snippets on Web UI **API / MCP** (`/api.html`)
 
-Any MCP client with **SSE** transport → `http://<host>:<port>/sse`.  
-Any MCP client with **streamable HTTP** → `http://<host>:<port>/stream`.
+Both transports share tools and server `instructions`. Wrong path (`/sse` vs `/stream`) is the most common connect failure.
 
 ---
 
