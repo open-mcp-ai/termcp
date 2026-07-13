@@ -4,6 +4,17 @@ Base URL: `http://localhost:18765`
 
 实时终端 I/O 走 WebSocket (`/api/ui/ws`)，其余操作走 REST。
 
+## 0. MCP 传输（AI 对接）
+
+与 REST 共用同一 HTTP 端口；工具面一致，按客户端能力二选一：
+
+| 传输 | 路径 | 说明 |
+|------|------|------|
+| SSE | `GET /sse` + `POST /message` | 客户端配置 `/sse`；JSON-RPC 走 `/message` |
+| Streamable HTTP | `/stream` | 单端点；Open WebUI 等使用 |
+
+浏览器：`/api.html`（Web UI **API / MCP**）提供按 origin 复制的 MCP 配置和 HTTP API 速查表。工具参数见 [`mcp-tools.md`](./mcp-tools.md)。
+
 ---
 
 ## 1. 连接配置 (Connection Profiles)
