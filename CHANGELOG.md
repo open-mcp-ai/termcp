@@ -17,6 +17,8 @@
 ### 文档
 
 - 重写 MCP `instructions`、`docs/mcp-tools.md`、CLAUDE multi-session 规则；对齐 resource-model。
+- **`/sse` 与 `/stream` 对等说明**：README / README.zh / `docs/mcp-tools.md` / `docs/api.md` / architecture 同步补齐端点、配套路径、客户端样例与常见误配。
+- **Web UI `api.html`**：首页标题栏 **API / MCP** 入口；精简为 MCP 可复制配置 + HTTP/WebSocket API 速查表，含 `claude mcp add --transport http`、通用 `mcpServers` JSON 与 URL-only 说明。
 
 ### 修复
 
