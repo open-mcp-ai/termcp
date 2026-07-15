@@ -82,6 +82,7 @@ func ForwardID(direction ForwardDirection) string {
 	forwardCounter.count++
 	return fmt.Sprintf("fw-%s-%d-%d", direction, time.Now().UnixMilli(), forwardCounter.count)
 }
+
 // tunnel connections back via smux to termcp's remoteHost:remotePort.
 // LocalForwardSSH creates a local forward (ssh -L): termcp listens on a local port and
 // tunnels each connection through the SSH client's direct-tcpip channel to the remote target.
@@ -200,8 +201,20 @@ func RemoteForwardSSH(ctx context.Context, client *ssh.Client, agentHost string,
 	return fw, listener, nil
 }
 
-// CreateLocal creates a local forward (ssh -L) via the best available path.
-func (fm *ForwardManager) CreateLocal(sshConfig string, remoteHost string, remotePort int, localPort int, sshClient *ssh.Client) (*ForwardInfo, error) {
+// put registers a forward after SessionID/SSHConfig are set on fw.
+// Callers must set metadata before put; the map stores a copy of ForwardInfo.
+func (fm *ForwardManager) put(fw *ForwardInfo, ln net.Listener, cancel context.CancelFunc) {
+	if fw == nil {
+		return
+	}
+	fm.mu.Lock()
+	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
+	fm.mu.Unlock()
+	fm.notifyChange()
+}
+
+// CreateLocal creates a local forward (ssh -L) and registers it under sessionID.
+func (fm *ForwardManager) CreateLocal(sessionID, sshConfig, remoteHost string, remotePort, localPort int, sshClient *ssh.Client) (*ForwardInfo, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("no SSH client available for %q", sshConfig)
 	}
@@ -211,16 +224,14 @@ func (fm *ForwardManager) CreateLocal(sshConfig string, remoteHost string, remot
 		cancel()
 		return nil, err
 	}
+	fw.SessionID = sessionID
 	fw.SSHConfig = sshConfig
-	fm.mu.Lock()
-	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
-	fm.mu.Unlock()
-	fm.notifyChange()
+	fm.put(fw, ln, cancel)
 	return fw, nil
 }
 
-// CreateRemote creates a remote forward (ssh -R) via the best available path.
-func (fm *ForwardManager) CreateRemote(sshConfig string, localHost string, localPort int, remoteHost string, remotePort int, sshClient *ssh.Client) (*ForwardInfo, error) {
+// CreateRemote creates a remote forward (ssh -R) and registers it under sessionID.
+func (fm *ForwardManager) CreateRemote(sessionID, sshConfig, localHost string, localPort int, remoteHost string, remotePort int, sshClient *ssh.Client) (*ForwardInfo, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("no SSH client available for %q", sshConfig)
 	}
@@ -230,11 +241,31 @@ func (fm *ForwardManager) CreateRemote(sshConfig string, localHost string, local
 		cancel()
 		return nil, err
 	}
+	fw.SessionID = sessionID
 	fw.SSHConfig = sshConfig
-	fm.mu.Lock()
-	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
-	fm.mu.Unlock()
-	fm.notifyChange()
+	fm.put(fw, ln, cancel)
+	return fw, nil
+}
+
+// CreateDynamic creates a SOCKS5 dynamic forward under sessionID.
+// When localDial is true, connections are dialed from termcp itself (internal);
+// otherwise they go through sshClient (ssh -D).
+func (fm *ForwardManager) CreateDynamic(sessionID, sshConfig string, localPort int, sshClient *ssh.Client, localDial bool) (*ForwardInfo, error) {
+	if !localDial && sshClient == nil {
+		return nil, fmt.Errorf("no SSH client available for %q", sshConfig)
+	}
+	if localDial {
+		return fm.dynamicLocal(sessionID, sshConfig, localPort)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fw, ln, err := DynamicForwardSSH(ctx, sshClient, localPort)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	fw.SessionID = sessionID
+	fw.SSHConfig = sshConfig
+	fm.put(fw, ln, cancel)
 	return fw, nil
 }
 
@@ -249,18 +280,35 @@ func (fm *ForwardManager) List() []ForwardInfo {
 	return out
 }
 
+// ListBySession returns forwards belonging to sessionID.
+func (fm *ForwardManager) ListBySession(sessionID string) []ForwardInfo {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	out := make([]ForwardInfo, 0)
+	for _, fw := range fm.forwards {
+		if fw.SessionID == sessionID {
+			out = append(out, fw.ForwardInfo)
+		}
+	}
+	return out
+}
+
 // DynamicForwardSSH starts a SOCKS5 proxy using an SSH client's dialer.
 // The ctx is used to stop the SOCKS5 server and close active connections.
 // Returns a listener for lifecycle management.
 func DynamicForwardSSH(ctx context.Context, client *ssh.Client, localPort int) (*ForwardInfo, net.Listener, error) {
 	if localPort == 0 {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil { return nil, nil, err }
+		if err != nil {
+			return nil, nil, err
+		}
 		localPort = l.Addr().(*net.TCPAddr).Port
 		l.Close()
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
-	if err != nil { return nil, nil, err }
+	if err != nil {
+		return nil, nil, err
+	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 	slog.Info("SOCKS5 listener started", "addr", ln.Addr().String(), "port", actualPort)
 
@@ -307,12 +355,12 @@ func serveSOCKS5(ctx context.Context, ln net.Listener, dialer func(target string
 			remote, err := dialer(target)
 			if err != nil {
 				slog.Error("SOCKS5 dial failed", "target", target, "err", err)
-				conn.Write(socks5Reply(1, nil)) // general failure
+				conn.Write(socks5Reply(1)) // general failure
 				return
 			}
 			defer remote.Close()
 			// Send success response AFTER dial succeeds
-			if _, err := conn.Write(socks5Reply(0, remote.LocalAddr())); err != nil {
+			if _, err := conn.Write(socks5Reply(0)); err != nil {
 				slog.Error("SOCKS5 reply write failed", "err", err)
 				return
 			}
@@ -334,90 +382,102 @@ func serveSOCKS5(ctx context.Context, ln net.Listener, dialer func(target string
 func socks5ReadRequest(conn net.Conn) (string, error) {
 	buf := make([]byte, 263)
 	// Read auth methods
-	if _, err := io.ReadFull(conn, buf[:2]); err != nil { return "", err }
-	if buf[0] != 5 { return "", fmt.Errorf("not SOCKS5") }
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return "", err
+	}
+	if buf[0] != 5 {
+		return "", fmt.Errorf("not SOCKS5")
+	}
 	nmethods := int(buf[1])
-	if _, err := io.ReadFull(conn, buf[:nmethods]); err != nil { return "", err }
+	if _, err := io.ReadFull(conn, buf[:nmethods]); err != nil {
+		return "", err
+	}
 	// Reply: no auth
-	if _, err := conn.Write([]byte{5, 0}); err != nil { return "", err }
+	if _, err := conn.Write([]byte{5, 0}); err != nil {
+		return "", err
+	}
 	// Read request
-	if _, err := io.ReadFull(conn, buf[:4]); err != nil { return "", err }
-	if buf[1] != 1 { return "", fmt.Errorf("only CONNECT supported") }
+	if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+		return "", err
+	}
+	if buf[1] != 1 {
+		return "", fmt.Errorf("only CONNECT supported")
+	}
 	var host string
 	switch buf[3] {
 	case 1: // IPv4
-		if _, err := io.ReadFull(conn, buf[:4]); err != nil { return "", err }
+		if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+			return "", err
+		}
 		host = net.IP(buf[:4]).String()
 	case 3: // Domain
-		if _, err := io.ReadFull(conn, buf[:1]); err != nil { return "", err }
+		if _, err := io.ReadFull(conn, buf[:1]); err != nil {
+			return "", err
+		}
 		l := int(buf[0])
-		if _, err := io.ReadFull(conn, buf[:l]); err != nil { return "", err }
+		if _, err := io.ReadFull(conn, buf[:l]); err != nil {
+			return "", err
+		}
 		host = string(buf[:l])
 	case 4: // IPv6
-		if _, err := io.ReadFull(conn, buf[:16]); err != nil { return "", err }
+		if _, err := io.ReadFull(conn, buf[:16]); err != nil {
+			return "", err
+		}
 		host = net.IP(buf[:16]).String()
 	default:
 		return "", fmt.Errorf("unsupported address type %d", buf[3])
 	}
-	if _, err := io.ReadFull(conn, buf[:2]); err != nil { return "", err }
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return "", err
+	}
 	port := int(buf[0])<<8 | int(buf[1])
 	return net.JoinHostPort(host, fmt.Sprintf("%d", port)), nil
 }
 
-func socks5Reply(rep byte, addr net.Addr) []byte {
+func socks5Reply(rep byte) []byte {
 	// Always return IPv4 0.0.0.0:0 for simplicity
 	return []byte{5, rep, 0, 1, 0, 0, 0, 0, 0, 0}
 }
 
-// DynamicForwardLocal starts a SOCKS5 proxy using net.Dial from termcp directly.
-func (fm *ForwardManager) DynamicForwardLocal(localPort int) (*ForwardInfo, error) {
+// dynamicLocal starts a SOCKS5 proxy using net.Dial from termcp itself.
+func (fm *ForwardManager) dynamicLocal(sessionID, sshConfig string, localPort int) (*ForwardInfo, error) {
 	if localPort == 0 {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		localPort = l.Addr().(*net.TCPAddr).Port
 		l.Close()
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 	slog.Info("SOCKS5 local listener started", "addr", ln.Addr().String())
 
 	fwID := ForwardID(DirectionDynamic)
 	ctx, cancel := context.WithCancel(context.Background())
-	fw := &forwardState{
-		ForwardInfo: ForwardInfo{
-			ForwardID: fwID, Direction: DirectionDynamic,
-			SSHConfig: "internal", ListenAddr: fmt.Sprintf("127.0.0.1:%d", actualPort),
-			TargetAddr: "SOCKS5", Status: "active", CreatedAt: time.Now(),
-		},
-		listener: ln, cancelFunc: cancel,
+	if sshConfig == "" {
+		sshConfig = "internal"
+	}
+	fw := &ForwardInfo{
+		ForwardID:  fwID,
+		SessionID:  sessionID,
+		Direction:  DirectionDynamic,
+		SSHConfig:  sshConfig,
+		ListenAddr: fmt.Sprintf("127.0.0.1:%d", actualPort),
+		TargetAddr: "SOCKS5",
+		Status:     "active",
+		CreatedAt:  time.Now(),
 	}
 	go serveSOCKS5(ctx, ln, func(target string) (net.Conn, error) {
 		conn, err := net.Dial("tcp", target)
 		slog.Info("SOCKS5 local dial", "target", target, "err", err)
 		return conn, err
 	})
-	fm.mu.Lock()
-	fm.forwards[fwID] = fw
-	fm.mu.Unlock()
-	fm.notifyChange()
-	return &fw.ForwardInfo, nil
-}
-
-// RegisterForward adds an externally-created forward to the manager (for list_forwards visibility).
-func (fm *ForwardManager) RegisterForward(fw *ForwardInfo) {
-	fm.mu.Lock()
-	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw}
-	fm.mu.Unlock()
-	fm.notifyChange()
-}
-
-// RegisterForwardFull registers a forward with its listener and cancel function for proper cleanup.
-func (fm *ForwardManager) RegisterForwardFull(fw *ForwardInfo, ln net.Listener, cancel context.CancelFunc) {
-	fm.mu.Lock()
-	fm.forwards[fw.ForwardID] = &forwardState{ForwardInfo: *fw, listener: ln, cancelFunc: cancel}
-	fm.mu.Unlock()
-	fm.notifyChange()
+	fm.put(fw, ln, cancel)
+	return fw, nil
 }
 
 // CloseBySession closes all forwards belonging to the given session ID.

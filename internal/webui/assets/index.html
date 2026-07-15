@@ -542,7 +542,7 @@
     @media (max-width: 768px) {
       .shell-window { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-width: 0; max-height: calc(100dvh - 16px); }
     }
-  
+
     .conn-tile .conn-tile-stack .sess-fwd-overlay {
       position: absolute; left: 2px; top: 2px; z-index: 3;
       width: 22px; height: 22px; padding: 0; border: none;
@@ -577,7 +577,7 @@
     #file-up:hover, #file-upload-btn:hover, #file-ls:hover { background: #eaeef2; color: #24292f; }
     #file-path:focus { background: #fff; }
 
-  
+
     /* File context menu (dark, matches shell-window) */
     .shell-file-ctx-menu { display:none; position:fixed; z-index:30001; background:#252526; border:1px solid #484f58; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.4); min-width:150px; padding:4px 0; }
     .file-ctx-item { padding:6px 14px; cursor:pointer; font-size:0.8rem; color:#ccc; white-space:nowrap; }
@@ -757,6 +757,7 @@
           <textarea id="conn-config" spellcheck="false"></textarea>
         </div>
         <div class="modal-actions">
+          <button type="button" class="btn" id="conn-duplicate" style="display:none">Duplicate</button>
           <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
           <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
@@ -982,6 +983,51 @@
 
   var _toolPanelSshCfg = '';
   var _toolPanelSessionId = '';
+  // Bind the shared forward modal to a session + ssh profile (also used by the files panel).
+  function setForwardContext(sessionId, sshConfig) {
+    _toolPanelSessionId = sessionId || '';
+    _toolPanelSshCfg = sshConfig || 'internal';
+  }
+  function openForwardModal(sessionId, sshConfig) {
+    var err = document.getElementById('modal-forward-err');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (!sessionId) {
+      if (err) { err.textContent = 'No active session — open terminal first'; err.style.display = 'block'; }
+      showModal('modal-forward');
+      return;
+    }
+    setForwardContext(sessionId, sshConfig);
+    var cfgEl = document.getElementById('fw-ssh-config-modal');
+    if (cfgEl) cfgEl.value = _toolPanelSshCfg;
+    document.getElementById('fw-remote-host').value = '';
+    document.getElementById('fw-remote-port').value = '';
+    document.getElementById('fw-local-host').value = '127.0.0.1';
+    document.getElementById('fw-local-port').value = '0';
+    document.getElementById('fw-direction').value = 'local';
+    document.getElementById('fw-direction').dispatchEvent(new Event('change'));
+    showModal('modal-forward');
+  }
+  function createForward(body) {
+    if (!_toolPanelSessionId) {
+      return Promise.reject(new Error('No active session — open terminal first'));
+    }
+    return fetch(sessionAPI(_toolPanelSessionId, '/forwards'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
+      return r.json();
+    });
+  }
+  function deleteForward(forwardId) {
+    return fetch('/api/forwards/' + encodeURIComponent(forwardId), { method: 'DELETE' })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
+        return r.json();
+      })
+      .then(function () { return loadForwards(); });
+  }
   var _toolsPanelReady = false;
   function setupToolsPanel() {
     if (_toolsPanelReady) return;
@@ -1038,8 +1084,7 @@
   }
 
   function openToolPanel(sshConfig, sessionId) {
-    _toolPanelSshCfg = sshConfig || 'internal';
-    _toolPanelSessionId = sessionId || '';
+    setForwardContext(sessionId || '', sshConfig || 'internal');
     var win = document.getElementById('panel-tools');
     if (!win) return;
     setupToolsPanel();
@@ -1219,18 +1264,7 @@
 
   var _fwAdd = document.getElementById('fw-show-add');
   if (_fwAdd) _fwAdd.addEventListener('click', function() {
-    document.getElementById('fw-ssh-config-modal').value = _toolPanelSshCfg;
-    document.getElementById('fw-remote-host').value = '';
-    document.getElementById('fw-remote-port').value = '';
-    document.getElementById('fw-local-host').value = '127.0.0.1';
-    document.getElementById('fw-local-port').value = '0';
-    document.getElementById('fw-direction').value = 'local';
-    document.getElementById('fw-dir-hint-local').style.display = '';
-    document.getElementById('fw-dir-hint-remote').style.display = 'none';
-    document.getElementById('fw-dir-hint-dynamic').style.display = 'none';
-    var tf = document.getElementById('fw-target-fields-modal') || document.getElementById('fw-target-fields');
-    if (tf) tf.style.display = '';
-    showModal('modal-forward');
+    openForwardModal(_toolPanelSessionId, _toolPanelSshCfg);
   });
   var _fwClose = document.getElementById('modal-forward-close');
   if (_fwClose) _fwClose.addEventListener('click', function() { hideModal('modal-forward'); });
@@ -1249,11 +1283,7 @@
       local_host: document.getElementById('fw-local-host').value.trim() || '127.0.0.1',
       local_port: parseInt(document.getElementById('fw-local-port').value) || 0
     };
-    fetch('/api/sessions/' + encodeURIComponent(_toolPanelSessionId) + '/forwards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) {
-        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); });
-        return r.json();
-      })
+    createForward(body)
       .then(function () { hideModal('modal-forward'); loadForwards(); })
       .catch(function (e) { err.textContent = String(e.message || e); err.style.display = 'block'; });
   };
@@ -1271,22 +1301,22 @@
     if (pl) pl.textContent = isDynamic ? 'SOCKS5 port (0 = random)' : 'Listen port (0 = random)';
   };
 
+  function forwardMatchesConfig(f, sshConfig) {
+    if (!sshConfig) return true;
+    var cfg = f.ssh_config || '';
+    return cfg === sshConfig || cfg.indexOf(sshConfig) >= 0 || sshConfig.indexOf(cfg) >= 0;
+  }
   function refreshFwList() {
-    fetch('/api/forwards').then(function(r){return r.json()}).then(function(j){
-      var fwds = (j.forwards||[]);
-      if (_toolPanelSshCfg) {
-        fwds = fwds.filter(function(f){return f.ssh_config === _toolPanelSshCfg || f.ssh_config.indexOf(_toolPanelSshCfg) >= 0 || (_toolPanelSshCfg.indexOf(f.ssh_config) >= 0)});
-      }
-      var el = document.getElementById('tools-fw-list-items');
-      if (!el) return;
-      if (!fwds.length) { el.innerHTML = 'No active forwards'; return; }
-      el.innerHTML = fwds.map(function(f){
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #eee">' +
-          '<span><b>' + escapeHtml(f.direction) + '</b> ' + escapeHtml(f.listen_addr) + ' \u2192 ' + escapeHtml(f.target_addr) + ' <span style="color:#656d76;font-size:0.7rem">' + escapeHtml(f.ssh_config) + '</span></span>' +
-          '<button class="btn fw-del-btn" style="padding:2px 8px;font-size:0.7rem" data-fwid="' + escapeHtml(f.forward_id) + '">\u2715</button>' +
-          '</div>';
-      }).join('');
-    }).catch(function(e){ var el = document.getElementById('tools-fw-list-items'); if (el) el.innerHTML = 'Error loading'; });
+    var el = document.getElementById('tools-fw-list-items');
+    if (!el) return;
+    var fwds = (window._lastForwards || []).filter(function(f) { return forwardMatchesConfig(f, _toolPanelSshCfg); });
+    if (!fwds.length) { el.innerHTML = 'No active forwards'; return; }
+    el.innerHTML = fwds.map(function(f){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #eee">' +
+        '<span><b>' + escapeHtml(f.direction) + '</b> ' + escapeHtml(f.listen_addr) + ' \u2192 ' + escapeHtml(f.target_addr) + ' <span style="color:#656d76;font-size:0.7rem">' + escapeHtml(f.ssh_config) + '</span></span>' +
+        '<button class="btn fw-del-btn" style="padding:2px 8px;font-size:0.7rem" data-fwid="' + escapeHtml(f.forward_id) + '">\u2715</button>' +
+        '</div>';
+    }).join('');
   }
 
   function renderSessionGrid(sessions, bannerMsg) {
@@ -2358,17 +2388,7 @@
     if (fwAddBtn) {
       fwAddBtn.addEventListener('click', function(e) {
         e.stopPropagation();
-        _toolPanelSshCfg = connLabel || 'internal';
-        document.getElementById('fw-ssh-config-modal').value = connLabel || 'internal';
-        document.getElementById('fw-remote-host').value = '';
-        document.getElementById('fw-remote-port').value = '';
-        document.getElementById('fw-local-host').value = '127.0.0.1';
-        document.getElementById('fw-local-port').value = '0';
-        document.getElementById('fw-direction').value = 'local';
-        var errEl = document.getElementById('modal-forward-err');
-        if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-        document.getElementById('fw-direction').dispatchEvent(new Event('change'));
-        showModal('modal-forward');
+        openForwardModal(sessionId, connLabel || 'internal');
       });
     }
     var fwRefreshBtn = win.querySelector('.shell-fw-refresh-btn');
@@ -2385,34 +2405,30 @@
       });
     }
 
-    // Refresh forwardings list for this window
+    // Refresh forwardings list for this window (from global cache)
     function refreshShellFwList(w) {
       w = w || win;
       var listEl = w.querySelector('.shell-fw-list');
       if (!listEl) return;
-      fetch('/api/forwards').then(function(r){return r.json()}).then(function(j){
-        var fwds = (j.forwards||[]).filter(function(f){ return f.ssh_config === (connLabel||'internal'); });
-        if (!fwds.length) { listEl.innerHTML = '<div style="padding:16px;color:#8b949e;text-align:center">No active forwards</div>'; return; }
-        listEl.innerHTML = fwds.map(function(f){
-          var dirLabel = f.direction;
-          var dirColor = dirLabel === 'local' ? '#3fb950' : (dirLabel === 'dynamic' ? '#58a6ff' : '#d29922');
-          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #21262d;transition:background .1s" onmouseover="this.style.background=\'#161b22\'" onmouseout="this.style.background=\'\'">' +
-            '<span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;padding:1px 5px;border-radius:3px;color:' + dirColor + ';border:1px solid ' + dirColor + ';flex-shrink:0;min-width:42px;text-align:center">' + escapeHtml(dirLabel) + '</span>' +
-            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.78rem"><span style="color:#8b949e">' + escapeHtml(f.listen_addr) + '</span> <span style="color:#484f58">→</span> <span style="color:#c9d1d9">' + escapeHtml(f.target_addr) + '</span></span>' +
-            '<button class="shell-fw-del-btn" data-fwid="' + escapeHtml(f.forward_id) + '" style="padding:2px 6px;font-size:0.68rem;border:1px solid transparent;border-radius:3px;background:transparent;color:#484f58;cursor:pointer;flex-shrink:0" onmouseover="this.style.borderColor=\'#f85149\';this.style.color=\'#f85149\'" onmouseout="this.style.borderColor=\'transparent\';this.style.color=\'#484f58\'">✕</button>' +
-            '</div>';
-        }).join('');
-        listEl.querySelectorAll('.shell-fw-del-btn').forEach(function(btn) {
-          btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            var fwid = this.getAttribute('data-fwid');
-            fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
-              .then(function() { loadForwards(); });
-          });
+      var cfg = connLabel || 'internal';
+      var fwds = (window._lastForwards || []).filter(function(f) { return forwardMatchesConfig(f, cfg); });
+      if (!fwds.length) { listEl.innerHTML = '<div style="padding:16px;color:#8b949e;text-align:center">No active forwards</div>'; return; }
+      listEl.innerHTML = fwds.map(function(f){
+        var dirLabel = f.direction;
+        var dirColor = dirLabel === 'local' ? '#3fb950' : (dirLabel === 'dynamic' ? '#58a6ff' : '#d29922');
+        return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #21262d;transition:background .1s" onmouseover="this.style.background=\'#161b22\'" onmouseout="this.style.background=\'\'">' +
+          '<span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;padding:1px 5px;border-radius:3px;color:' + dirColor + ';border:1px solid ' + dirColor + ';flex-shrink:0;min-width:42px;text-align:center">' + escapeHtml(dirLabel) + '</span>' +
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.78rem"><span style="color:#8b949e">' + escapeHtml(f.listen_addr) + '</span> <span style="color:#484f58">→</span> <span style="color:#c9d1d9">' + escapeHtml(f.target_addr) + '</span></span>' +
+          '<button class="shell-fw-del-btn" data-fwid="' + escapeHtml(f.forward_id) + '" style="padding:2px 6px;font-size:0.68rem;border:1px solid transparent;border-radius:3px;background:transparent;color:#484f58;cursor:pointer;flex-shrink:0" onmouseover="this.style.borderColor=\'#f85149\';this.style.color=\'#f85149\'" onmouseout="this.style.borderColor=\'transparent\';this.style.color=\'#484f58\'">✕</button>' +
+          '</div>';
+      }).join('');
+      listEl.querySelectorAll('.shell-fw-del-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          deleteForward(this.getAttribute('data-fwid')).catch(function(){});
         });
-        // Auto-scroll to bottom so new items are visible
-        listEl.scrollTop = listEl.scrollHeight;
-      }).catch(function(){});
+      });
+      listEl.scrollTop = listEl.scrollHeight;
     }
     win._refreshFwList = function() { refreshShellFwList(win); };
 
@@ -3187,6 +3203,7 @@ SHELL_WINDOW_PANELS_HTML +
     document.getElementById('modal-conn-err').style.display = 'none';
     document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
     document.getElementById('conn-delete').style.display = edit ? 'inline-block' : 'none';
+    document.getElementById('conn-duplicate').style.display = edit ? 'inline-block' : 'none';
     var nameEl = document.getElementById('conn-name');
     nameEl.value = edit ? name : '';
     nameEl.readOnly = false;
@@ -3360,6 +3377,19 @@ SHELL_WINDOW_PANELS_HTML +
       err.style.display = 'block';
     });
   };
+  document.getElementById('conn-duplicate').onclick = function () {
+    var nameEl = document.getElementById('conn-name');
+    // Switch into create mode while keeping the current form/TOML values.
+    editingConnName = '';
+    nameEl.value = '';
+    nameEl.readOnly = false;
+    document.getElementById('modal-conn-title').textContent = 'Add connection';
+    document.getElementById('conn-delete').style.display = 'none';
+    document.getElementById('conn-duplicate').style.display = 'none';
+    var err = document.getElementById('modal-conn-err');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    try { nameEl.focus(); } catch (e) {}
+  };
 
   function openStartModal(connName, clickEvent) {
     startConnName = connName;
@@ -3401,12 +3431,7 @@ SHELL_WINDOW_PANELS_HTML +
         e.preventDefault();
         var fwid = btn.getAttribute('data-fwid');
         if (!fwid) return;
-        fetch('/api/forwards/' + encodeURIComponent(fwid), {method: 'DELETE'})
-          .then(function(r) {
-            if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || 'HTTP ' + r.status); });
-            loadForwards();
-          })
-          .catch(function(err) { console.error('Delete forward failed:', err); });
+        deleteForward(fwid).catch(function(err) { console.error('Delete forward failed:', err); });
       });
     }
   })();
