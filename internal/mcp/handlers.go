@@ -12,11 +12,10 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/shell"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
-	"github.com/open-mcp-ai/termcp/internal/forward"
-	"github.com/open-mcp-ai/termcp/internal/sftp"
 )
 
 func getString(args map[string]any, key, def string) string {
@@ -134,7 +133,6 @@ func getStringSlice(args map[string]any, key string) []string {
 	}
 	return nil
 }
-
 
 // resolveSSHFromArgs returns the ssh_config name, loaded entry, and remote dial settings (nil Remote = built-in loopback).
 func (s *Server) resolveSSHFromArgs(args map[string]any) (string, *sshconfig.Entry, *session.RemoteSSH, error) {
@@ -314,7 +312,8 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	if timeout < 0.1 || timeout > 60 {
 		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
 	}
-	maxLines := int(getFloat64(args, "max_lines", 0)); maxBytes := int(getFloat64(args, "max_bytes", 0))
+	maxLines := int(getFloat64(args, "max_lines", 0))
+	maxBytes := int(getFloat64(args, "max_bytes", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
 	shell, bad := s.requireShell(sessionID)
@@ -326,14 +325,14 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	info := shell.Info()
-		result := map[string]any{
-			"output":                output,
-			"has_more":              shell.HasMoreOutput(readerID),
-			"lines_returned":        strings.Count(output, "\n"),
-			"bytes_returned":        len(output),
-			"session_status":        string(info.Status),
-			"session_uptime_seconds": int(time.Since(info.CreatedAt).Seconds()),
-		}
+	result := map[string]any{
+		"output":                 output,
+		"has_more":               shell.HasMoreOutput(readerID),
+		"lines_returned":         strings.Count(output, "\n"),
+		"bytes_returned":         len(output),
+		"session_status":         string(info.Status),
+		"session_uptime_seconds": int(time.Since(info.CreatedAt).Seconds()),
+	}
 	return jsonResult(result), nil
 }
 
@@ -499,17 +498,13 @@ func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolR
 	}
 
 	sess, bad := s.requireSession(sessionID)
-	if bad != nil { return bad, nil }
-	sshClient := sess.SSHClient()
-	ctx, cancel := context.WithCancel(context.Background())
-	fw, ln, err := forward.LocalForwardSSH(ctx, sshClient, remoteHost, remotePort, localPort)
+	if bad != nil {
+		return bad, nil
+	}
+	fw, err := s.forwardMgr.CreateLocal(sessionID, sess.Info().Name, remoteHost, remotePort, localPort, sess.SSHClient())
 	if err != nil {
-		cancel()
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	fw.SSHConfig = sess.Info().Name
-	fw.SessionID = sessionID
-	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{
 		"local_port": fw.ListenAddr,
 		"forward_id": fw.ForwardID,
@@ -535,17 +530,13 @@ func (s *Server) handleRemoteForward(ctx context.Context, request mcpgo.CallTool
 	}
 
 	sess, bad := s.requireSession(sessionID)
-	if bad != nil { return bad, nil }
-	sshClient := sess.SSHClient()
-	ctx, cancel := context.WithCancel(context.Background())
-	fw, ln, err := forward.RemoteForwardSSH(ctx, sshClient, localHost, localPort, remoteHost, remotePort)
+	if bad != nil {
+		return bad, nil
+	}
+	fw, err := s.forwardMgr.CreateRemote(sessionID, sess.Info().Name, localHost, localPort, remoteHost, remotePort, sess.SSHClient())
 	if err != nil {
-		cancel()
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	fw.SSHConfig = sess.Info().Name
-	fw.SessionID = sessionID
-	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
 	return jsonResult(map[string]any{
 		"remote_port": localPort,
 		"forward_id":  fw.ForwardID,
@@ -562,14 +553,14 @@ func (s *Server) handleDynamicForward(ctx context.Context, request mcpgo.CallToo
 	}
 
 	sess, bad := s.requireSession(sessionID)
-	if bad != nil { return bad, nil }
-	sshClient := sess.SSHClient()
-	ctx, cancel := context.WithCancel(context.Background())
-	fw, ln, err := forward.DynamicForwardSSH(ctx, sshClient, localPort)
-	if err != nil { cancel(); return mcpgo.NewToolResultError(err.Error()), nil }
-	fw.SSHConfig = sess.Info().Name
-	fw.SessionID = sessionID
-	s.forwardMgr.RegisterForwardFull(fw, ln, cancel)
+	if bad != nil {
+		return bad, nil
+	}
+	info := sess.Info()
+	fw, err := s.forwardMgr.CreateDynamic(sessionID, info.Name, localPort, sess.SSHClient(), info.SSHEndpoint == "internal")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	return jsonResult(map[string]any{"local_port": fw.ListenAddr, "forward_id": fw.ForwardID}), nil
 }
 
@@ -612,26 +603,26 @@ func (s *Server) handleFileRead(ctx context.Context, request mcpgo.CallToolReque
 	localPath := getString(args, "local_path", "")
 
 	if remotePath == "" {
-	return mcpgo.NewToolResultError("remote_path required"), nil
+		return mcpgo.NewToolResultError("remote_path required"), nil
 	}
 	if mode != "text" && mode != "hex" && mode != "file" {
-	return mcpgo.NewToolResultError(`mode must be "text", "hex", or "file"`), nil
+		return mcpgo.NewToolResultError(`mode must be "text", "hex", or "file"`), nil
 	}
 	if sessionID == "" {
-	return mcpgo.NewToolResultError("session_id required"), nil
+		return mcpgo.NewToolResultError("session_id required"), nil
 	}
 
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
-	return bad, nil
+		return bad, nil
 	}
 	defer sftpCli.Close()
 	result, err := sftpCli.ReadFile(remotePath, offset, length, mode, localPath)
 	if err != nil {
-	return mcpgo.NewToolResultError(err.Error()), nil
+		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	return jsonResult(toMap(result)), nil
-	}
+}
 
 func (s *Server) handleFileWrite(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
@@ -645,23 +636,23 @@ func (s *Server) handleFileWrite(ctx context.Context, request mcpgo.CallToolRequ
 	length := int64(getFloat64(args, "length", 0))
 
 	if remotePath == "" {
-	return mcpgo.NewToolResultError("remote_path required"), nil
+		return mcpgo.NewToolResultError("remote_path required"), nil
 	}
 	if localPath == "" && data == "" {
-	return mcpgo.NewToolResultError("data or local_path required"), nil
+		return mcpgo.NewToolResultError("data or local_path required"), nil
 	}
 
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
-	return bad, nil
+		return bad, nil
 	}
 	defer sftpCli.Close()
 	n, err := sftpCli.WriteFile(remotePath, offset, data, mode, localPath, localOffset, length)
 	if err != nil {
-	return mcpgo.NewToolResultError(err.Error()), nil
+		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	return jsonResult(map[string]any{"ok": true, "bytes_written": n}), nil
-	}
+}
 
 func (s *Server) handleFileStat(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
@@ -669,24 +660,24 @@ func (s *Server) handleFileStat(ctx context.Context, request mcpgo.CallToolReque
 	remotePath := getString(args, "remote_path", "")
 
 	if remotePath == "" {
-	return mcpgo.NewToolResultError("remote_path required"), nil
+		return mcpgo.NewToolResultError("remote_path required"), nil
 	}
 
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
-	return bad, nil
+		return bad, nil
 	}
 	defer sftpCli.Close()
 	result, err := sftpCli.StatFile(remotePath)
 	if err != nil {
-	return mcpgo.NewToolResultError(err.Error()), nil
+		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	m := toMap(result)
 	m["download_url"] = s.baseURL + "/api/sessions/" + sessionID + "/files/download?path=" + url.QueryEscape(remotePath)
 	m["upload_url"] = s.baseURL + "/api/sessions/" + sessionID + "/files/upload"
 	m["session_id"] = sessionID
 	return jsonResult(m), nil
-	}
+}
 
 func (s *Server) handleFileDelete(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()

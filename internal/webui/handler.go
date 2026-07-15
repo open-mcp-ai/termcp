@@ -1,25 +1,24 @@
 package webui
 
 import (
-	"context"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/crypto/ssh"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"golang.org/x/crypto/ssh"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/forward"
-	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/session"
+	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
@@ -310,32 +309,31 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-	// handleGetSession returns a single session's full info.
-	// GET /api/sessions/{id}
-	func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess := h.Sessions.Get(id)
-		if sess == nil {
-			http.NotFound(w, r)
-			return
-		}
-		writeJSON(w, http.StatusOK, sess.Info())
+// handleGetSession returns a single session's full info.
+// GET /api/sessions/{id}
+func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess := h.Sessions.Get(id)
+	if sess == nil {
+		http.NotFound(w, r)
+		return
 	}
+	writeJSON(w, http.StatusOK, sess.Info())
+}
 
-	// handleDeleteSession terminates all shells, closes SSH, and removes the session.
-	// DELETE /api/sessions/{id}
-	func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		sess := h.Sessions.Get(id)
-		if sess == nil {
-			http.NotFound(w, r)
-			return
-		}
-		h.Sessions.Terminate(id, true, 0)
-		sess.Disconnect()
-		w.WriteHeader(http.StatusNoContent)
+// handleDeleteSession terminates all shells, closes SSH, and removes the session.
+// DELETE /api/sessions/{id}
+func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess := h.Sessions.Get(id)
+	if sess == nil {
+		http.NotFound(w, r)
+		return
 	}
-
+	h.Sessions.Terminate(id, true, 0)
+	sess.Disconnect()
+	w.WriteHeader(http.StatusNoContent)
+}
 
 // handleCreateShell creates a new shell channel on an existing session.
 // POST /api/sessions/{id}/shells
@@ -385,7 +383,6 @@ func (h *Handler) redirectShells(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	http.Redirect(w, r, "/api/sessions/"+id+"/shells", http.StatusMovedPermanently)
 }
-
 
 func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -439,9 +436,6 @@ func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-
-
-
 func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess := h.Sessions.Get(id)
@@ -456,8 +450,6 @@ func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"shells": shells})
 }
-
-
 
 func (h *Handler) handleCloseShell(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -512,8 +504,6 @@ func (h *Handler) resolveSSH(name string) (cfgName string, ent *sshconfig.Entry,
 	return name, ent, r, nil
 }
 
-
-
 func (h *Handler) handleListForwards(w http.ResponseWriter, r *http.Request) {
 	if h.ForwardMgr == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"forwards": []any{}})
@@ -548,8 +538,28 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// session_id comes from the URL path.
+	var req struct {
+		SessionID  string `json:"session_id"`
+		Direction  string `json:"direction"`
+		RemoteHost string `json:"remote_host"`
+		RemotePort int    `json:"remote_port"`
+		LocalHost  string `json:"local_host"`
+		LocalPort  int    `json:"local_port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+
+	// Prefer path id (canonical POST /api/sessions/{id}/forwards); body session_id is for compat POST /api/forwards.
 	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(req.SessionID)
+	}
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "session_id required (use POST /api/sessions/{id}/forwards)"})
+		return
+	}
 	sess := h.Sessions.Get(sessionID)
 	if sess == nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
@@ -561,17 +571,6 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Direction  string `json:"direction"`
-		RemoteHost string `json:"remote_host"`
-		RemotePort int    `json:"remote_port"`
-		LocalHost  string `json:"local_host"`
-		LocalPort  int    `json:"local_port"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
-		return
-	}
 	if req.Direction == "" {
 		req.Direction = "local"
 	}
@@ -605,32 +604,18 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 
 	var fw *forward.ForwardInfo
 	var fwErr error
-
-	if req.Direction == "dynamic" {
-		if isInternal {
-			fw, fwErr = h.ForwardMgr.DynamicForwardLocal(req.LocalPort)
-		} else {
-			ctx, cancel := context.WithCancel(context.Background())
-			fw2, ln, err2 := forward.DynamicForwardSSH(ctx, sshClient, req.LocalPort)
-			fw, fwErr = fw2, err2
-			if fwErr == nil && h.ForwardMgr != nil {
-				fw2.SSHConfig = sshConfig
-				fw2.SessionID = sessionID
-				h.ForwardMgr.RegisterForwardFull(fw2, ln, cancel)
-			} else if cancel != nil {
-				cancel()
-			}
-		}
-	} else if req.Direction == "local" {
-		fw, fwErr = h.ForwardMgr.CreateLocal(sshConfig, req.RemoteHost, req.RemotePort, req.LocalPort, sshClient)
-	} else {
-		fw, fwErr = h.ForwardMgr.CreateRemote(sshConfig, req.LocalHost, req.LocalPort, req.RemoteHost, req.RemotePort, sshClient)
+	switch req.Direction {
+	case "dynamic":
+		fw, fwErr = h.ForwardMgr.CreateDynamic(sessionID, sshConfig, req.LocalPort, sshClient, isInternal)
+	case "local":
+		fw, fwErr = h.ForwardMgr.CreateLocal(sessionID, sshConfig, req.RemoteHost, req.RemotePort, req.LocalPort, sshClient)
+	case "remote":
+		fw, fwErr = h.ForwardMgr.CreateRemote(sessionID, sshConfig, req.LocalHost, req.LocalPort, req.RemoteHost, req.RemotePort, sshClient)
 	}
 	if fwErr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fwErr.Error()})
 		return
 	}
-	fw.SessionID = sessionID
 	writeJSON(w, http.StatusCreated, fw)
 }
 
@@ -639,20 +624,10 @@ func (h *Handler) handleCreateForward(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleListSessionForwards(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	if h.ForwardMgr == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"forwards": []any{}})
+		writeJSON(w, http.StatusOK, map[string]any{"forwards": []forward.ForwardInfo{}})
 		return
 	}
-	all := h.ForwardMgr.List()
-	var filtered []forward.ForwardInfo
-	for _, fw := range all {
-		if fw.SessionID == sessionID {
-			filtered = append(filtered, fw)
-		}
-	}
-	if filtered == nil {
-		filtered = []forward.ForwardInfo{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"forwards": filtered})
+	writeJSON(w, http.StatusOK, map[string]any{"forwards": h.ForwardMgr.ListBySession(sessionID)})
 }
 
 func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client) {
@@ -697,7 +672,10 @@ func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 			for _, e := range entries {
 				info, _ := e.Info()
 				ch := map[string]any{"name": e.Name(), "is_dir": e.IsDir()}
-				if info != nil { ch["size"] = info.Size(); ch["mod_time"] = info.ModTime().UTC().Format(time.RFC3339) }
+				if info != nil {
+					ch["size"] = info.Size()
+					ch["mod_time"] = info.ModTime().UTC().Format(time.RFC3339)
+				}
 				children = append(children, ch)
 			}
 			result["children"] = children
