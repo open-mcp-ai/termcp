@@ -214,8 +214,9 @@
           <tr><td>Sessions</td><td>GET / POST</td><td><code class="inline">/api/sessions</code></td></tr>
           <tr><td>Session</td><td>GET / DELETE</td><td><code class="inline">/api/sessions/{id}</code></td></tr>
           <tr><td>Shells</td><td>GET / POST</td><td><code class="inline">/api/sessions/{id}/shells</code></td></tr>
-          <tr><td>Shell</td><td>DELETE</td><td><code class="inline">/api/shells/{id}</code></td></tr>
-          <tr><td>Output history</td><td>GET</td><td><code class="inline">/api/sessions/{id}/output-range</code></td></tr>
+          <tr><td>Shell</td><td>DELETE</td><td><code class="inline">/api/shells/{id}</code> <span class="muted">(shell_id)</span></td></tr>
+          <tr><td>Output history</td><td>GET</td><td><code class="inline">/api/shells/{id}/output-range</code> <span class="muted">(shell_id)</span></td></tr>
+          <tr><td>Output history (compat)</td><td>GET</td><td><code class="inline">/api/sessions/{id}/output-range</code> <span class="muted">(shell_id or session primary)</span></td></tr>
           <tr><td>Forwards</td><td>GET</td><td><code class="inline">/api/forwards</code></td></tr>
           <tr><td>Forward</td><td>DELETE</td><td><code class="inline">/api/forwards/{id}</code></td></tr>
           <tr><td>Session forwards</td><td>GET / POST</td><td><code class="inline">/api/sessions/{id}/forwards</code></td></tr>
@@ -228,6 +229,7 @@
         </tbody>
       </table>
       <p class="muted">Request and response examples live in repo <code class="inline">docs/api.md</code>.</p>
+      <p class="muted"><code class="inline">session_id</code> is the connection container; <code class="inline">shell_id</code> is a terminal channel. Do not pass one where the other is required.</p>
     </div>
   </main>
 

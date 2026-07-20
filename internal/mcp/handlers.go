@@ -368,9 +368,6 @@ func (s *Server) handleTerminateSession(ctx context.Context, request mcpgo.CallT
 		return bad, nil
 	}
 	s.sessMgr.Terminate(sessionID, force, time.Duration(gracePeriod*float64(time.Second)))
-	if sess := s.sessMgr.Get(sessionID); sess != nil {
-		sess.Disconnect()
-	}
 	return successResult(), nil
 }
 

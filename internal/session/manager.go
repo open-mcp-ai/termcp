@@ -17,9 +17,9 @@ type Manager struct {
 	msgMgr      *message.Manager
 	store       *storage.Store
 
-	listChangeMu   sync.RWMutex
-	onListChange   func()
-	onTerminate    func(sessionID string)
+	listChangeMu sync.RWMutex
+	onListChange func()
+	onTerminate  func(sessionID string)
 }
 
 // NewManager creates a Manager. internalSSH must be the built-in sshserver.Server (after Start) when using internal profiles; may be nil if only remote sessions are used in tests.
@@ -48,11 +48,25 @@ func (m *Manager) notifyListChange() {
 	}
 }
 
-// SetTerminateListener registers a callback invoked with the session ID when a session is terminated.
+// SetTerminateListener registers a callback for session resource-tree teardown.
+// It is invoked exactly once per session ID when the session root is finally closed
+// (explicit terminate/delete/disconnect, or abnormal SSH disconnect that ends the session).
+// Use this for child resources that cannot outlive a session (forwards, etc.).
 func (m *Manager) SetTerminateListener(fn func(sessionID string)) {
 	m.listChangeMu.Lock()
 	m.onTerminate = fn
 	m.listChangeMu.Unlock()
+}
+
+// notifySessionClosed runs the terminate listener for sessionID.
+// Callers must ensure this runs at most once (Session.done is exitOnce-guarded).
+func (m *Manager) notifySessionClosed(sessionID string) {
+	m.listChangeMu.RLock()
+	fn := m.onTerminate
+	m.listChangeMu.RUnlock()
+	if fn != nil {
+		fn(sessionID)
+	}
 }
 
 // NotifyChange triggers the session list change callback (for WebSocket/SSE push).
@@ -61,9 +75,10 @@ func (m *Manager) NotifyChange() {
 }
 
 // Create starts a new session and registers it.
-// The session is auto-removed from the registry only on manual Terminate or
-// Disconnect; natural root-shell exit leaves the session in the registry
-// (matches remote behaviour), marking just the shell exited.
+// The session is auto-removed from the registry only when the session root is
+// closed (Terminate/Disconnect/abnormal SSH disconnect). Natural root-shell
+// exit alone leaves the session in the registry (connection container may still
+// host other shells/forwards), marking just the shell exited.
 func (m *Manager) Create(cfg Config) (*Session, error) {
 	s, err := New(m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
@@ -74,9 +89,14 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 
 	sid := s.ID
 	s.onExit = func() {
+		// Session is the resource-tree root: remove it and release child resources.
 		m.sessions.Delete(sid)
 		m.persist()
 		m.notifyListChange()
+		if m.msgMgr != nil {
+			m.msgMgr.ForgetSession(sid)
+		}
+		m.notifySessionClosed(sid)
 	}
 	s.onChildChange = m.notifyListChange
 
@@ -151,41 +171,26 @@ func (m *Manager) ListAll() []api.Session {
 	return result
 }
 
-// Terminate stops a session.
+// Terminate stops a session and tears down its resource tree.
+// Shells are signalled/closed first, then Disconnect closes the SSH client and
+// fires onExit (registry removal + one-shot child-resource cleanup).
 func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	v, ok := m.sessions.Load(id)
 	if !ok {
 		return
 	}
-	v.(*Session).Terminate(force, gracePeriod)
-	m.persist()
-	m.notifyListChange()
-	m.listChangeMu.RLock()
-	fn := m.onTerminate
-	m.listChangeMu.RUnlock()
-	if fn != nil {
-		fn(id)
-	}
+	s := v.(*Session)
+	s.Terminate(force, gracePeriod)
+	// Always close the session root so child resources cannot outlive it.
+	s.Disconnect()
 }
 
 // Delete forcefully removes a session. Running sessions are terminated and disconnected first.
 func (m *Manager) Delete(id string) error {
-	v, ok := m.sessions.Load(id)
-	if !ok {
+	if m.Get(id) == nil {
 		return nil
 	}
-	s := v.(*Session)
-	s.Terminate(true, 0)
-	s.Disconnect()
-	m.sessions.Delete(id)
-	m.persist()
-	m.notifyListChange()
-	m.listChangeMu.RLock()
-	fn := m.onTerminate
-	m.listChangeMu.RUnlock()
-	if fn != nil {
-		fn(id)
-	}
+	m.Terminate(id, true, 0)
 	return nil
 }
 
@@ -210,7 +215,7 @@ func (m *Manager) FindActiveBySSHConfig(sshConfig string) *Session {
 
 func (m *Manager) CleanupAll(force bool) {
 	// Snapshot all session IDs, then terminate each one via Manager.Terminate
-	// so onTerminate callbacks fire and associated resources are released.
+	// so the session resource tree (including forwards) is released once.
 	var ids []string
 	m.sessions.Range(func(k, _ any) bool {
 		ids = append(ids, k.(string))
@@ -218,10 +223,6 @@ func (m *Manager) CleanupAll(force bool) {
 	})
 	for _, id := range ids {
 		m.Terminate(id, force, 0)
-		// Disconnect SSH client to fully release remote sessions.
-		if s := m.Get(id); s != nil {
-			s.Disconnect()
-		}
 	}
 
 	// Wait for exit goroutines to update status before persisting.
