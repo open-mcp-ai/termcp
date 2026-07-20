@@ -5,31 +5,35 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-mcp-ai/termcp/pkg/api"
 	"github.com/open-mcp-ai/termcp/internal/storage"
+	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
 // Manager handles persistence of session messages.
 type Manager struct {
-	store   *storage.Store
-	mu      sync.Mutex
-	session map[string]*sync.Mutex
+	store *storage.Store
+	// session holds per-session index locks (string → *sync.Mutex).
+	session sync.Map
 }
 
 // NewManager creates a Manager backed by the given Store.
 func NewManager(store *storage.Store) *Manager {
-	return &Manager{store: store, session: make(map[string]*sync.Mutex)}
+	return &Manager{store: store}
 }
 
 func (m *Manager) sessionLock(sessionID string) *sync.Mutex {
-	m.mu.Lock()
-	mu, ok := m.session[sessionID]
-	if !ok {
-		mu = &sync.Mutex{}
-		m.session[sessionID] = mu
+	if v, ok := m.session.Load(sessionID); ok {
+		return v.(*sync.Mutex)
 	}
-	m.mu.Unlock()
-	return mu
+	mu := &sync.Mutex{}
+	actual, _ := m.session.LoadOrStore(sessionID, mu)
+	return actual.(*sync.Mutex)
+}
+
+// ForgetSession releases in-memory state associated with a closed session.
+// Disk-backed messages are intentionally kept.
+func (m *Manager) ForgetSession(sessionID string) {
+	m.session.Delete(sessionID)
 }
 
 // Append records a new message and persists it.

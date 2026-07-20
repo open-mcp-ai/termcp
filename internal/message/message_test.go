@@ -112,3 +112,30 @@ func TestManager_ListEmpty(t *testing.T) {
 		t.Fatalf("expected 0 entries, got %d", len(entries))
 	}
 }
+
+func TestManager_ForgetSession(t *testing.T) {
+	dir := t.TempDir()
+	store := storage.New(dir)
+	mgr := NewManager(store)
+
+	if _, err := mgr.Append("s1", api.MsgInput, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mgr.session.Load("s1"); !ok {
+		t.Fatal("expected session lock after Append")
+	}
+
+	mgr.ForgetSession("s1")
+	if _, ok := mgr.session.Load("s1"); ok {
+		t.Fatal("expected session lock removed after ForgetSession")
+	}
+
+	// Disk history remains available after in-memory forget.
+	entries, err := mgr.List("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 persisted entry, got %d", len(entries))
+	}
+}

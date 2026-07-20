@@ -156,6 +156,8 @@ Response 200:
 
 关闭指定 Shell channel（参数为 **shell_id**）。不中断 SSH 连接，不影响同 Session 的其他 Shell。internal 主 shell 关闭为 no-op。
 
+已不存在的 shell 也返回 204（幂等）。
+
 ```
 Response: 204 No Content
 ```
@@ -187,19 +189,26 @@ Response: 204 No Content
 
 > 终端 I/O 的 `id` 使用 Shell ID；Session ID 只用于连接级 REST 资源。
 
-### `GET /api/sessions/{id}/output-range`
+### `GET /api/shells/{id}/output-range`
 
-读取终端输出历史（不推进 reader cursor）。
+读取 shell 保留输出片段（**path id 是 shell_id**）。
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `start` | query | 起始 byte offset (0-based) |
-| `max` | query | 最大返回字节，≤512KB，默认 256KB |
-| `tail` | query | `1` = 取尾部 max 字节（忽略 start） |
+兼容：`GET /api/sessions/{id}/output-range` 仍可用。
+当 id 是 shell_id 时直接命中；当 id 是 session_id 时回退到该 session 的 primary shell。
 
 ```
+Query:
+  start=0          起始字节（默认 0；与 tail=1 互斥）
+  max=262144       最大返回字节（硬上限 512KiB）
+  tail=1           从末尾取 max 字节（忽略 start）
+
 Response 200:
-{ "start": 0, "end": 1024, "total": 4096, "d": "<base64>" }
+{
+  "start": 0,
+  "end": 1024,
+  "total": 4096,
+  "d": "<base64>"
+}
 ```
 
 ---
@@ -345,9 +354,9 @@ Response 200: { "ok": true }
 |--------|---------|
 | `POST /api/sessions/start` | `POST /api/sessions` |
 | `GET /api/sessions/{id}/child-shells` | `GET /api/sessions/{id}/shells` (301) |
-| `POST /api/sessions/{id}/terminate` | `DELETE /api/shells/{id}` |
-| `POST /api/sessions/{id}/close-shell` | `DELETE /api/shells/{id}` |
+| `POST /api/sessions/{id}/terminate` | `DELETE /api/sessions/{id}` |
 | `POST /api/sessions/{id}/disconnect` | `DELETE /api/sessions/{id}` |
+| `POST /api/sessions/{id}/close-shell` | close primary shell of session (`session_id` in path) |
 | `POST /api/forwards` | `POST /api/sessions/{id}/forwards` |
 | `DELETE /api/sessions/{id}/files/delete` | `DELETE /api/sessions/{id}/files` |
 | `POST /api/sessions/{id}/files/rename` | `PUT /api/sessions/{id}/files` |

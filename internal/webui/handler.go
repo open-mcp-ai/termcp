@@ -67,11 +67,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 	mux.HandleFunc("GET /api/ui/ws", h.handleWebUIWS)
+	// output-range path id is shell_id (or session_id for primary-shell fallback).
 	mux.HandleFunc("GET /api/sessions/{id}/output-range", h.handleSessionOutputRange)
 	mux.HandleFunc("POST /api/sessions/{id}/shells", h.handleCreateShell)
 	mux.HandleFunc("GET /api/sessions/{id}/shells", h.handleListShells)
 
-	// Shells (globally unique IDs — virtual top-level resource for deletion)
+	// Shells (globally unique IDs — virtual top-level resource)
+	mux.HandleFunc("GET /api/shells/{id}/output-range", h.handleShellOutputRange)
 	mux.HandleFunc("DELETE /api/shells/{id}", h.handleCloseShell)
 
 	// Port forwards (list all, delete by ID)
@@ -92,9 +94,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Backward compat: old routes map to canonical handlers
 	mux.HandleFunc("POST /api/sessions/start", h.handleCreateSession)
 	mux.HandleFunc("GET /api/sessions/{id}/child-shells", h.redirectShells)
-	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleCloseShell)
-	mux.HandleFunc("POST /api/sessions/{id}/close-shell", h.handleCloseShell)
+	// terminate/disconnect end the whole session (resource tree root).
+	mux.HandleFunc("POST /api/sessions/{id}/terminate", h.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/disconnect", h.handleDeleteSession)
+	// close-shell closes the primary shell of a session (path id is session_id).
+	mux.HandleFunc("POST /api/sessions/{id}/close-shell", h.handleClosePrimaryShell)
 	mux.HandleFunc("POST /api/forwards", h.handleCreateForward)
 	mux.HandleFunc("DELETE /api/sessions/{id}/files/delete", h.handleDeleteFile)
 	mux.HandleFunc("POST /api/sessions/{id}/files/rename", h.handleRenameFile)
@@ -325,13 +329,11 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/sessions/{id}
 func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess := h.Sessions.Get(id)
-	if sess == nil {
+	if h.Sessions.Get(id) == nil {
 		http.NotFound(w, r)
 		return
 	}
 	h.Sessions.Terminate(id, true, 0)
-	sess.Disconnect()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -384,13 +386,37 @@ func (h *Handler) redirectShells(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/api/sessions/"+id+"/shells", http.StatusMovedPermanently)
 }
 
+// resolveOutputShell resolves a shell for output-range endpoints.
+// Prefer shell_id; fall back to session primary shell when a session_id is passed.
+func (h *Handler) resolveOutputShell(id string) session.TerminalShell {
+	if cs := h.Sessions.GetChildShell(id); cs != nil {
+		return cs
+	}
+	if sess := h.Sessions.Get(id); sess != nil {
+		if cs := sess.PrimaryShell(); cs != nil {
+			return cs
+		}
+	}
+	return nil
+}
+
+// handleShellOutputRange is the canonical shell history endpoint: GET /api/shells/{id}/output-range.
+func (h *Handler) handleShellOutputRange(w http.ResponseWriter, r *http.Request) {
+	h.writeOutputRange(w, r, r.PathValue("id"))
+}
+
+// handleSessionOutputRange remains for compatibility. Path id may be shell_id
+// (what the Web UI currently sends) or session_id (primary-shell fallback).
 func (h *Handler) handleSessionOutputRange(w http.ResponseWriter, r *http.Request) {
+	h.writeOutputRange(w, r, r.PathValue("id"))
+}
+
+func (h *Handler) writeOutputRange(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	id := r.PathValue("id")
-	shell := h.Sessions.GetChildShell(id)
+	shell := h.resolveOutputShell(id)
 	if shell == nil {
 		http.NotFound(w, r)
 		return
@@ -451,6 +477,8 @@ func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"shells": shells})
 }
 
+// handleCloseShell closes one shell channel by shell_id (DELETE /api/shells/{id}).
+// Missing shell is treated as already closed (204) so UI fire-and-forget is quiet.
 func (h *Handler) handleCloseShell(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -463,11 +491,42 @@ func (h *Handler) handleCloseShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cs := h.Sessions.GetChildShell(id); cs != nil {
-		h.Sessions.CloseChildShell(id)
+		_, _ = h.Sessions.CloseChildShell(id)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	http.NotFound(w, r)
+	// Already exited/removed from the session map.
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleClosePrimaryShell is the legacy POST /api/sessions/{id}/close-shell path.
+// Path id is a session_id: close that session's primary shell only.
+func (h *Handler) handleClosePrimaryShell(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	sess := h.Sessions.Get(sessionID)
+	if sess == nil {
+		// Idempotent if session already gone.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	shellID := sess.PrimaryShellID()
+	if shellID == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if sess.SSHEndpoint == "internal" {
+		// Same policy as DELETE /api/shells/{primary}: internal primary outlives the tab.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if h.Sessions.GetChildShell(shellID) != nil {
+		_, _ = h.Sessions.CloseChildShell(shellID)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
