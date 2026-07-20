@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -181,6 +182,106 @@ func TestSession_ForceTerminate(t *testing.T) {
 
 	if m.Get(id) != nil {
 		t.Fatal("expected session to be removed after force terminate")
+	}
+}
+
+func TestManager_TerminateReleasesChildResourcesOnce(t *testing.T) {
+	srv := startTestServer(t)
+
+	command, args := testSleepCommand("60")
+	m := NewManager(nil, nil, srv)
+
+	var (
+		mu    sync.Mutex
+		ids   []string
+		count int
+	)
+	m.SetTerminateListener(func(sessionID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		count++
+		ids = append(ids, sessionID)
+	})
+
+	s, err := m.Create(testConfig(command, args, api.ModePipe, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := s.ID
+
+	m.Terminate(id, true, 0)
+	// Second close path must not re-fire child-resource cleanup.
+	s.Disconnect()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if count != 1 {
+		t.Fatalf("expected resource-tree cleanup once, got %d (ids=%v)", count, ids)
+	}
+	if len(ids) != 1 || ids[0] != id {
+		t.Fatalf("expected cleanup for %q, got %v", id, ids)
+	}
+	if m.Get(id) != nil {
+		t.Fatal("expected session removed after terminate")
+	}
+}
+
+func TestManager_DisconnectReleasesChildResources(t *testing.T) {
+	srv := startTestServer(t)
+
+	command, args := testSleepCommand("60")
+	m := NewManager(nil, nil, srv)
+
+	var (
+		mu    sync.Mutex
+		count int
+		gotID string
+	)
+	m.SetTerminateListener(func(sessionID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		count++
+		gotID = sessionID
+	})
+
+	s, err := m.Create(testConfig(command, args, api.ModePipe, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := s.ID
+
+	// Simulate final session teardown without Manager.Terminate (e.g. SSH abort path).
+	s.Disconnect()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if count != 1 {
+		t.Fatalf("expected resource-tree cleanup once via onExit, got %d", count)
+	}
+	if gotID != id {
+		t.Fatalf("expected cleanup for %q, got %q", id, gotID)
+	}
+	if m.Get(id) != nil {
+		t.Fatal("expected session removed after disconnect")
+	}
+}
+
+func TestSession_ResizePty(t *testing.T) {
+	srv := startTestServer(t)
+
+	s, err := New(srv, testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, ""), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Terminate(true, 0)
+
+	if err := s.ResizePty(50, 120); err != nil {
+		t.Fatalf("ResizePty failed: %v", err)
+	}
+
+	info := s.Info()
+	if info.Rows != 50 || info.Cols != 120 {
+		t.Fatalf("expected 50x120, got %dx%d", info.Rows, info.Cols)
 	}
 }
 

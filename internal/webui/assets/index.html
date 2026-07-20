@@ -884,7 +884,7 @@
     }
   }
 
-  /** /api/sessions/{id}{suffix} — e.g. /close-shell; input and resize use WebSocket */
+  /** /api/sessions/{id}{suffix} — session-scoped REST (shells/forwards/files). Terminal I/O uses WebSocket. */
   function sessionAPI(sessionId, suffix) {
     return '/api/sessions/' + encodeURIComponent(sessionId) + suffix;
   }
@@ -1358,10 +1358,7 @@
       sx.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
-        // First terminate (close channel), then disconnect (close SSH client).
-        fetch('/api/shells/' + encodeURIComponent(s.id), { method: 'DELETE' }).then(function() {
-          return fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' });
-        }).catch(function () {});
+        fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' }).catch(function () {});
         var w = getShellWindowBySid(s.id);
         if (w) closeShellWindow(w);
       };
@@ -1892,12 +1889,13 @@
   /**
    * Soft cap on how much prior output we paint into xterm (protects browser / renderer).
    * Full retained bytes may be larger on the server; a future dedicated “history viewer” UI
-   * can page through GET /api/sessions/{id}/output-range without this embedded-terminal limit.
+   * can page through GET /api/shells/{id}/output-range without this embedded-terminal limit.
    */
   var SHELL_HISTORY_DISPLAY_CAP = 32 * 1024 * 1024;
 
-  function fetchShellOutputRange(sessionId, qs) {
-    return fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/output-range?' + qs).then(function (r) {
+  function fetchShellOutputRange(shellId, qs) {
+    // Path id is shell_id (channel id used by tabs/WS watch).
+    return fetch('/api/shells/' + encodeURIComponent(shellId) + '/output-range?' + qs).then(function (r) {
       if (!r.ok) throw new Error('output-range ' + r.status);
       return r.json();
     });

@@ -477,15 +477,13 @@ func (s *Session) TerminateShellOnly() {
 	}
 }
 
-// Disconnect closes the underlying SSH client and marks the session as fully exited.
+// Disconnect closes the underlying SSH session/client and marks the session as fully exited.
 func (s *Session) Disconnect() {
 	s.exitOnce.Do(func() {
 		s.done()
 	})
 	if s.execSession != nil {
-		if cli := s.execSession.SSHClient(); cli != nil {
-			cli.Close()
-		}
+		_ = s.execSession.Close()
 	}
 }
 
