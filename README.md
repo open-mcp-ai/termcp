@@ -27,7 +27,7 @@
 
 
 <p align="center">
-  <strong>English</strong> | <a href="./readme.zh.md">中文</a>
+  <strong>English</strong> | <a href="./README.zh.md">中文</a>
 </p>
 
 
@@ -37,6 +37,10 @@
 ## Introduction
 
 `termcp` is an MCP server written in Go that exposes interactive programs to AI Agents as persistent **SSH** sessions, letting Agents continuously manage and drive them. On top of that, termcp ships a dedicated session management UI that gives you full visibility into the Agent's behavior. You can also interact directly with the controlled machine — or adjust the Agent's behavior — just as you would over a normal SSH connection.
+
+
+https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
+
 
 ## Why termcp
 
