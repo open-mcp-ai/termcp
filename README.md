@@ -1,106 +1,155 @@
-# termcp
+<div id="top">
+
+
 
 <p align="center">
-  <strong>Give AI Agents Interactive Terminal Capabilities</strong>
+    <img src="./docs/assets/logo.png"></img>
+  <h1 align="center">termcp</h1>
+  <p align="center"><em>Give AI Agents interactive terminal capabilities.</em></p>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="macOS / Linux / Windows">
-  <img src="https://img.shields.io/badge/MCP-SSE_&_Streamable_HTTP-green.svg" alt="MCP SSE & Streamable HTTP">
-  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
-</p>
+
 
 <p align="center">
-  <a href="./README.zh.md"><img src="https://img.shields.io/badge/🌏-中文-blue.svg" alt="中文"></a>
+  <a href="https://github.com/open-mcp-ai/termcp/stargazers">
+    <img src="https://img.shields.io/github/stars/open-mcp-ai/termcp?label=Stars&logo=github&style=for-the-badge" alt="Stars">
+  </a>
+  <a href="https://github.com/open-mcp-ai/termcp/forks">
+    <img src="https://img.shields.io/github/forks/open-mcp-ai/termcp?label=Forks&logo=github&style=for-the-badge" alt="Forks">
+  </a>
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-2786ff?style=for-the-badge" alt="Platform">
+  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.25+">
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT License">
+  </a>
 </p>
 
+
+
 <p align="center">
-  <a href="./README.zh.md">中文</a> | <strong>English</strong>
+  <strong>English</strong> | <a href="./readme.zh.md">中文</a>
 </p>
+
+
 
 ---
 
+## Introduction
+
+`termcp` is an MCP server written in Go that exposes interactive programs to AI Agents as persistent **SSH** sessions, letting Agents continuously manage and drive them. On top of that, termcp ships a dedicated session management UI that gives you full visibility into the Agent's behavior. You can also interact directly with the controlled machine — or adjust the Agent's behavior — just as you would over a normal SSH connection.
+
+## Why termcp
+
+### Breaking the Boundary
+
+Agents can natively only execute one-shot commands — they run and return. But a huge amount of real-world work is **multi-turn interaction**, for example:
+
+- SSH into a host: enter a password first, _then_ run commands.
+- Debug code line by line in a Python REPL.
+- Answer a `[Y/n]` prompt buried deep inside an installer.
+- Drive terminal-dependent tools like `top`, `htop`, or impacket.
+
+In these scenarios the process keeps running, and the Agent must **read and write the process's I/O across multiple conversation turns**. Plenty of specialized MCPs have sprung up to handle these — but why not just give the Agent hands so it can interact directly? `termcp` breaks that boundary for AI Agents: no more writing or installing a separate MCP for every interactive tool. The Agent can directly and continuously manage and drive interactive programs like **TUIs**, **REPLs**, **GDB**, **msfconsole**, **vim**, and more.
+
+### Visual Management
+
+`termcp` provides a session management UI that gives you and the Agent a clear view of everything happening inside the processes:
+
+- **Multi-session dashboard**: every running session lives here, distinguished by name — switch between them or take over at any time.
+- **Real-time Agent behavior observation**: just like a local terminal, watch `htop`'s live display, `vim`'s editing process, or an installer's colorful prompts right in the browser — no more guessing at a "black box".
+- **Tab-based management**: under a single SSH session you can open multiple operating shells, each rendered as an independent tab in the UI. The Agent can debug in tab A and tail logs in tab B without interference.
+- **Port forwarding at a glance**: every port-forwarding rule tied to a session is listed in the panel — local/remote ports and protocols, all visible at a glance.
+- **File management**: browse directories, upload/download, rename, and create folders directly from the management UI.
+- **Centralized connection templates**: a unified SSH config store. If you'd rather not expose the actual SSH credentials to the Agent, just tell it the name of the SSH config to use.
+
+## Quick Navigation
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Connecting MCP Clients](#connecting-mcp-clients)
+- [Examples](#examples)
+- [Tool Reference](#tool-reference)
+- [Known Limitations](#known-limitations)
+
+## Features
+
+- **🟦 Multi-turn interaction** — The process keeps running; the Agent can drive it across multiple conversation turns instead of a one-shot call-and-return.
+- **🟪 Real terminal environment** — A fully emulated real terminal, so programs that depend on terminal features like `vim`, `top`, `gdb` all run correctly, with cross-platform compatibility.
+- **🟧 Built-in visual UI** — Access live terminals, session lists, and output-history replay straight from a browser. Served from a single port, no extra deployment needed.
+- **🟨 Multiple Agents, no conflicts** — Multiple Agents can read the same session simultaneously, each maintaining its own independent cursor, with no output stealing.
+- **🟩 Remote operations, all integrated** — Command execution, file transfer, and port forwarding all over a single SSH connection, with no need to re-establish connections.
+
 ## Quick Start
 
-### Install
+### Download
+
+Head to the Releases page and download the pre-built binary for your platform:
+
+| Platform            | File                       |
+| :------------------ | :------------------------- |
+| Linux (x86_64)      | `termcp-linux-amd64`       |
+| Linux (ARM64)       | `termcp-linux-arm64`       |
+| macOS (Intel)       | `termcp-darwin-amd64`      |
+| macOS (Apple Silicon) | `termcp-darwin-arm64`    |
+| Windows (x86_64)    | `termcp-windows-amd64.exe` |
+| Windows (ARM64)     | `termcp-windows-arm64.exe` |
+
+### Build
 
 ```bash
-go install github.com/open-mcp-ai/termcp@latest
-termcp --data-dir ./data
-```
+# Clone
+git clone https://github.com/open-mcp-ai/termcp.git
+cd termcp
 
-### Build from source
-
-```bash
+# Build
 go build -o termcp .
+
+# Run (defaults: loopback, port 18765)
 ./termcp --data-dir ./data
 ```
 
-Open your browser to `http://127.0.0.1:18765` for the **Web UI**.
+Open `http://127.0.0.1:18765` in your browser to enter the **Web UI**.
 
-The Web UI features:
-- **Browser-based terminal** (xterm.js + WebSocket) — start sessions, send input, watch output live
-- **Session list** with real-time SSE updates
-- **Connection templates** for saved SSH profiles (`internal` loopback or `remote` hosts)
-- Full output scrollback replay — reconnect and re-read from the beginning
+## Usage
 
-## Command Line
+### Command Line
 
-```
+```text
 termcp [flags]
-termcp ssh-config init <name> -data-dir <dir>   # create a remote SSH config skeleton
-termcp ssh-config list -data-dir <dir>          # list all SSH config names
+termcp ssh-config init <name> -data-dir <dir>   # Create a remote SSH config template
+termcp ssh-config list -data-dir <dir>          # List existing SSH config names
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--host` | `127.0.0.1` | HTTP bind address. Use `0.0.0.0` to listen on all interfaces. |
-| `--port` | `18765` | HTTP port. Web UI, MCP SSE, and MCP streamable HTTP share this port. |
-| `--data-dir` | `./data` | Persistent storage (sessions, messages, SSH configs). Created if missing. |
-| `--log-level` | `info` | Log verbosity: `debug`, `info`, `warn`, `error`. Use `debug` to inspect MCP tool calls. |
-| `--admin-host` | `127.0.0.1` | Admin HTTP API bind address. |
-| `--admin-port` | `0` (disabled) | Admin HTTP API port. Requires `--admin-token` when non-zero. |
-| `--admin-token` | — | Bearer / `X-Admin-Token` for SSH config management via HTTP. |
+| Flag            | Default       | Description                                                              |
+| --------------- | ------------- | ------------------------------------------------------------------------ |
+| `--host`        | `127.0.0.1`   | HTTP bind address. `0.0.0.0` listens on all interfaces.                  |
+| `--port`        | `18765`       | HTTP port. Shared by the Web UI, MCP SSE, and MCP streamable HTTP.       |
+| `--data-dir`    | `./data`      | Persistence directory (sessions, messages, SSH configs). Auto-created.   |
+| `--log-level`   | `info`        | Log level: `debug` / `info` / `warn` / `error`. `debug` shows MCP tool calls. |
+| `--admin-host`  | `127.0.0.1`   | Admin HTTP API bind address.                                             |
+| `--admin-port`  | `0` (off)     | Admin HTTP API port. Requires `--admin-token` when non-zero.             |
+| `--admin-token` | —             | Bearer / `X-Admin-Token` for managing SSH configs.                       |
 
 ### Examples
 
 ```bash
-# Loopback-only, verbose logs
-./termcp --data-dir ./data --log-level debug
-
-# Listen on all interfaces (LAN/WAN — add a reverse proxy for auth)
+# Listen on all interfaces
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# Enable admin API for SSH config management
+# Enable the admin token
 ./termcp --data-dir ./data --admin-port 9090 --admin-token "my-secret"
 
-# Create a remote SSH config
+# Create an SSH config template
 ./termcp ssh-config init my-server --data-dir ./data
-# Edit ./data/ssh_configs/my-server/config.json with credentials
 
 # List available SSH configs
 ./termcp ssh-config list --data-dir ./data
 ```
 
-## MCP Configuration
+## Connecting MCP Clients
 
-termcp exposes the **same MCP tools** on one port over two transports. Pick by client capability — not different servers.
-
-| If the client supports… | Use | URL |
-|-------------------------|-----|-----|
-| **SSE** | SSE | `http://<host>:<port>/sse` |
-| **HTTP / streamable HTTP** | Streamable HTTP | `http://<host>:<port>/stream` |
-
-Browser Web UI → **API / MCP** (`/api.html`) provides live MCP config snippets and an HTTP API list for the current origin.
-
-### Claude Code
-
-**SSE** (usual choice):
-
-```bash
-claude mcp add --transport sse termcp http://localhost:18765/sse
-```
+### Claude Code (SSE)
 
 ```json
 {
@@ -113,242 +162,24 @@ claude mcp add --transport sse termcp http://localhost:18765/sse
 }
 ```
 
-Configure only `/sse`. The SSE client uses `POST /message` for JSON-RPC automatically.
-
-**Streamable HTTP** (Claude CLI transport name is `http`):
+Or via CLI:
 
 ```bash
-claude mcp add --transport http termcp http://localhost:18765/stream
+claude mcp add --transport sse termcp http://localhost:18765/sse
 ```
 
-```json
-{
-  "mcpServers": {
-    "termcp": {
-      "type": "http",
-      "url": "http://your-server:18765/stream"
-    }
-  }
-}
-```
+### Open WebUI (Streamable HTTP)
 
-One path only — do **not** append `/sse` or `/message`.
+Point Open WebUI at `http://<host>:18765/stream`.
 
-### Other clients
+- Same machine: `http://127.0.0.1:18765/stream`.
+- Open WebUI inside Docker, termcp on the host: `http://host.docker.internal:18765/stream` (macOS/Windows), or the host's LAN IP.
 
-- Open WebUI and other HTTP / Streamable HTTP clients: `http://<host>:18765/stream`
-- SSE clients: `http://<host>:18765/sse`
-- JSON config clients: use the `mcpServers` snippets on Web UI **API / MCP** (`/api.html`)
+### Other MCP Clients
 
-Both transports share tools and server `instructions`. Wrong path (`/sse` vs `/stream`) is the most common connect failure.
+- SSE transport → `http://<host>:<port>/sse`
+- Streamable HTTP → `http://<host>:<port>/stream`
+
 
 ---
 
-## Introduction
-
-`termcp` is an MCP (Model Context Protocol) server that enables AI Agents (like Claude Code) to start, control, and manage **long-running interactive processes**.
-
-### Why Do You Need It?
-
-AI Agents can natively only execute one-shot commands — they run and immediately return results. But many real-world scenarios require **multi-turn interaction**:
-
-- SSH into a remote server, enter a password first, then run commands
-- Debug code line by line in a Python REPL
-- Answer `[Y/n]` prompts in interactive installers
-- Use terminal-dependent commands like `top`, `htop`
-- Run security tools (e.g., impacket) for multi-step operations
-
-In these scenarios, the process keeps running, and the AI Agent needs to **repeatedly read and write** the process's I/O across **multiple conversation turns**. `termcp` is the bridge designed precisely for this purpose.
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Web UI** | Browser-based terminal with xterm.js + WebSocket; session list, connection templates, output replay |
-| **Multi-agent session sharing** | Multiple AI agents read from the same session simultaneously, each with an independent cursor — no output stealing |
-| **PTY and Pipe dual mode** | PTY mode emulates a real terminal; Pipe mode for simple stdin/stdout interaction |
-| **Remote deployment** | SSE over HTTP transport — Agent and Server can run on different machines |
-| **Service-side SSH profiles** | SSH connection details stored server-side as `{data-dir}/ssh_configs/<name>/config.json`; MCP tools only pass the name |
-| **Multi-session management** | Manage multiple independent processes simultaneously without interference |
-| **Shell channel multiplexing** | `start_subshell` opens extra shell channels on one SSH connection — no new TCP handshake; `close_shell` closes one channel without tearing down the session |
-| **Port forwarding** | `ssh -L` / `-R` / `-D` style local, remote, and dynamic (SOCKS5) forwards over an existing SSH session |
-| **SFTP file operations** | `file_read` / `file_write` / `file_stat` / `file_delete` / `file_rename` / `file_mkdir` plus HTTP download/upload URLs via `get_file_urls` |
-| **Message persistence** | Session records and I/O messages persisted to local JSON files |
-| **ANSI escape code stripping** | Optional automatic removal of terminal control sequences for clean text output |
-| **Blocking reads with timeout** | Agents wait for new output up to a configurable timeout; returns promptly via sync.Cond |
-| **Cross-platform shell detection** | `detect_shell` probes the termcp host for bash/zsh/fish/pwsh/cmd — useful for mixed Windows/Linux environments |
-| **Graceful termination** | SIGTERM first, then SIGKILL after a configurable grace period |
-| **PTY resize** | Dynamically adjust terminal rows and columns at runtime |
-| **Safe shell startup** | History expansion (`!`) disabled automatically; TERM propagated to child processes |
-
----
-
-## Architecture
-
-```
-┌──────┐  SSE/HTTP  ┌──────────────┐  In-memory SSH  ┌──────────┐
-│Agent │ ──────────> │ Go Server    │ ──────────────> │ PTY/     │
-│(MCP) │             │ - MCP API    │  (no TCP port)  │ Process  │
-└──────┘             │ - Web UI     │                 └──────────┘
-                     │ - SSH Server │
-                     └──────────────┘
-                            │
-                            ▼
-                     ┌──────────────┐
-                     │ JSON Storage │
-                     │ - sessions   │
-                     │ - messages   │
-                     │ - ssh_configs│
-                     └──────────────┘
-```
-
-### Project Structure
-
-```
-.
-├── main.go                      # Entry point
-├── internal/
-│   ├── config/config.go         # Configuration with validation
-│   ├── mcp/
-│   │   ├── server.go            # MCP SSE server & tool registration
-│   │   ├── handlers.go          # 31 tool handlers
-│   │   └── logging.go           # Structured slog logging per tool call
-│   ├── webui/                   # Embedded SPA + WebSocket terminal + REST API
-│   ├── sshserver/server.go      # In-memory SSH server (charmbracelet/ssh)
-│   ├── sshclient/               # SSH client (crypto/ssh) + ChildShell multiplex
-│   ├── sshconfig/               # Server-side SSH profile store
-│   ├── session/                 # Session lifecycle + thread-safe registry
-│   ├── buffer/buffer.go         # Multi-reader append-only output log
-│   ├── storage/store.go         # Atomic JSON file persistence
-│   ├── message/message.go       # Message management per session
-│   ├── forward/forward.go       # Port forward manager (-L / -R / -D)
-│   ├── sftp/sftp.go             # SFTP client wrapper for file tools
-│   ├── shell/detect.go          # Cross-platform shell detection
-│   ├── ansi/strip.go            # ANSI escape code removal
-│   ├── encoding/                # \xHH / hex data encoding helpers
-│   └── logansi/handler.go       # Color slog handler
-├── pkg/api/types.go             # Public types (Session, Message, SessionMode)
-├── go.mod
-└── go.sum
-```
-
-### Key Design Decisions
-
-1. **Multi-Reader Output Buffer**: One append-only byte log; each reader has an independent read cursor. Prefixes fully consumed by every reader are trimmed to bound memory; there is no fixed per-reader cap or ring overwrite.
-
-2. **In-Memory SSH Architecture**: The server runs a charmbracelet/ssh server fully in-process — no TCP listener. Each `start_session` dials an in-memory net.Conn pair and creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, signal forwarding, and environment variable passing. On Windows, ConPTY (via creack/pty) is used for native pseudo-terminal support. `start_subshell` reuses the same SSH client for additional shell channels with no new handshake.
-
-3. **Single HTTP Mux**: Web UI, MCP SSE (`/sse`), MCP streamable HTTP (`/stream`), and WebSocket terminal (`/api/ui/ws`) share one listener on the configured port. Optional admin HTTP on a separate port.
-
-4. **Atomic JSON Persistence**: Session metadata and I/O messages stored via temp-file + fsync + rename:
-   - `data/sessions.json` — Session list
-   - `data/messages/{session_id}/index.json` — Message index
-   - `data/messages/{session_id}/messages/{msg_id}.json` — Message content
-
-5. **Session Lifecycle Safety**: Exit goroutine is the single authority for `Status`/`ExitCode` (via `sync.Once`). Terminate is idempotent. Stdin writes are serialized via a dedicated mutex.
-
-6. **Safe Shell Environment**: Interactive shells start with history expansion disabled (zsh: `NO_BANG_HIST`, bash: `+o histexpand`) to prevent `!` characters in passwords and URLs from causing errors. PTY-requested `TERM` is propagated to child processes.
-
----
-
-## Examples
-
-### Example 1: SSH Remote Operations
-
-```
-AI Agent Flow                                   Process Output
-─────────────────                              ────────────────
-
-start_session(ssh_config="my-server")
-  → session_id, shell_id
-                                    ←    (read_output for prompts)
-
-send_input(shell_id, text="df -h")
-press_key(shell_id, key="enter")
-read_output(shell_id, timeout=3)
-                                    ←    "Filesystem ... Use% Mounted on ..."
-
-terminate_session(session_id)
-```
-
-### Example 2: Python REPL Debugging
-
-```
-start_session(command="python3", mode="pty")
-  → session_id, shell_id
-
-send_input(shell_id, text="data = [1, 2, 3, 4, 5]")
-press_key(shell_id, key="enter")
-read_output(shell_id)
-
-send_input(shell_id, text="sum(data)")
-press_key(shell_id, key="enter")
-read_output(shell_id)
-                                    ←    "15"
-```
-
-### Example 3: Multi-Agent Collaboration
-
-```
-# Agent A starts a monitoring process
-start_session(command="top", mode="pty")
-  → session_id, shell_id
-
-# Agent B joins the same shell without stealing output
-register_reader(shell_id=...)
-  → reader_id: 2
-
-# Agent A reads its own cursor
-read_output(shell_id=..., reader_id=1)
-  → "PID USER  PR  NI  VIRT  RES  SHR S %CPU %MEM   TIME+ COMMAND..."
-
-# Agent B reads independently
-read_output(shell_id=..., reader_id=2)
-  → "top - 14:32:10 up 3 days,  2:15,  1 user,  load average: 0.52, 0.58, 0.59..."
-
-# Agent B is done
-unregister_reader(shell_id=..., reader_id=2)
-
-# Agent A terminates the session
-terminate_session(session_id=...)
-```
-
-### Example 4: Multi-session Parallel Management
-
-```
-start_session(command="ping", args=["-c", "5", "google.com"], name="ping-test")
-  → session_id, shell_id
-
-start_session(command="python3", args=["-m", "http.server", "8080"], name="web-server")
-  → session_id, shell_id
-
-list_sessions()
-  → [{id: "...", status: "running"}, ...]
-
-read_output(shell_id=..., timeout=1)  # poll shells, timeout ≤ 3
-
-terminate_session(session_id=...)
-```
-
----
-
-## Tool Reference
-
-Full tool reference: [`docs/mcp-tools.md`](docs/mcp-tools.md).
-
-| Category | Tools |
-|----------|-------|
-| Session lifecycle | `start_session`, `list_sessions`, `get_session_info`, `terminate_session` |
-| Shell I/O | `send_input`, `press_key`, `read_output`, `resize_pty` |
-| Shell multiplexing | `start_subshell`, `list_subshells`, `close_shell` |
-| Multi-agent reading | `register_reader`, `unregister_reader` |
-| Port forwarding | `local_forward` (-L), `remote_forward` (-R), `dynamic_forward` (-D), `list_forwards`, `close_forward` |
-| File operations (SFTP) | `file_read`, `file_write`, `file_stat`, `file_delete`, `file_rename`, `file_mkdir`, `get_file_urls`, … |
-| Server discovery | `detect_shell`, `list_ssh_configs` |
-| Message persistence | `list_messages`, `get_message` |
-
----
-
-## License
-
-MIT
