@@ -1,30 +1,107 @@
-# termcp
+<div id="top">
+
+
 
 <p align="center">
-  <strong>让 AI Agent 拥有交互式终端能力</strong>
+    <img src="./docs/assets/logo.png"></img>
+  <h1 align="center">termcp</h1>
+  <p align="center"><em>让 AI Agent 拥有交互式终端能力。</em></p>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="macOS / Linux / Windows">
-  <img src="https://img.shields.io/badge/MCP-SSE_&_Streamable_HTTP-green.svg" alt="MCP SSE & Streamable HTTP">
-  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
-</p>
+
 
 <p align="center">
-  <a href="https://linux.do/"><img src="https://img.shields.io/badge/🐧-linux.do-ff69b4.svg" alt="linux.do"></a>
-  <a href="./README.md"><img src="https://img.shields.io/badge/🌏-English-blue.svg" alt="English"></a>
+  <a href="https://github.com/open-mcp-ai/termcp/stargazers">
+    <img src="https://img.shields.io/github/stars/open-mcp-ai/termcp?label=Stars&logo=github&style=for-the-badge" alt="Stars">
+  </a>
+  <a href="https://github.com/open-mcp-ai/termcp/forks">
+    <img src="https://img.shields.io/github/forks/open-mcp-ai/termcp?label=Forks&logo=github&style=for-the-badge" alt="Forks">
+  </a>
+  <img src="https://img.shields.io/badge/平台-macOS%20%7C%20Linux%20%7C%20Windows-2786ff?style=for-the-badge" alt="平台">
+  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.25+">
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT License">
+  </a>
 </p>
+
+
 
 <p align="center">
   <strong>中文</strong> | <a href="./README.md">English</a>
 </p>
 
+
+
 ---
+
+## 简介
+
+`termcp `是一个go语言编写的包含MCP服务器，以**SSH**会话的形式，让AI Agent能够持续地管理、调度交互式程序。此外，termcp还有专门用于管理这些会话的界面，使得用户能够完整地观测AI Agent的行为。同时用户能够像使用SSH一样，直接与受控机器进行交互或调整AI Agent行为。
+
+## 为什么选 termcp
+
+### 打破边界
+
+Agent 原生只能执行一次性命令，运行完就返回。但现实中有大量工作是**多轮交互**的，例如：
+
+- SSH 登录一台主机，先输密码，_再_执行命令。
+- 在 Python REPL 里逐行调试代码。
+- 回答安装程序里深埋的 `[Y/n]` 提示。
+- 驱动 `top`、`htop`、或 impacket 这类终端依赖型工具。
+
+这些场景里进程持续运行，Agent 必须在**多个对话轮次间读写进程的 I/O**。由此诞生了许多专门的MCP，但是为什么不直接赋予Agent双手，让他能够直接交互呢？`termcp`让 AI Agent打破了进程交互的边界，不再需要为每个交互工具安装编写单独的mcp，使其能够直接地持续管理、调度交互式程序，如**TUI**、**REPL**、**GDB**、**msfconsole**、**vim**等。
+
+### 可视化管理
+
+`termcp` 提供了一个会话管理界面，让你和 Agent 对进程里正在发生的一切一目了然:
+
+- **多会话仪表盘**:所有正在运行的会话都在这里，以名称区分，随时切换，随时接管。
+- **实时 AI Agent 行为观测**:像操作本地终端一样，直接在浏览器里看到 `htop` 的动态界面、`vim` 的编辑过程，或者安装程序弹出的彩色提示，不再对着"黑盒"猜测。
+- **标签化管理**:一个 SSH 会话下可开多个操作shell，每个 shell 在 UI 里是独立标签页，Agent 在 A 标签调试、在 B 标签查日志，互不干扰。
+- **端口转发可视化**：会话相关的所有端口转发等功能参数都列在面板里，本地/远程端口、协议一目了然。
+- **文件管理**：在管理界面里直接浏览目录、上传下载、重命名、建目录。
+- **连接模板集中托管**：提供统一的SSH配置管理，如果不想让Agent知道ssh具体配置，只需要告知Agent需要使用的ssh配置文件。
+
+## 快速导航
+
+- [功能特性](#功能特性)
+- [快速开始](#快速开始)
+- [使用](#使用)
+- [接入 MCP 客户端](#接入-mcp-客户端)
+- [示例](#示例)
+- [工具参考](#工具参考)
+- [已知限制](#已知限制)
+
+## 功能特性
+
+- **🟦 支持多轮交互** —— 进程持续运行，Agent 可跨多个对话轮次驱动，而非一次性调用即返回。
+- **🟪 真实终端环境** —— 完整模拟真实终端，`vim`、`top`、`gdb` 等依赖终端特性的程序均可正常运行，跨平台兼容。
+- **🟧 内建可视化界面** —— 浏览器即可访问实时终端、会话列表、历史输出回放，单端口提供服务，无需额外部署。
+- **🟨 多 Agent 并行不冲突** —— 多个 Agent 可同时读取同一会话，各自维护独立游标，输出互不抢占。
+- **🟩 远程操作一体集成** —— 单条 SSH 连接内完成命令执行、文件传输与端口转发，无需重复建立连接。
 
 ## 快速开始
 
+### 下载
+
+前往 Releases 页面,下载对应平台的预编译二进制:
+
+| 平台                  | 文件                       |
+| :-------------------- | :------------------------- |
+| Linux (x86_64)        | `termcp-linux-amd64`       |
+| Linux (ARM64)         | `termcp-linux-arm64`       |
+| macOS (Intel)         | `termcp-darwin-amd64`      |
+| macOS (Apple Silicon) | `termcp-darwin-arm64`      |
+| Windows (x86_64)      | `termcp-windows-amd64.exe` |
+| Windows (ARM64)       | `termcp-windows-arm64.exe` |
+
+### 编译
+
 ```bash
+# 克隆
+git clone https://github.com/open-mcp-ai/termcp.git
+cd termcp
+
 # 编译
 go build -o termcp .
 
@@ -34,322 +111,75 @@ go build -o termcp .
 
 浏览器打开 `http://127.0.0.1:18765` 即可进入 **Web 界面**。
 
-Web 界面功能：
-- **浏览器终端**（xterm.js + WebSocket）—— 启动会话、发送输入、实时查看输出
-- **会话列表**，支持 SSE 实时更新
-- **连接模板**，支持已保存的 SSH profile（`internal` loopback 或 `remote` 远端主机）
-- 完整历史回放 —— 重连后可从开头重读输出
+## 使用
 
-## 命令行
+### 命令行
 
-```
+```text
 termcp [flags]
-termcp ssh-config init <名称> -data-dir <目录>   # 创建远端 SSH 配置模板
-termcp ssh-config list -data-dir <目录>          # 列出所有 SSH 配置名称
+termcp ssh-config init <name> -data-dir <dir>   # 创建远端 SSH 配置模板
+termcp ssh-config list -data-dir <dir>          # 列出已存的 SSH 配置名
 ```
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--host` | `127.0.0.1` | HTTP 监听地址。`0.0.0.0` 监听所有网卡。 |
-| `--port` | `18765` | HTTP 端口。Web UI、MCP SSE、MCP streamable HTTP 共享此端口。 |
-| `--data-dir` | `./data` | 持久化目录（会话、消息、SSH 配置）。不存在时自动创建。 |
-| `--log-level` | `info` | 日志级别：`debug`、`info`、`warn`、`error`。用 `debug` 查看 MCP 工具调用详情。 |
-| `--admin-host` | `127.0.0.1` | Admin HTTP API 监听地址。 |
-| `--admin-port` | `0`（禁用）| Admin HTTP API 端口。非零时需配合 `--admin-token`。 |
-| `--admin-token` | — | Bearer / `X-Admin-Token`，用于通过 HTTP 管理 SSH 配置。 |
+| Flag            | 默认值      | 说明                                                         |
+| --------------- | ----------- | ------------------------------------------------------------ |
+| `--host`        | `127.0.0.1` | HTTP 绑定地址。`0.0.0.0` 监听所有网卡。                      |
+| `--port`        | `18765`     | HTTP 端口。Web UI、MCP SSE、MCP streamable HTTP 共用。       |
+| `--data-dir`    | `./data`    | 持久化目录（会话、消息、SSH 配置）。不存在则自动创建。       |
+| `--log-level`   | `info`      | 日志级别：`debug` / `info` / `warn` / `error`。`debug` 显示 MCP 工具调用。 |
+| `--admin-host`  | `127.0.0.1` | 管理 HTTP API 绑定地址。                                     |
+| `--admin-port`  | `0`（关闭） | 管理 HTTP API 端口。非零时必须配 `--admin-token`。           |
+| `--admin-token` | —           | 管理 SSH 配置的 Bearer / `X-Admin-Token`。                   |
 
-### 使用示例
+### 示例
 
 ```bash
-# 仅 loopback，详细日志
-./termcp --data-dir ./data --log-level debug
-
-# 监听所有网卡（LAN/WAN — 生产环境请加反向代理做认证）
+# 监听所有网卡
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# 启用 Admin API 管理 SSH 配置
+# 启用管理员Token
 ./termcp --data-dir ./data --admin-port 9090 --admin-token "my-secret"
 
-# 创建远端 SSH 配置
+# 创建 SSH 配置模板
 ./termcp ssh-config init my-server --data-dir ./data
-# 编辑 ./data/ssh_configs/my-server/config.json 填入凭据
 
-# 列出现有 SSH 配置
+# 列出可用 SSH 配置
 ./termcp ssh-config list --data-dir ./data
 ```
 
-## MCP 配置
+## 接入 MCP 客户端
 
-termcp 在同一端口暴露 **同一套 MCP 工具** 的两种传输。按客户端能力选择，不是两套服务。
-
-| 客户端支持… | 使用 | URL |
-|-------------|------|-----|
-| **SSE** | SSE | `http://<host>:<port>/sse` |
-| **HTTP / streamable HTTP** | Streamable HTTP | `http://<host>:<port>/stream` |
-
-浏览器 Web UI → **API / MCP**（`/api.html`）可按当前 origin 复制 MCP 配置，并查看 HTTP API 列表。
-
-### Claude Code
-
-**SSE**（常用）：
-
-```bash
-claude mcp add --transport sse termcp http://localhost:18765/sse
-```
+### Claude Code（SSE）
 
 ```json
 {
   "mcpServers": {
     "termcp": {
-      "type": "sse",
+      "type": "sse"，
       "url": "http://your-server:18765/sse"
     }
   }
 }
 ```
 
-只配置 `/sse` 即可；SSE 客户端会自动用 `POST /message` 发 JSON-RPC。
-
-**Streamable HTTP**（Claude CLI 的 transport 名是 `http`）：
+或用 CLI：
 
 ```bash
-claude mcp add --transport http termcp http://localhost:18765/stream
+claude mcp add --transport sse termcp http://localhost:18765/sse
 ```
 
-```json
-{
-  "mcpServers": {
-    "termcp": {
-      "type": "http",
-      "url": "http://your-server:18765/stream"
-    }
-  }
-}
-```
+### Open WebUI（Streamable HTTP）
 
-单路径，**不要**再拼 `/sse` 或 `/message`。
+将 Open WebUI 指向 `http://<host>:18765/stream`。
 
-### 其他客户端
+- 同机：`http://127.0.0.1:18765/stream`。
+- Open WebUI 在 Docker 内、termcp 在宿主机：`http://host.docker.internal:18765/stream`（macOS/Windows），或宿主机局域网 IP。
 
-- Open WebUI 和其他 HTTP / Streamable HTTP 客户端：`http://<host>:18765/stream`
-- SSE 客户端：`http://<host>:18765/sse`
-- JSON 配置客户端：使用 Web UI **API / MCP**（`/api.html`）里的 `mcpServers` 片段
+### 其他 MCP 客户端
 
-两套传输共用工具与 `instructions`。连不上时优先检查路径是否选错（`/sse` vs `/stream`）。
+- SSE 传输 → `http://<host>:<port>/sse`
+- Streamable HTTP → `http://<host>:<port>/stream`
+
 
 ---
 
-## 项目介绍
-
-`termcp` 是一个基于 MCP (Model Context Protocol) 协议的服务端，让 AI Agent（如 Claude Code）能够启动、操控和管理**长时间运行的交互式进程**。
-
-### 为什么需要它？
-
-AI Agent 原生只能执行一次性命令——执行完毕后立刻返回结果。但现实中大量场景需要**多轮交互**：
-
-- SSH 到远程服务器，先输密码，再执行命令
-- Python REPL 中逐行调试代码
-- 交互式安装程序中回答 `[Y/n]` 提示
-- 使用 `top`、`htop` 等需要终端的命令
-- 运行安全工具（如 impacket）进行多步骤操作
-
-这些场景下，进程持续运行，AI Agent 需要在**多个对话轮次中反复读写**进程的输入输出。`termcp` 正是为此而设计的桥梁。
-
-### 核心特性
-
-| 特性 | 说明 |
-|------|------|
-| **Web 界面** | 浏览器终端（xterm.js + WebSocket）；会话列表、连接模板、输出回放 |
-| **多 Agent 会话共享** | 多个 AI Agent 可同时从同一会话独立读取，各持游标互不干扰 |
-| **PTY 和 Pipe 双模式** | PTY 模式模拟真实终端；Pipe 模式适用于简单 stdin/stdout 交互 |
-| **远程部署** | SSE over HTTP 传输 — Agent 和 Server 可运行在不同机器上 |
-| **服务端 SSH profile** | SSH 连接信息存为 `{data-dir}/ssh_configs/<名称>/config.json`；MCP 工具只传名称 |
-| **多会话管理** | 同时管理多个独立进程，互不干扰 |
-| **Shell 通道复用** | `start_subshell` 在同一 SSH 连接上开新通道——无新 TCP 握手；`close_shell` 只关一个通道，不拆会话 |
-| **端口转发** | 基于 SSH 通道的 `ssh -L` / `-R` / `-D` 本地、远端、动态（SOCKS5）转发 |
-| **SFTP 文件操作** | `file_read` / `file_write` / `file_stat` / `file_delete` / `file_rename` / `file_mkdir`，外加 `get_file_urls` 提供 HTTP 上传下载 URL |
-| **消息持久化** | 会话记录和 I/O 消息持久化到本地 JSON 文件 |
-| **ANSI 转义码清除** | 可选自动去除终端控制序列，AI Agent 获得纯净文本 |
-| **带超时的阻塞读取** | Agent 可配置超时等待新输出，sync.Cond 保证及时返回 |
-| **跨平台 Shell 检测** | `detect_shell` 探测 termcp 宿主机上的 bash/zsh/fish/pwsh/cmd，混合 Windows/Linux 环境适用 |
-| **优雅终止** | 先 SIGTERM，等待可配置宽限期后再 SIGKILL |
-| **PTY 尺寸调整** | 运行时动态调整终端行列数 |
-| **安全的 Shell 启动** | 自动禁用历史展开（`!`）；TERM 正确传播给子进程 |
-
----
-
-## 架构设计
-
-```
-┌──────┐  SSE/HTTP  ┌──────────────┐  内存 SSH   ┌──────────┐
-│Agent │ ──────────> │ Go Server    │ ──────────> │ PTY/     │
-│(MCP) │             │ - MCP API    │ (无 TCP 端口)│ Process  │
-└──────┘             │ - Web UI     │              └──────────┘
-                     │ - SSH Server │
-                     └──────────────┘
-                            │
-                            ▼
-                     ┌──────────────┐
-                     │ JSON Storage │
-                     │ - sessions   │
-                     │ - messages   │
-                     │ - ssh_configs│
-                     └──────────────┘
-```
-
-### 项目结构
-
-```
-.
-├── main.go                      # 入口
-├── internal/
-│   ├── config/config.go         # 配置与校验
-│   ├── mcp/
-│   │   ├── server.go            # MCP SSE server & Tool 注册
-│   │   ├── handlers.go          # 31 个 Tool 处理器
-│   │   └── logging.go           # 结构化 slog 日志（逐工具调用记录）
-│   ├── webui/                   # 嵌入 SPA + WebSocket 终端 + REST API
-│   ├── sshserver/server.go      # 内存 SSH server (charmbracelet/ssh)
-│   ├── sshclient/               # SSH client (crypto/ssh) + ChildShell 通道复用
-│   ├── sshconfig/               # 服务端 SSH profile 存储
-│   ├── session/                 # Session 生命周期 + 线程安全注册表
-│   ├── buffer/buffer.go         # 多读者追加式输出日志
-│   ├── storage/store.go         # 原子 JSON 文件持久化
-│   ├── message/message.go       # 消息管理（每会话互斥锁）
-│   ├── forward/forward.go       # 端口转发管理器 (-L / -R / -D)
-│   ├── sftp/sftp.go             # SFTP 客户端封装（文件工具）
-│   ├── shell/detect.go          # 跨平台 Shell 检测
-│   ├── ansi/strip.go            # ANSI 转义码清除
-│   ├── encoding/                # \xHH / hex 数据编解码
-│   └── logansi/handler.go       # 彩色 slog handler
-├── pkg/api/types.go             # 公共类型 (Session, Message, SessionMode)
-├── go.mod
-└── go.sum
-```
-
-### 关键设计决策
-
-1. **多读者输出缓冲**：一份追加式字节日志，每个 reader 持有独立读游标。所有 reader 都已越过的前缀可裁剪以控制内存；无固定容量上限或环形覆盖。
-
-2. **内存 SSH 架构**：Server 在进程内运行 charmbracelet/ssh server——**不监听 TCP 端口**。每次 `start_session` 拨号一对内存 net.Conn，通过 crypto/ssh client 创建 SSH session，利用 SSH 协议成熟的 PTY 分配、窗口调整、信号转发和环境变量传递机制。Windows 下使用 ConPTY（经 creack/pty）提供原生伪终端支持。`start_subshell` 复用同一 SSH client 开新 shell 通道，无需重新握手。
-
-3. **单 HTTP ServeMux**：Web UI、MCP SSE（`/sse`）、MCP streamable HTTP（`/stream`）、WebSocket 终端（`/api/ui/ws`）共享一个端口。可选 Admin HTTP 使用独立端口。
-
-4. **原子 JSON 持久化**：会话元数据和 I/O 消息通过临时文件 + fsync + rename 存储：
-   - `data/sessions.json` — 会话列表
-   - `data/messages/{session_id}/index.json` — 消息索引
-   - `data/messages/{session_id}/messages/{msg_id}.json` — 消息内容
-
-5. **会话生命周期安全**：退出 goroutine 是 `Status`/`ExitCode` 的唯一权威（通过 `sync.Once`）。终止操作是幂等的。标准输入写入通过专用互斥锁串行化。
-
-6. **安全的 Shell 环境**：交互式 shell 启动时自动禁用历史展开（zsh: `NO_BANG_HIST`，bash: `+o histexpand`），防止密码、URL 中的 `!` 字符导致命令失败。PTY 请求的 `TERM` 值正确传播给子进程。
-
----
-
-## 效果示例
-
-### 示例 1：SSH 远程操作
-
-```
-AI Agent 操作流程                              进程输出
-─────────────────                              ────────────────
-
-start_session(ssh_config="my-server")
-  → session_id, shell_id
-                                    ←    (用 read_output 读提示)
-
-send_input(shell_id, text="df -h")
-press_key(shell_id, key="enter")
-read_output(shell_id, timeout=3)
-                                    ←    "Filesystem ... Use% Mounted on ..."
-
-terminate_session(session_id)
-```
-
-### 示例 2：Python REPL 调试
-
-```
-start_session(command="python3", mode="pty")
-  → session_id, shell_id
-
-send_input(shell_id, text="data = [1, 2, 3, 4, 5]")
-press_key(shell_id, key="enter")
-read_output(shell_id)
-
-send_input(shell_id, text="sum(data)")
-press_key(shell_id, key="enter")
-read_output(shell_id)
-                                    ←    "15"
-```
-
-### 示例 3：多 Agent 协作
-
-```
-# Agent A 启动监控进程
-start_session(command="top", mode="pty")
-  → session_id, shell_id
-
-# Agent B 加入同一 shell，不窃取输出
-register_reader(shell_id=...)
-  → reader_id: 2
-
-# Agent A 读取自己的游标位置
-read_output(shell_id=..., reader_id=1)
-  → "PID USER  PR  NI  VIRT  RES  SHR S %CPU %MEM   TIME+ COMMAND..."
-
-# Agent B 从头独立读取
-read_output(shell_id=..., reader_id=2)
-  → "top - 14:32:10 up 3 days,  2:15,  1 user,  load average: 0.52, 0.58, 0.59..."
-
-# Agent B 完成
-unregister_reader(shell_id=..., reader_id=2)
-
-# Agent A 终止会话
-terminate_session(session_id=...)
-```
-
-### 示例 4：多会话并行管理
-
-```
-start_session(command="ping", args=["-c", "5", "google.com"], name="ping-test")
-  → session_id, shell_id
-
-start_session(command="python3", args=["-m", "http.server", "8080"], name="web-server")
-  → session_id, shell_id
-
-list_sessions()
-  → [{id: "...", status: "running"}, ...]
-
-read_output(shell_id=..., timeout=1)  # 轮询各 shell，timeout ≤ 3
-
-terminate_session(session_id=...)
-```
-
----
-
-## 工具参考
-
-完整工具参考见 [`docs/mcp-tools.md`](docs/mcp-tools.md)。
-
-| 分组 | 工具 |
-|------|------|
-| 会话生命周期 | `start_session`、`list_sessions`、`get_session_info`、`terminate_session` |
-| Shell I/O | `send_input`、`press_key`、`read_output`、`resize_pty` |
-| Shell 通道复用 | `start_subshell`、`list_subshells`、`close_shell` |
-| 多 Agent 共读 | `register_reader`、`unregister_reader` |
-| 端口转发 | `local_forward`（-L）、`remote_forward`（-R）、`dynamic_forward`（-D）、`list_forwards`、`close_forward` |
-| 文件操作（SFTP） | `file_read`、`file_write`、`file_stat`、`file_delete`、`file_rename`、`file_mkdir`、`get_file_urls` 等 |
-| 服务端发现 | `detect_shell`、`list_ssh_configs` |
-| 消息持久化 | `list_messages`、`get_message` |
-
----
-
-## 社区 / 友联
-
-- [linux.do](https://linux.do/) — 中文技术社区
-
----
-
-## License
-
-MIT
