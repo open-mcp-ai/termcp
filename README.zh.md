@@ -38,6 +38,8 @@
 
 `termcp `是一个go语言编写的包含MCP服务器，以**SSH**会话的形式，让AI Agent能够持续地管理、调度交互式程序。此外，termcp还有专门用于管理这些会话的界面，使得用户能够完整地观测AI Agent的行为。同时用户能够像使用SSH一样，直接与受控机器进行交互或调整AI Agent行为。
 
+https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
+
 ## 为什么选 termcp
 
 ### 打破边界
