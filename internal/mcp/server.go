@@ -68,7 +68,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpserver.WithInstructions(mcpServerInstructions),
 	)
 	mcpServer.AddTool(mcpgo.NewTool("start_session",
-		mcpgo.WithDescription("Start a session (connection container) with one primary shell channel. Profiles live under data-dir/ssh_configs/<name>/config.json. Use ssh_config \"internal\" (or omit) for loopback on the termcp host; other names are remote SSH. Returns session_id (connection) and shell_id (terminal I/O). Leave command/args empty for login shell / profile defaults."),
+		mcpgo.WithDescription("Start a session (connection container) with one primary shell channel. Profiles live under data-dir/ssh_configs/<name>/config.toml. Use ssh_config \"internal\" (or omit) for loopback on the termcp host; other names are remote SSH. Returns session_id (connection) and shell_id (terminal I/O). Leave command/args empty for login shell / profile defaults."),
 		mcpgo.WithString("command", mcpgo.Description("Executable or shell builtin line; leave empty with no args for login shell / profile default_shell")),
 		mcpgo.WithArray("args", mcpgo.Description("Argv after command; only valid when command is non-empty"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("pty: pseudo-terminal (interactive TUI); pipe: no TTY, line-oriented"), mcpgo.DefaultString("pty")),

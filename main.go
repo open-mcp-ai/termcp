@@ -268,7 +268,7 @@ func runSSHConfigInit(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	p := filepath.Join(dataDir, "ssh_configs", name, "config.json")
+	p := filepath.Join(sshconfig.NewStore(dataDir).ConfigDir(name), "config.toml")
 	fmt.Println("created", p)
 }
 
