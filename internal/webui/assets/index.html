@@ -785,6 +785,22 @@
     </div>
   </div>
 
+  <div id="modal-confirm" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-h">
+        <h2 id="modal-confirm-title">Confirm</h2>
+        <button type="button" id="modal-confirm-close" style="width:28px;height:28px;padding:0;border:none;background:transparent;color:#57606a;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:4px" title="Close"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-confirm-msg" style="margin:0 0 4px;color:#1f2328;font-size:0.9rem;word-break:break-word"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="modal-confirm-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="modal-confirm-ok">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="static/xterm/xterm.js"></script>
   <script>
 (function () {
@@ -2879,6 +2895,44 @@ SHELL_WINDOW_PANELS_HTML +
   function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
   function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+  // Style-consistent replacement for the native confirm() dialog.
+  // opts: { title, message, okText, danger }
+  function confirmDialog(opts) {
+    opts = opts || {};
+    var title = document.getElementById('modal-confirm-title');
+    var msg = document.getElementById('modal-confirm-msg');
+    var okBtn = document.getElementById('modal-confirm-ok');
+    var cancelBtn = document.getElementById('modal-confirm-cancel');
+    var closeBtn = document.getElementById('modal-confirm-close');
+    title.textContent = opts.title || 'Confirm';
+    msg.textContent = opts.message || '';
+    okBtn.textContent = opts.okText || 'OK';
+    okBtn.className = opts.danger ? 'btn btn-danger' : 'btn btn-primary';
+    // Replace handlers without accumulating listeners: clone node each call.
+    var freshOk = okBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(freshOk, okBtn);
+    var freshCancel = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(freshCancel, cancelBtn);
+    var freshClose = closeBtn.cloneNode(true);
+    closeBtn.parentNode.replaceChild(freshClose, closeBtn);
+    return new Promise(function (resolve) {
+      function done(v) {
+        hideModal('modal-confirm');
+        freshOk.removeEventListener('click', onOk);
+        freshCancel.removeEventListener('click', onCancel);
+        freshClose.removeEventListener('click', onCancel);
+        resolve(v);
+      }
+      function onOk() { done(true); }
+      function onCancel() { done(false); }
+      freshOk.addEventListener('click', onOk);
+      freshCancel.addEventListener('click', onCancel);
+      freshClose.addEventListener('click', onCancel);
+      showModal('modal-confirm');
+      try { freshOk.focus(); } catch (e) {}
+    });
+  }
+
   function renderConnGrid(connections, bannerMsg) {
     var grid = document.getElementById('conn-grid');
     if (!grid) return;
@@ -3362,7 +3416,17 @@ SHELL_WINDOW_PANELS_HTML +
   document.getElementById('conn-delete').onclick = function () {
     var name = document.getElementById('conn-name').value.trim();
     if (!name) return;
-    if (!confirm('Delete connection ' + name + '?')) return;
+    confirmDialog({
+      title: 'Delete connection',
+      message: 'Delete connection "' + name + '"? This cannot be undone.',
+      okText: 'Delete',
+      danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      doDeleteConnection(name);
+    });
+  };
+  function doDeleteConnection(name) {
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
