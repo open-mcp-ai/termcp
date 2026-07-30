@@ -23,9 +23,6 @@
     .btn-danger { background: #cf222e; border-color: #cf222e; color: #fff; }
     .btn-danger:hover { background: #a40e26; border-color: #a40e26; }
     .dock { padding: 16px; min-height: calc(100% - 52px); }
-    .entries-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; width: 100%; }
-    .entries-toolbar .dock-title { margin: 0; }
-    .entries-toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
     .icon-btn {
       width: 36px; height: 36px; padding: 0; border-radius: 8px; border: 1px solid #d0d7de;
       background: #fff; color: #24292f; cursor: pointer;
@@ -36,7 +33,20 @@
     .icon-btn-primary { background: #2da44e; border-color: #2da44e; color: #fff; }
     .icon-btn-primary:hover { background: #2c974b; border-color: #2c974b; color: #fff; }
     .icon-btn svg { width: 18px; height: 18px; display: block; }
-    .dock-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #656d76; margin-bottom: 10px; }
+    .section-header {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #656d76;
+      min-height: 36px; margin-bottom: 10px; cursor: pointer; user-select: none;
+      padding: 4px 6px; border-radius: 4px;
+      transition: background .12s;
+    }
+    .section-header:hover { background: #eaeef2; }
+    .section-header[aria-expanded="false"] .sec-chevron { transform: rotate(-90deg); opacity: .5; }
+    .section-header .sec-chevron {
+      width: 12px; height: 12px; display: inline-block; flex-shrink: 0;
+      transition: transform 0.2s ease, opacity .12s;
+    }
+    .section-body.collapsed { display: none; }
     .conn-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
     .conn-tile { position: relative; text-align: center; user-select: none; }
     /* Entry card: horizontal layout; address only in icon title */
@@ -609,24 +619,30 @@
     </nav>
   </header>
   <div class="dock">
-    <div class="entries-toolbar">
-      <div class="dock-title">Entries</div>
-      <div class="entries-toolbar-actions">
-        <button type="button" class="icon-btn icon-btn-primary" id="btn-add-conn" title="Add connection" aria-label="Add connection">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-        <button type="button" class="icon-btn" id="btn-refresh-conn" title="Refresh list" aria-label="Refresh list">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M1 20v-6h6"/><path d="M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/></svg>
-        </button>
-      </div>
+    <div class="section-header" id="sec-entries" aria-expanded="true" role="button" tabindex="0">
+      <svg class="sec-chevron" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>
+      <span>Entries</span>
+      <span style="flex:1"></span>
+      <button type="button" class="icon-btn icon-btn-primary" style="width:28px;height:28px" id="btn-add-conn" title="Add connection" aria-label="Add connection" onclick="event.stopPropagation()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button type="button" class="icon-btn" style="width:28px;height:28px" id="btn-refresh-conn" title="Refresh list" aria-label="Refresh list" onclick="event.stopPropagation()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M1 20v-6h6"/><path d="M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/></svg>
+      </button>
     </div>
-    <div id="conn-load-banner" class="conn-load-banner" role="status"></div>
-    <div id="conn-grid" class="conn-grid"></div>
-    <div class="dock-title" style="margin-top:22px">Sessions</div>
-    <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
-    <div id="session-grid" class="conn-grid"></div>
-
-  </div>
+    <div class="section-body" id="sec-entries-body">
+      <div id="conn-load-banner" class="conn-load-banner" role="status"></div>
+      <div id="conn-grid" class="conn-grid"></div>
+    </div>
+    <div class="section-header" id="sec-sessions" aria-expanded="true" role="button" tabindex="0">
+      <svg class="sec-chevron" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>
+      <span>Sessions</span>
+      <span style="flex:1"></span>
+    </div>
+    <div class="section-body" id="sec-sessions-body">
+      <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
+      <div id="session-grid" class="conn-grid"></div>
+    </div>
 
 
   <div id="panel-tools" class="shell-window tools-panel" style="display:none;width:520px;height:70vh;min-width:340px;min-height:280px">
@@ -1605,7 +1621,7 @@
     ws.onmessage = function (ev) {
       try {
         var j = JSON.parse(ev.data);
-        if (j.type === 'sessions') applySessionsSnapshot(j.sessions || []);
+        if (j.type === 'sessions') { applySessionsSnapshot(j.sessions || []); if (j.connections) renderConnGrid(j.connections, ''); }
         else if (j.type === 'terminal') {
           var win = getShellWindowBySid(j.id);
           if (!win) win = findShellWindowByChannelSid(j.id);
@@ -3501,6 +3517,33 @@ SHELL_WINDOW_PANELS_HTML +
   loadForwards();
   loadConnections();
   startUIWebSocket();
+
+  // Section collapse/expand with localStorage persistence
+  ['entries', 'sessions'].forEach(function (key) {
+    var header = document.getElementById('sec-' + key);
+    var body = document.getElementById('sec-' + key + '-body');
+    if (!header || !body) return;
+    var stored = localStorage.getItem('termcp.section.' + key);
+    if (stored === 'collapsed') {
+      header.setAttribute('aria-expanded', 'false');
+      body.classList.add('collapsed');
+    }
+    header.addEventListener('click', function (e) {
+      if (e.target.closest('.icon-btn')) return;
+      var collapsed = header.getAttribute('aria-expanded') === 'false';
+      header.setAttribute('aria-expanded', String(collapsed));  // toggle: now expanded
+      if (collapsed) {
+        body.classList.remove('collapsed');
+        localStorage.setItem('termcp.section.' + key, 'expanded');
+      } else {
+        body.classList.add('collapsed');
+        localStorage.setItem('termcp.section.' + key, 'collapsed');
+      }
+    });
+    header.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
+    });
+  });
 })();
   </script>
 </body>

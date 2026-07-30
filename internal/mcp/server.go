@@ -38,6 +38,8 @@ const mcpServerInstructions = `termcp agent rules (follow in order until the use
 9) Crash-loop detection: if read_output returns a large traceback repeating the same error pattern (e.g. Python _pyrepl / fancy_termios with termios.error or recursion), the process is in an unrecoverable loop. Immediately terminate_session, then retry with PYTHON_BASIC_REPL=1 in the process environment. If a command succeeds but then hangs (output goes silent while session stays running), check get_session_info for status and decide whether to wait or terminate.
 
 10) Forwards (OpenSSH names): local_forward = ssh -L (listen local, target remote); remote_forward = ssh -R (listen remote, target local/termcp); dynamic_forward = ssh -D (SOCKS5). All take session_id.
+
+11) SSH configs: list_ssh_configs returns only profile names (no host/user/secrets). When enabled, create_ssh_config / edit_ssh_config / copy_ssh_config / delete_ssh_config manage profiles. NEVER echo, quote, log, or restate password, private_key, key_passphrase, or proxy credentials from tool arguments or results — write secrets into tools only, do not surface them in chat. There is no read/get tool for full config bodies by design; do not invent one or try to dump secrets via shell/file tools.
 `
 
 // Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
@@ -333,6 +335,77 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	// Do not use WithStreamableHTTPServer(mainSrv) here — Shutdown must not close the shared listener.
 	s.streamServer = mcpserver.NewStreamableHTTPServer(mcpServer)
 	return s
+}
+
+// RegisterSSHConfigWriteTools adds create_ssh_config, edit_ssh_config, copy_ssh_config,
+// and delete_ssh_config tools. Call only when -mcp-manage-ssh-configs is set.
+func (s *Server) RegisterSSHConfigWriteTools() {
+	s.mcpServer.AddTool(mcpgo.NewTool("create_ssh_config",
+		mcpgo.WithDescription("Create a new remote SSH profile under data-dir/ssh_configs/<name>/config.toml. Fails if name already exists. Requires host, user, and password or private_key. Never echo password/private_key/key_passphrase/proxy credentials back in chat."),
+		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Profile name (letters, digits, _, -; max 64). Passed later as ssh_config to start_session.")),
+		mcpgo.WithString("host", mcpgo.Required(), mcpgo.Description("SSH hostname or IP")),
+		mcpgo.WithString("user", mcpgo.Required(), mcpgo.Description("SSH username")),
+		mcpgo.WithNumber("port", mcpgo.Description("SSH port"), mcpgo.DefaultNumber(22)),
+		mcpgo.WithString("password", mcpgo.Description("Password auth (omit if using private_key)")),
+		mcpgo.WithString("private_key", mcpgo.Description("PEM private key content (omit if using password)")),
+		mcpgo.WithString("key_passphrase", mcpgo.Description("Passphrase for encrypted private_key")),
+		mcpgo.WithBoolean("trust_unknown_host", mcpgo.Description("Accept unknown host keys"), mcpgo.DefaultBool(false)),
+		mcpgo.WithString("known_hosts", mcpgo.Description("known_hosts content or path")),
+		mcpgo.WithNumber("dial_timeout_seconds", mcpgo.Description("Dial timeout"), mcpgo.DefaultNumber(30)),
+		mcpgo.WithString("proxy", mcpgo.Description("SOCKS5 proxy URL, e.g. socks5://user:pass@host:port")),
+		mcpgo.WithString("description", mcpgo.Description("Human-readable description")),
+		mcpgo.WithString("default_shell", mcpgo.Description("Default command when start_session leaves command empty")),
+		mcpgo.WithString("default_mode", mcpgo.Description("Default mode: pty or pipe")),
+		mcpgo.WithString("jump_host", mcpgo.Description("Optional bastion host (ProxyJump)")),
+		mcpgo.WithString("jump_user", mcpgo.Description("Bastion username")),
+		mcpgo.WithNumber("jump_port", mcpgo.Description("Bastion port"), mcpgo.DefaultNumber(22)),
+		mcpgo.WithString("jump_password", mcpgo.Description("Bastion password")),
+		mcpgo.WithString("jump_private_key", mcpgo.Description("Bastion PEM private key")),
+		mcpgo.WithString("jump_key_passphrase", mcpgo.Description("Bastion key passphrase")),
+		mcpgo.WithBoolean("jump_trust_unknown_host", mcpgo.Description("Bastion trust unknown host"), mcpgo.DefaultBool(false)),
+		mcpgo.WithString("jump_known_hosts", mcpgo.Description("Bastion known_hosts")),
+		mcpgo.WithNumber("jump_dial_timeout_seconds", mcpgo.Description("Bastion dial timeout"), mcpgo.DefaultNumber(30)),
+		mcpgo.WithString("jump_proxy", mcpgo.Description("Bastion SOCKS5 proxy URL")),
+	), withLogging("create_ssh_config", s.handleCreateSSHConfig))
+
+	s.mcpServer.AddTool(mcpgo.NewTool("edit_ssh_config",
+		mcpgo.WithDescription("Patch an existing remote SSH profile. Only provided (non-empty) fields are updated; omitted fields keep their stored values including secrets. Never returns config body or credentials. Never expose secrets in chat."),
+		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Existing profile name to edit")),
+		mcpgo.WithString("host", mcpgo.Description("SSH hostname or IP")),
+		mcpgo.WithString("user", mcpgo.Description("SSH username")),
+		mcpgo.WithNumber("port", mcpgo.Description("SSH port")),
+		mcpgo.WithString("password", mcpgo.Description("Replace password (omit to keep existing)")),
+		mcpgo.WithString("private_key", mcpgo.Description("Replace PEM private key (omit to keep existing)")),
+		mcpgo.WithString("key_passphrase", mcpgo.Description("Replace key passphrase")),
+		mcpgo.WithBoolean("trust_unknown_host", mcpgo.Description("Accept unknown host keys")),
+		mcpgo.WithString("known_hosts", mcpgo.Description("known_hosts content or path")),
+		mcpgo.WithNumber("dial_timeout_seconds", mcpgo.Description("Dial timeout")),
+		mcpgo.WithString("proxy", mcpgo.Description("SOCKS5 proxy URL")),
+		mcpgo.WithString("description", mcpgo.Description("Human-readable description")),
+		mcpgo.WithString("default_shell", mcpgo.Description("Default command for empty start_session command")),
+		mcpgo.WithString("default_mode", mcpgo.Description("Default mode: pty or pipe")),
+		mcpgo.WithString("jump_host", mcpgo.Description("Set/replace bastion host (creates jump section if missing)")),
+		mcpgo.WithString("jump_user", mcpgo.Description("Bastion username")),
+		mcpgo.WithNumber("jump_port", mcpgo.Description("Bastion port")),
+		mcpgo.WithString("jump_password", mcpgo.Description("Bastion password")),
+		mcpgo.WithString("jump_private_key", mcpgo.Description("Bastion PEM private key")),
+		mcpgo.WithString("jump_key_passphrase", mcpgo.Description("Bastion key passphrase")),
+		mcpgo.WithBoolean("jump_trust_unknown_host", mcpgo.Description("Bastion trust unknown host")),
+		mcpgo.WithString("jump_known_hosts", mcpgo.Description("Bastion known_hosts")),
+		mcpgo.WithNumber("jump_dial_timeout_seconds", mcpgo.Description("Bastion dial timeout")),
+		mcpgo.WithString("jump_proxy", mcpgo.Description("Bastion SOCKS5 proxy URL")),
+	), withLogging("edit_ssh_config", s.handleEditSSHConfig))
+
+	s.mcpServer.AddTool(mcpgo.NewTool("copy_ssh_config",
+		mcpgo.WithDescription("Duplicate an existing SSH profile (including secrets) to a new name on the server — a server-side copy, secrets never reach the agent. Use then edit_ssh_config to change host/user without re-providing keys. Fails when target_name already exists."),
+		mcpgo.WithString("source_name", mcpgo.Required(), mcpgo.Description("Existing profile to copy from")),
+		mcpgo.WithString("target_name", mcpgo.Required(), mcpgo.Description("New profile name (must not already exist)")),
+	), withLogging("copy_ssh_config", s.handleCopySSHConfig))
+
+	s.mcpServer.AddTool(mcpgo.NewTool("delete_ssh_config",
+		mcpgo.WithDescription("Delete a remote SSH profile by name. The built-in \"internal\" profile cannot be deleted."),
+		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Profile name to delete")),
+	), withLogging("delete_ssh_config", s.handleDeleteSSHConfig))
 }
 
 // SSEHandler exposes the MCP SSE endpoint for mounting on a shared mux.

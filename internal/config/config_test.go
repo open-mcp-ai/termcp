@@ -58,13 +58,3 @@ func TestValidate_AcceptsAllValidLevels(t *testing.T) {
 	}
 }
 
-func TestValidate_AdminPortRequiresToken(t *testing.T) {
-	cfg := &Config{Host: "127.0.0.1", Port: 8080, DataDir: "/tmp/data", AdminPort: 9090, AdminToken: "   "}
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error when admin_port set with empty admin_token")
-	}
-	cfg2 := &Config{Host: "127.0.0.1", Port: 8080, DataDir: "/tmp/data", AdminPort: 9090, AdminToken: "secret"}
-	if err := cfg2.Validate(); err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-}

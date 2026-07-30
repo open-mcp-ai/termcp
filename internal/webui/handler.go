@@ -54,6 +54,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	if h.ForwardMgr != nil {
 		h.ForwardMgr.SetOnChange(h.sessionHub().broadcast)
 	}
+	if h.SSH != nil {
+		h.SSH.SetOnChange(h.sessionHub().broadcast)
+	}
 	// Connection profiles
 	mux.HandleFunc("GET /api/connection-templates", h.handleConnectionTemplates)
 	mux.HandleFunc("GET /api/connections", h.handleListConnections)

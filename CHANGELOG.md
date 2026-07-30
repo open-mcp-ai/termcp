@@ -4,6 +4,17 @@
 
 ### Breaking
 
+- **删除 admin HTTP API**：移除 `--admin-host` / `--admin-port` / `--admin-token` 开关与独立 admin 端口。SSH 配置管理改为 MCP 工具（用 `--mcp-manage-ssh-configs` 启用）。
+- **新增 `--mcp-manage-ssh-configs` 开关**（默认关闭）：开启后 MCP 客户端可调用 `create_ssh_config` / `edit_ssh_config` / `copy_ssh_config` / `delete_ssh_config` 管理 SSH profile。凭据写入后不可读取，日志不记录敏感字段。
+
+### Added
+
+- `create_ssh_config`：结构化参数创建 remote SSH profile（host/user/password/private_key/jump）。
+- `edit_ssh_config`：增量修补已有 profile，省略字段保持原值（含凭据）。
+- `copy_ssh_config`：服务端复制 profile（含凭据），凭据不会经过 AI。
+- `delete_ssh_config`：按名称删除 profile。
+- WebUI Entries/Sessions 面板可折叠，状态持久化到 localStorage。
+
 - **Session / Shell 双 ID**：`start_session` 返回互不相同的 `session_id`（连接容器）与 `shell_id`（终端通道）。首个 shell 不再与 session 共用 id。
 - **I/O 只认 `shell_id`**：`send_input` / `press_key` / `read_output` / `resize_pty` / `register_reader` / `unregister_reader` / `close_shell` 参数改为 `shell_id`。连接级操作（forwards、files、terminate、delete、start_subshell）仍用 `session_id`。
 - **删除工具**：`send_and_read`、`background_send`、`delete_session`（硬切换，无别名）。

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,15 +14,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"golang.org/x/term"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/open-mcp-ai/termcp/internal/forward"
-
 	"github.com/open-mcp-ai/termcp/internal/config"
+	"github.com/open-mcp-ai/termcp/internal/forward"
 	"github.com/open-mcp-ai/termcp/internal/logansi"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
@@ -122,10 +119,8 @@ func main() {
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
-	flag.StringVar(&cfg.AdminHost, "admin-host", cfg.AdminHost, "SSH config admin API bind host")
-	flag.IntVar(&cfg.AdminPort, "admin-port", cfg.AdminPort, "SSH config admin HTTP port (0 = disabled; requires admin-token)")
-	flag.StringVar(&cfg.AdminToken, "admin-token", cfg.AdminToken, "Bearer / X-Admin-Token for PUT/GET/DELETE /api/ssh-configs")
 	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
+		flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
 	flag.Parse()
 
 	if err := cfg.Validate(); err != nil {
@@ -168,26 +163,13 @@ func main() {
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
 	mcpSrv.NoInternal = cfg.NoInternal
+	if cfg.MCPManageSSHConfigs {
+		mcpSrv.RegisterSSHConfigWriteTools()
+	}
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
 	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
-
-	var adminSrv *http.Server
-	if cfg.AdminPort > 0 {
-		admin := &sshconfig.AdminHandler{Store: sshStore, Token: cfg.AdminToken}
-		adminMux := http.NewServeMux()
-		adminMux.Handle("/api/ssh-configs", admin)
-		adminMux.Handle("/api/ssh-configs/", admin)
-		adminAddr := fmt.Sprintf("%s:%d", cfg.AdminHost, cfg.AdminPort)
-		adminSrv = &http.Server{Addr: adminAddr, Handler: adminMux}
-		go func() {
-			slog.Info("http admin", "listen", adminAddr, "paths", "/api/ssh-configs")
-			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("admin API server stopped", "err", err)
-			}
-		}()
-	}
 
 	host := strings.TrimSpace(cfg.Host)
 	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)
@@ -209,11 +191,6 @@ func main() {
 		sessMgr.CleanupAll(true)
 		if sshSrv != nil {
 			sshSrv.Stop()
-		}
-		if adminSrv != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = adminSrv.Shutdown(ctx)
-			cancel()
 		}
 		mcpSrv.Stop()
 	}()

@@ -131,9 +131,8 @@ termcp ssh-config list -data-dir <dir>          # List existing SSH config names
 | `--port`        | `18765`       | HTTP port. Shared by the Web UI, MCP SSE, and MCP streamable HTTP.       |
 | `--data-dir`    | `./data`      | Persistence directory (sessions, messages, SSH configs). Auto-created.   |
 | `--log-level`   | `info`        | Log level: `debug` / `info` / `warn` / `error`. `debug` shows MCP tool calls. |
-| `--admin-host`  | `127.0.0.1`   | Admin HTTP API bind address.                                             |
-| `--admin-port`  | `0` (off)     | Admin HTTP API port. Requires `--admin-token` when non-zero.             |
-| `--admin-token` | —             | Bearer / `X-Admin-Token` for managing SSH configs.                       |
+| `--no-internal` | `false`       | Disable the built-in loopback SSH profile.                                   |
+| `--mcp-manage-ssh-configs` | `false` | Enable MCP tools to create/edit/delete SSH configs (secrets are never exposed). |
 
 ### Examples
 
@@ -141,14 +140,14 @@ termcp ssh-config list -data-dir <dir>          # List existing SSH config names
 # Listen on all interfaces
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# Enable the admin token
-./termcp --data-dir ./data --admin-port 9090 --admin-token "my-secret"
-
 # Create an SSH config template
 ./termcp ssh-config init my-server --data-dir ./data
 
 # List available SSH configs
 ./termcp ssh-config list --data-dir ./data
+
+# Allow AI agents to manage SSH configs
+./termcp --data-dir ./data --mcp-manage-ssh-configs
 ```
 
 ## Connecting MCP Clients
