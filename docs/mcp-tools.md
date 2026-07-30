@@ -198,9 +198,56 @@ list_ssh_configs
 
 ### list_ssh_configs
 
-返回可用的 profile 名称列表（不含密码/host/完整 JSON）。无参数。
+返回可用的 profile 名称列表（不含密码/host/完整 JSON）。始终可用，无参数。
 
-**返回**：`{ configs: ["internal", "my-server", ...] }`
+**返回**：`{ ssh_configs: ["internal", "my-server", ...] }`
+
+### create_ssh_config
+
+创建新的 remote SSH profile。需启用 `--mcp-manage-ssh-configs`。Fails if name already exists。
+
+| 参数 | 类型 | 必须 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `name` | string | 是 | — | Profile 名称（字母/数字/`_`/`-`，最长 64） |
+| `host` | string | 是 | — | SSH 主机名或 IP |
+| `user` | string | 是 | — | SSH 用户名 |
+| `port` | number | 否 | `22` | SSH 端口 |
+| `password` | string | 否 | — | 密码认证（与 private_key 二选一） |
+| `private_key` | string | 否 | — | PEM 私钥内容 |
+| `key_passphrase` | string | 否 | — | 加密私钥的 passphrase |
+| `trust_unknown_host` | bool | 否 | `false` | 接受未知 host key |
+| `known_hosts` | string | 否 | — | known_hosts 内容或路径 |
+| `dial_timeout_seconds` | number | 否 | `30` | Dial 超时 |
+| `proxy` | string | 否 | — | SOCKS5 代理 URL |
+| `description` | string | 否 | — | 人类可读的描述 |
+| `default_shell` | string | 否 | — | 默认 shell 命令 |
+| `default_mode` | string | 否 | — | 默认模式：`pty` 或 `pipe` |
+| `jump_host` 等 | — | 否 | — | 可选的单层 bastion（ProxyJump）参数，前缀 `jump_` |
+
+**注意**：password/private_key/key_passphrase/proxy 凭据**写入后不可读取**；不要在聊天中回显。
+
+### edit_ssh_config
+
+增量修补已有 profile。仅将提供的非空字段写入；省略的字段（含密码/密钥）保持原值。需启用 `--mcp-manage-ssh-configs`。
+
+参数同 `create_ssh_config`，但 `host`/`user` 非必填（仅更新传入的字段）。
+
+### copy_ssh_config
+
+服务端整体复制已有 profile（含凭据），凭据不经过 AI。需启用 `--mcp-manage-ssh-configs`。
+
+| 参数 | 类型 | 必须 | 说明 |
+|------|------|------|------|
+| `source_name` | string | 是 | 要复制的现有 profile |
+| `target_name` | string | 是 | 新 profile 名称（必须不存在） |
+
+### delete_ssh_config
+
+按名称删除 remote profile。`internal` 不可删除。需启用 `--mcp-manage-ssh-configs`。
+
+| 参数 | 类型 | 必须 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 要删除的 profile 名称 |
 
 ---
 

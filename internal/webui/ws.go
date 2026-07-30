@@ -106,7 +106,25 @@ func (c *uiWS) sessionLoop() {
 
 func (c *uiWS) enqueueSessions() {
 	list := c.h.Sessions.ListAll()
-	b, err := json.Marshal(map[string]any{"type": "sessions", "sessions": list})
+	payload := map[string]any{"type": "sessions", "sessions": list}
+	if c.h.SSH != nil {
+		names, err := c.h.SSH.List()
+		if err == nil {
+			var conns []connectionSummary
+			for _, n := range names {
+				ent, err := c.h.SSH.Load(n)
+				if err != nil {
+					continue
+				}
+				if c.h.NoInternal && ent.Kind == "internal" {
+					continue
+				}
+				conns = append(conns, summarizeConnection(n, ent))
+			}
+			payload["connections"] = conns
+		}
+	}
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}

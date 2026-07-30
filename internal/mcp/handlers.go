@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/open-mcp-ai/termcp/internal/session"
@@ -444,6 +445,237 @@ func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallT
 		return bad, nil
 	}
 	shell.UnregisterReader(readerID)
+	return successResult(), nil
+}
+
+func (s *Server) handleCreateSSHConfig(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.sshConfigs == nil {
+		return mcpgo.NewToolResultError("ssh config store not configured"), nil
+	}
+	args := request.GetArguments()
+	name := strings.TrimSpace(getString(args, "name", ""))
+	if name == "" {
+		return mcpgo.NewToolResultError("name is required"), nil
+	}
+	host := strings.TrimSpace(getString(args, "host", ""))
+	user := strings.TrimSpace(getString(args, "user", ""))
+	password := strings.TrimSpace(getString(args, "password", ""))
+	privateKey := strings.TrimSpace(getString(args, "private_key", ""))
+	keyPassphrase := strings.TrimSpace(getString(args, "key_passphrase", ""))
+	port := int(getFloat64(args, "port", 22))
+	trustUnknown := getBool(args, "trust_unknown_host", false)
+	knownHosts := strings.TrimSpace(getString(args, "known_hosts", ""))
+	dialTimeout := int(getFloat64(args, "dial_timeout_seconds", 30))
+	proxy := strings.TrimSpace(getString(args, "proxy", ""))
+	description := strings.TrimSpace(getString(args, "description", ""))
+	defaultShell := strings.TrimSpace(getString(args, "default_shell", ""))
+	defaultMode := strings.TrimSpace(getString(args, "default_mode", ""))
+
+	entry := &sshconfig.Entry{
+		Kind:         sshconfig.KindRemote,
+		Description:  description,
+		DefaultShell: defaultShell,
+		DefaultMode:  defaultMode,
+		DialSpec: sshconfig.DialSpec{
+			Host:               host,
+			Port:               port,
+			User:               user,
+			Password:           password,
+			PrivateKey:         privateKey,
+			KeyPassphrase:      keyPassphrase,
+			TrustUnknownHost:   &trustUnknown,
+			KnownHosts:         knownHosts,
+			DialTimeoutSeconds: dialTimeout,
+			Proxy:              proxy,
+		},
+	}
+
+	// Optional single-level jump
+	if jh := strings.TrimSpace(getString(args, "jump_host", "")); jh != "" {
+		ju := strings.TrimSpace(getString(args, "jump_user", ""))
+		jp := strings.TrimSpace(getString(args, "jump_password", ""))
+		jpk := strings.TrimSpace(getString(args, "jump_private_key", ""))
+		jkp := strings.TrimSpace(getString(args, "jump_key_passphrase", ""))
+		jt := getBool(args, "jump_trust_unknown_host", false)
+		jkh := strings.TrimSpace(getString(args, "jump_known_hosts", ""))
+		jdt := int(getFloat64(args, "jump_dial_timeout_seconds", 30))
+		jpx := strings.TrimSpace(getString(args, "jump_proxy", ""))
+		jport := int(getFloat64(args, "jump_port", 22))
+		entry.Jump = &sshconfig.JumpSpec{
+			DialSpec: sshconfig.DialSpec{
+				Host:               jh,
+				Port:               jport,
+				User:               ju,
+				Password:           jp,
+				PrivateKey:         jpk,
+				KeyPassphrase:      jkp,
+				TrustUnknownHost:   &jt,
+				KnownHosts:         jkh,
+				DialTimeoutSeconds: jdt,
+				Proxy:              jpx,
+			},
+		}
+	}
+
+	// Refuse to overwrite an existing profile — use edit_ssh_config or copy_ssh_config.
+	if names, err := s.sshConfigs.List(); err == nil {
+		for _, n := range names {
+			if strings.EqualFold(n, name) {
+				return mcpgo.NewToolResultError(fmt.Sprintf("ssh config %q already exists (use edit_ssh_config or copy_ssh_config)", name)), nil
+			}
+		}
+	}
+
+	body, err := toml.Marshal(entry)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if _, err := sshconfig.ParseAndValidate(body); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.sshConfigs.Save(name, body); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handleDeleteSSHConfig(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.sshConfigs == nil {
+		return mcpgo.NewToolResultError("ssh config store not configured"), nil
+	}
+	name := strings.TrimSpace(getString(request.GetArguments(), "name", ""))
+	if name == "" {
+		return mcpgo.NewToolResultError("name is required"), nil
+	}
+	if err := s.sshConfigs.Delete(name); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handleCopySSHConfig(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.sshConfigs == nil {
+		return mcpgo.NewToolResultError("ssh config store not configured"), nil
+	}
+	args := request.GetArguments()
+	src := strings.TrimSpace(getString(args, "source_name", ""))
+	dst := strings.TrimSpace(getString(args, "target_name", ""))
+	if src == "" || dst == "" {
+		return mcpgo.NewToolResultError("source_name and target_name are required"), nil
+	}
+	data, err := s.sshConfigs.ReadRaw(src)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.sshConfigs.Save(dst, data); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handleEditSSHConfig(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.sshConfigs == nil {
+		return mcpgo.NewToolResultError("ssh config store not configured"), nil
+	}
+	args := request.GetArguments()
+	name := strings.TrimSpace(getString(args, "name", ""))
+	if name == "" {
+		return mcpgo.NewToolResultError("name is required"), nil
+	}
+
+	existing, err := s.sshConfigs.Load(name)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+
+	// Merge: apply non-empty values from args over existing entry.
+	if v := getString(args, "host", ""); v != "" {
+		existing.Host = strings.TrimSpace(v)
+	}
+	if v := getString(args, "user", ""); v != "" {
+		existing.User = strings.TrimSpace(v)
+	}
+	if v := getString(args, "password", ""); v != "" {
+		existing.Password = strings.TrimSpace(v)
+	}
+	if v := getString(args, "private_key", ""); v != "" {
+		existing.PrivateKey = strings.TrimSpace(v)
+	}
+	if v := getString(args, "key_passphrase", ""); v != "" {
+		existing.KeyPassphrase = strings.TrimSpace(v)
+	}
+	if v := getString(args, "description", ""); v != "" {
+		existing.Description = strings.TrimSpace(v)
+	}
+	if v := getString(args, "default_shell", ""); v != "" {
+		existing.DefaultShell = strings.TrimSpace(v)
+	}
+	if v := getString(args, "default_mode", ""); v != "" {
+		existing.DefaultMode = strings.TrimSpace(v)
+	}
+	if v := getString(args, "known_hosts", ""); v != "" {
+		existing.KnownHosts = strings.TrimSpace(v)
+	}
+	if v := getString(args, "proxy", ""); v != "" {
+		existing.Proxy = strings.TrimSpace(v)
+	}
+	if v := getFloat64(args, "port", -1); v >= 0 {
+		existing.Port = int(v)
+	}
+	if v := getFloat64(args, "dial_timeout_seconds", -1); v >= 0 {
+		existing.DialTimeoutSeconds = int(v)
+	}
+	if _, ok := args["trust_unknown_host"]; ok {
+		t := getBool(args, "trust_unknown_host", false)
+		existing.TrustUnknownHost = &t
+	}
+
+	// Jump merge
+	if jh := getString(args, "jump_host", ""); jh != "" {
+		if existing.Jump == nil {
+			existing.Jump = &sshconfig.JumpSpec{}
+		}
+		existing.Jump.Host = strings.TrimSpace(jh)
+		if v := getString(args, "jump_user", ""); v != "" {
+			existing.Jump.User = strings.TrimSpace(v)
+		}
+		if v := getString(args, "jump_password", ""); v != "" {
+			existing.Jump.Password = strings.TrimSpace(v)
+		}
+		if v := getString(args, "jump_private_key", ""); v != "" {
+			existing.Jump.PrivateKey = strings.TrimSpace(v)
+		}
+		if v := getString(args, "jump_key_passphrase", ""); v != "" {
+			existing.Jump.KeyPassphrase = strings.TrimSpace(v)
+		}
+		if v := getString(args, "jump_known_hosts", ""); v != "" {
+			existing.Jump.KnownHosts = strings.TrimSpace(v)
+		}
+		if v := getString(args, "jump_proxy", ""); v != "" {
+			existing.Jump.Proxy = strings.TrimSpace(v)
+		}
+		if v := getFloat64(args, "jump_port", -1); v >= 0 {
+			existing.Jump.Port = int(v)
+		}
+		if v := getFloat64(args, "jump_dial_timeout_seconds", -1); v >= 0 {
+			existing.Jump.DialTimeoutSeconds = int(v)
+		}
+		if _, ok := args["jump_trust_unknown_host"]; ok {
+			t := getBool(args, "jump_trust_unknown_host", false)
+			existing.Jump.TrustUnknownHost = &t
+		}
+	}
+
+	body, err := toml.Marshal(existing)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if _, err := sshconfig.ParseAndValidate(body); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.sshConfigs.Save(name, body); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	return successResult(), nil
 }
 

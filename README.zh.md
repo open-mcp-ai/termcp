@@ -129,9 +129,8 @@ termcp ssh-config list -data-dir <dir>          # 列出已存的 SSH 配置名
 | `--port`        | `18765`     | HTTP 端口。Web UI、MCP SSE、MCP streamable HTTP 共用。       |
 | `--data-dir`    | `./data`    | 持久化目录（会话、消息、SSH 配置）。不存在则自动创建。       |
 | `--log-level`   | `info`      | 日志级别：`debug` / `info` / `warn` / `error`。`debug` 显示 MCP 工具调用。 |
-| `--admin-host`  | `127.0.0.1` | 管理 HTTP API 绑定地址。                                     |
-| `--admin-port`  | `0`（关闭） | 管理 HTTP API 端口。非零时必须配 `--admin-token`。           |
-| `--admin-token` | —           | 管理 SSH 配置的 Bearer / `X-Admin-Token`。                   |
+| `--no-internal` | `false`     | 禁用内建 loopback SSH profile。                                |
+| `--mcp-manage-ssh-configs` | `false` | 允许 AI 通过 MCP 管理 SSH 配置（凭据永不暴露）。                |
 
 ### 示例
 
@@ -139,14 +138,14 @@ termcp ssh-config list -data-dir <dir>          # 列出已存的 SSH 配置名
 # 监听所有网卡
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# 启用管理员Token
-./termcp --data-dir ./data --admin-port 9090 --admin-token "my-secret"
-
 # 创建 SSH 配置模板
 ./termcp ssh-config init my-server --data-dir ./data
 
 # 列出可用 SSH 配置
 ./termcp ssh-config list --data-dir ./data
+
+# 允许 AI Agent 管理 SSH 配置
+./termcp --data-dir ./data --mcp-manage-ssh-configs
 ```
 
 ## 接入 MCP 客户端
