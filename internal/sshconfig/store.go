@@ -7,13 +7,27 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Store manages dataDir/ssh_configs/<name>/config.toml for remote profiles.
 // The built-in "internal" profile is virtual: it is never written to disk.
 type Store struct {
-	dataDir string
-	mu      sync.Mutex
+	dataDir  string
+	mu       sync.Mutex
+	onChange atomic.Value // func(), set via SetOnChange, called after Save/Delete/Rename
+}
+
+// SetOnChange registers a callback fired after Save, Delete, or Rename succeeds.
+func (s *Store) SetOnChange(fn func()) {
+	s.onChange.Store(fn)
+}
+
+func (s *Store) notifyChange() {
+	fn, _ := s.onChange.Load().(func())
+	if fn != nil {
+		fn()
+	}
 }
 
 // NewStore returns a Store rooted at dataDir (always absolute path when Abs succeeds).
@@ -171,7 +185,11 @@ func (s *Store) Save(name string, data []byte) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, p)
+	if err := os.Rename(tmpPath, p); err != nil {
+		return err
+	}
+	s.notifyChange()
+	return nil
 }
 
 // InitRemoteSkeleton creates ssh_configs/<name>/config.toml from template.
@@ -238,7 +256,11 @@ func (s *Store) Rename(oldName, newName string) error {
 			return fmt.Errorf("config already exists: %s", filepath.Join(s.root(), e.Name(), "config.toml"))
 		}
 	}
-	return os.Rename(oldDir, newDir)
+	if err := os.Rename(oldDir, newDir); err != nil {
+		return err
+	}
+	s.notifyChange()
+	return nil
 }
 
 // Delete removes a remote config; the virtual internal profile cannot be deleted.
@@ -255,5 +277,6 @@ func (s *Store) Delete(name string) error {
 		return err
 	}
 	_ = os.Remove(dir)
+	s.notifyChange()
 	return nil
 }
