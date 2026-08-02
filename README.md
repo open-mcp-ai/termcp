@@ -71,6 +71,7 @@ In these scenarios the process keeps running, and the Agent must **read and writ
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
+- [Docker Deployment](#docker-deployment)
 - [Connecting MCP Clients](#connecting-mcp-clients)
 - [Examples](#examples)
 - [Tool Reference](#tool-reference)
@@ -121,8 +122,6 @@ Open `http://127.0.0.1:18765` in your browser to enter the **Web UI**.
 
 ```text
 termcp [flags]
-termcp ssh-config init <name> -data-dir <dir>   # Create a remote SSH config template
-termcp ssh-config list -data-dir <dir>          # List existing SSH config names
 ```
 
 | Flag            | Default       | Description                                                              |
@@ -140,14 +139,97 @@ termcp ssh-config list -data-dir <dir>          # List existing SSH config names
 # Listen on all interfaces
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# Create an SSH config template
-./termcp ssh-config init my-server --data-dir ./data
-
-# List available SSH configs
-./termcp ssh-config list --data-dir ./data
-
 # Allow AI agents to manage SSH configs
 ./termcp --data-dir ./data --mcp-manage-ssh-configs
+```
+
+## Docker Deployment
+
+### Multi-stage build: add termcp to any container
+
+Place the following `Dockerfile` in your application project. The build stage installs termcp with `go install`, then `COPY --from` copies the binary into the target image. The target container does not need the Go runtime:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# Replace this at build time with an accessible Go base image if needed
+ARG GO_IMAGE=golang:1.25-alpine
+FROM ${GO_IMAGE} AS termcp-build
+
+# Go module proxy; use https://proxy.golang.org,direct outside China if preferred
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+ENV GOBIN=/out
+
+# Pin latest to a concrete version in production, for example @vX.Y.Z
+RUN go install github.com/open-mcp-ai/termcp@latest
+
+# Replace with any target base image
+FROM alpine
+COPY --from=termcp-build /out/termcp /usr/local/bin/termcp
+```
+
+> `go install` downloads termcp and its dependencies through the Go module proxy. `GOPROXY` defaults to `goproxy.cn` and can be replaced with `--build-arg GOPROXY=...`. If Docker Hub is slow or unavailable, use `--build-arg GO_IMAGE=...` to select an accessible Go base-image mirror.
+
+### Startup command examples
+
+```bash
+# Build the application image with termcp included
+# You can also pass an internal GOPROXY or Go base-image mirror
+docker build \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  -t my-app-with-termcp .
+
+# Run termcp as the container's main process
+# Containers must bind to 0.0.0.0; persist the data directory as a volume
+docker run -d --name my-app-termcp \
+  -p 18765:18765 \
+  -v termcp-data:/data \
+  --entrypoint /usr/local/bin/termcp \
+  my-app-with-termcp \
+  --host 0.0.0.0 --port 18765 --data-dir /data
+
+# Enable MCP tools that write SSH configurations when needed
+docker run -d --name my-app-termcp \
+  -p 18765:18765 -v termcp-data:/data \
+  --entrypoint /usr/local/bin/termcp \
+  my-app-with-termcp \
+  --host 0.0.0.0 --data-dir /data --mcp-manage-ssh-configs
+
+# Follow logs
+docker logs -f my-app-termcp
+```
+
+If the original application must run in the same container, start termcp from the existing entrypoint or process manager:
+
+```bash
+/usr/local/bin/termcp --host 0.0.0.0 --port 18765 --data-dir /data
+```
+
+A container typically runs one foreground process. If the application must remain the main process, run termcp as a separate service on the same Docker network and connect to it at `http://termcp:18765/stream`.
+
+### Docker Compose startup
+
+```yaml
+services:
+  termcp:
+    build:
+      context: .
+      args:
+        GOPROXY: https://goproxy.cn,direct
+    entrypoint: ["/usr/local/bin/termcp"]
+    command: ["--host", "0.0.0.0", "--port", "18765", "--data-dir", "/data"]
+    ports:
+      - "18765:18765"
+    volumes:
+      - termcp-data:/data
+
+volumes:
+  termcp-data:
+```
+
+```bash
+docker compose up -d --build
 ```
 
 ## Connecting MCP Clients
@@ -177,6 +259,7 @@ Point Open WebUI at `http://<host>:18765/stream`.
 
 - Same machine: `http://127.0.0.1:18765/stream`.
 - Open WebUI inside Docker, termcp on the host: `http://host.docker.internal:18765/stream` (macOS/Windows), or the host's LAN IP.
+- Both in Docker on the same network (see [Docker Deployment](#docker-deployment)): `http://termcp:18765/stream`.
 
 ### Other MCP Clients
 

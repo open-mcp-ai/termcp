@@ -5,6 +5,7 @@
 ### Breaking
 
 - **删除 admin HTTP API**：移除 `--admin-host` / `--admin-port` / `--admin-token` 开关与独立 admin 端口。SSH 配置管理改为 MCP 工具（用 `--mcp-manage-ssh-configs` 启用）。
+- **删除 `ssh-config init` / `ssh-config list` CLI 子命令**（从未出现在 `--help`）。SSH 配置改由 Web UI、`list_ssh_configs` 及 `--mcp-manage-ssh-configs` 的 MCP 工具管理。
 - **新增 `--mcp-manage-ssh-configs` 开关**（默认关闭）：开启后 MCP 客户端可调用 `create_ssh_config` / `edit_ssh_config` / `copy_ssh_config` / `delete_ssh_config` 管理 SSH profile。凭据写入后不可读取，日志不记录敏感字段。
 
 ### Added

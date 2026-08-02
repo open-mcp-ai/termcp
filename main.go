@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -92,28 +91,6 @@ func logHTTPMain(base string, port int, lanIPv4 []string) {
 }
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "ssh-config" {
-		base := filepath.Base(os.Args[0])
-		if len(os.Args) < 3 {
-			printSSHConfigUsage(base)
-			os.Exit(2)
-		}
-		switch os.Args[2] {
-		case "init":
-			if len(os.Args) < 4 {
-				printSSHConfigUsage(base)
-				os.Exit(2)
-			}
-			runSSHConfigInit(os.Args[3:])
-		case "list":
-			runSSHConfigList(os.Args[3:])
-		default:
-			printSSHConfigUsage(base)
-			os.Exit(2)
-		}
-		return
-	}
-
 	cfg := config.Default()
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
@@ -122,6 +99,11 @@ func main() {
 	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
 		flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
 	flag.Parse()
+
+	if args := flag.Args(); len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "unknown arguments: %s\n", strings.Join(args, " "))
+		os.Exit(2)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)
@@ -219,45 +201,4 @@ func buildLogHandler(cfg *config.Config) slog.Handler {
 	}
 	color := term.IsTerminal(int(os.Stderr.Fd()))
 	return logansi.NewTextHandler(os.Stderr, logansi.Options{MinLevel: minLevel, Color: color})
-}
-
-func printSSHConfigUsage(program string) {
-	fmt.Fprintf(os.Stderr, "usage:\n")
-	fmt.Fprintf(os.Stderr, "  %s ssh-config init <name> [-data-dir path]\n", program)
-	fmt.Fprintf(os.Stderr, "  %s ssh-config list [-data-dir path]\n", program)
-}
-
-func parseSSHConfigDataDir(setName string, args []string) string {
-	fs := flag.NewFlagSet(setName, flag.ExitOnError)
-	d := fs.String("data-dir", config.Default().DataDir, "termcp data directory")
-	_ = fs.Parse(args)
-	return *d
-}
-
-func runSSHConfigInit(args []string) {
-	if len(args) < 1 {
-		printSSHConfigUsage(filepath.Base(os.Args[0]))
-		os.Exit(2)
-	}
-	name := args[0]
-	dataDir := parseSSHConfigDataDir("ssh-config init", args[1:])
-	if err := sshconfig.InitRemoteSkeleton(dataDir, name); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	p := filepath.Join(sshconfig.NewStore(dataDir).ConfigDir(name), "config.toml")
-	fmt.Println("created", p)
-}
-
-func runSSHConfigList(args []string) {
-	dataDir := parseSSHConfigDataDir("ssh-config list", args)
-	store := sshconfig.NewStore(dataDir)
-	names, err := store.List()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	for _, n := range names {
-		fmt.Println(n)
-	}
 }
