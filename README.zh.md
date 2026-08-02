@@ -69,6 +69,7 @@ Agent 原生只能执行一次性命令，运行完就返回。但现实中有�
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
 - [使用](#使用)
+- [Docker 部署](#docker-部署)
 - [接入 MCP 客户端](#接入-mcp-客户端)
 - [示例](#示例)
 - [工具参考](#工具参考)
@@ -119,8 +120,6 @@ go build -o termcp .
 
 ```text
 termcp [flags]
-termcp ssh-config init <name> -data-dir <dir>   # 创建远端 SSH 配置模板
-termcp ssh-config list -data-dir <dir>          # 列出已存的 SSH 配置名
 ```
 
 | Flag            | 默认值      | 说明                                                         |
@@ -138,14 +137,97 @@ termcp ssh-config list -data-dir <dir>          # 列出已存的 SSH 配置名
 # 监听所有网卡
 ./termcp --data-dir ./data --host 0.0.0.0
 
-# 创建 SSH 配置模板
-./termcp ssh-config init my-server --data-dir ./data
-
-# 列出可用 SSH 配置
-./termcp ssh-config list --data-dir ./data
-
 # 允许 AI Agent 管理 SSH 配置
 ./termcp --data-dir ./data --mcp-manage-ssh-configs
+```
+
+## Docker 部署
+
+### 多阶段构建：添加到任意容器
+
+将下面的 `Dockerfile` 放到应用项目中。构建阶段通过 `go install` 安装 termcp，再用 `COPY --from` 把二进制文件复制到目标镜像；目标容器不需要安装 Go 运行时：
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# 可在构建时替换为可访问的 Go 基础镜像
+ARG GO_IMAGE=golang:1.25-alpine
+FROM ${GO_IMAGE} AS termcp-build
+
+# Go 模块加速；海外环境可改为 https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+ENV GOBIN=/out
+
+# 生产环境建议将 latest 固定为具体版本，例如 @vX.Y.Z
+RUN go install github.com/open-mcp-ai/termcp@latest
+
+# 替换为任意目标基础镜像
+FROM alpine
+COPY --from=termcp-build /out/termcp /usr/local/bin/termcp
+```
+
+> `go install` 会从 Go 模块代理下载 termcp 及其依赖。`GOPROXY` 默认使用 `goproxy.cn`；也可以通过 `--build-arg GOPROXY=...` 替换。若 Docker Hub 访问较慢，可通过 `--build-arg GO_IMAGE=...` 指定可用的 Go 基础镜像镜像源。
+
+### 启动命令示例
+
+```bash
+# 构建包含 termcp 的应用镜像
+# 也可以同时指定企业内网或其他可用的 GOPROXY / Go 基础镜像
+docker build \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  -t my-app-with-termcp .
+
+# 以 termcp 作为容器主进程
+# 容器内必须监听 0.0.0.0，数据目录应挂载为持久化卷
+docker run -d --name my-app-termcp \
+  -p 18765:18765 \
+  -v termcp-data:/data \
+  --entrypoint /usr/local/bin/termcp \
+  my-app-with-termcp \
+  --host 0.0.0.0 --port 18765 --data-dir /data
+
+# 开启 MCP SSH 配置写入工具（按需使用）
+docker run -d --name my-app-termcp \
+  -p 18765:18765 -v termcp-data:/data \
+  --entrypoint /usr/local/bin/termcp \
+  my-app-with-termcp \
+  --host 0.0.0.0 --data-dir /data --mcp-manage-ssh-configs
+
+# 查看日志
+docker logs -f my-app-termcp
+```
+
+如果需要与原应用进程在同一个容器中同时运行，应在原有 entrypoint 或进程管理器中启动：
+
+```bash
+/usr/local/bin/termcp --host 0.0.0.0 --port 18765 --data-dir /data
+```
+
+Docker 容器通常只运行一个前台进程；若应用仍需作为主进程运行，建议将 termcp 放在同一 Docker 网络的独立服务中，并通过 `http://termcp:18765/stream` 访问。
+
+### Docker Compose 启动
+
+```yaml
+services:
+  termcp:
+    build:
+      context: .
+      args:
+        GOPROXY: https://goproxy.cn,direct
+    entrypoint: ["/usr/local/bin/termcp"]
+    command: ["--host", "0.0.0.0", "--port", "18765", "--data-dir", "/data"]
+    ports:
+      - "18765:18765"
+    volumes:
+      - termcp-data:/data
+
+volumes:
+  termcp-data:
+```
+
+```bash
+docker compose up -d --build
 ```
 
 ## 接入 MCP 客户端
@@ -175,6 +257,7 @@ claude mcp add --transport sse termcp http://localhost:18765/sse
 
 - 同机：`http://127.0.0.1:18765/stream`。
 - Open WebUI 在 Docker 内、termcp 在宿主机：`http://host.docker.internal:18765/stream`（macOS/Windows），或宿主机局域网 IP。
+- 两者都在 Docker 内（同一网络，见 [Docker 部署](#docker-部署)）：`http://termcp:18765/stream`。
 
 ### 其他 MCP 客户端
 
