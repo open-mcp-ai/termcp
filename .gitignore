@@ -6,6 +6,7 @@ build/
 
 # Go build artifacts
 /termcp
+/dist/
 *.exe
 *.exe~
 *.test
