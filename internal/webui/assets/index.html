@@ -413,6 +413,21 @@
       border: 2px solid #1e1e1e;
     }
     .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6e7681; }
+    /* Floating "back to latest output" button (appears only when scrolled away from the live tail) */
+    .shell-term-scroll-fab {
+      position: absolute; right: 14px; bottom: 10px; z-index: 15;
+      width: 30px; height: 30px; padding: 0;
+      border: 1px solid rgba(255,255,255,.18); border-radius: 50%;
+      background: rgba(46,58,76,.92); color: #d4d4d4;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .15s, background .15s, transform .1s;
+      box-shadow: 0 2px 10px rgba(0,0,0,.4);
+    }
+    .shell-term-scroll-fab.visible { opacity: 1; pointer-events: auto; }
+    .shell-term-scroll-fab:hover { background: rgba(66,82,104,.96); color: #fff; }
+    .shell-term-scroll-fab:active { transform: scale(.94); }
+    .shell-term-scroll-fab svg { width: 16px; height: 16px; display: block; }
     .shell-window.shell-window-collapsed .shell-window-content,
     .shell-window.shell-window-collapsed .shell-window-resize-handle { display: none; }
     .shell-window.shell-window-collapsed { height: auto; min-height: 0; }
@@ -823,6 +838,7 @@
   var shellWindowCount = 0;
   var startConnName = '';
   var editingConnName = '';
+  var _connDirty = false; // unsaved edits in the connection editor
   window._pendingTerminalWatch = Object.create(null);
 
   function escapeHtml(s) {
@@ -2147,6 +2163,13 @@
     // Hide until first fit to prevent garbled flash.
     inst.style.visibility = 'hidden';
     term.open(inst);
+    // Show the "back to latest" button when the user scrolls this channel away from the tail.
+    var _vp = term.element && term.element.querySelector('.xterm-viewport');
+    if (_vp) {
+      _vp.addEventListener('scroll', function () {
+        if (win._activeChannelSid === sessionId) updateTermScrollButton(win);
+      }, { passive: true });
+    }
     attachXtermViewportScrollbarGuard(term);
     attachTermBrowserChordShield(term);
 
@@ -2198,6 +2221,7 @@
         win._channels[sessionId].fitRo = ro;
         shellTermSyncViewportAfterBufferChange(term, inst, win);
       } catch (eBoot) {}
+      updateTermScrollButton(win);
     });
 
     // Tab click → switch
@@ -2249,6 +2273,7 @@
         try { ch.term.focus(); } catch(e) {}
       });
     });
+    updateTermScrollButton(win);
   }
 
   /** Close a channel tab. Terminates the shell process and cleans up. */
@@ -2289,6 +2314,7 @@
         _showChannelEmpty(win, true);
       }
     }
+    updateTermScrollButton(win);
   }
 
   function _showChannelEmpty(win, show) {
@@ -2336,6 +2362,41 @@
     return ro;
   }
 
+  /** Floating "back to latest output" button — shown only when the active channel is scrolled away from the live tail. */
+  function setupTermScrollFab(win) {
+    if (win._scrollFab) return win._scrollFab;
+    var body = win.querySelector('.shell-channel-body');
+    if (!body) return null;
+    var fab = document.createElement('button');
+    fab.type = 'button';
+    fab.className = 'shell-term-scroll-fab';
+    fab.title = 'Back to latest output';
+    fab.setAttribute('aria-label', 'Back to latest output');
+    fab.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V3M4 8l4 4 4-4"/></svg>';
+    fab.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    fab.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      var term = ch ? ch.term : null;
+      if (term) shellTermScrollToBottom(term, true);
+      fab.classList.remove('visible');
+      try { if (term) term.focus(); } catch (e0) {}
+    });
+    body.appendChild(fab);
+    win._scrollFab = fab;
+    return fab;
+  }
+
+  /** Show/hide the scroll FAB based on whether the active channel is at the live tail. */
+  function updateTermScrollButton(win) {
+    var fab = win._scrollFab;
+    if (!fab) return;
+    var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+    var term = ch ? ch.term : null;
+    if (!term) { fab.classList.remove('visible'); return; }
+    fab.classList.toggle('visible', !xtermViewportNearBottom(term, 64));
+  }
+
   /** Initialize shell window UI (header buttons, drag, resize, tab switching) — no xterm. */
   function _initShellWindowUI(win, connLabel, sessionId, clickEvent) {
     var header = win.querySelector('.shell-window-header');
@@ -2357,6 +2418,7 @@
     bindShellWindowCloseButton(win, closeBtn);
 
     win._inputClosed = false;
+    setupTermScrollFab(win);
 
     collapseBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     collapseBtn.addEventListener('click', function (e) {
@@ -2911,6 +2973,35 @@ SHELL_WINDOW_PANELS_HTML +
   function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
   function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+  /**
+   * Leaving the page detaches this tab from live state (open terminal windows,
+   * running sessions, active forwards, unsaved connection edits). Sessions keep
+   * running server-side — the guard only makes the leave deliberate instead of
+   * accidental. Returns a comma-joined summary of what is live, or '' when safe.
+   */
+  function pageHasLiveState() {
+    var reasons = [];
+    var c = shellWindowsEl();
+    var openWins = c ? c.querySelectorAll('.shell-window').length : 0;
+    if (openWins > 0) reasons.push(openWins + ' open terminal window' + (openWins > 1 ? 's' : ''));
+    var running = 0;
+    (window._lastSessionsSnapshot || []).forEach(function (s) { if (s && s.status === 'running') running++; });
+    if (running > 0) reasons.push(running + ' running session' + (running > 1 ? 's' : ''));
+    var fwdCount = (window._lastForwards || []).length;
+    if (fwdCount > 0) reasons.push(fwdCount + ' active forwarding' + (fwdCount > 1 ? 's' : ''));
+    if (_connDirty) reasons.push('unsaved connection changes');
+    return reasons.join(', ');
+  }
+
+  window.addEventListener('beforeunload', function (e) {
+    var live = pageHasLiveState();
+    if (!live) return;
+    e.preventDefault();
+    // Modern browsers always show a generic dialog regardless of text; legacy
+    // browsers render returnValue verbatim.
+    e.returnValue = 'termcp still has ' + live + '. Leaving closes the terminal view — sessions keep running on the server.';
+  });
+
   // Style-consistent replacement for the native confirm() dialog.
   // opts: { title, message, okText, danger }
   function confirmDialog(opts) {
@@ -3267,6 +3358,7 @@ SHELL_WINDOW_PANELS_HTML +
   function openConnModal(edit, name, kind) {
     if (edit && kind === 'internal') return; // built-in virtual profile is not editable
     editingConnName = edit ? name : '';
+    _connDirty = false;
     connEntries = null; // refresh import dropdown options
     document.getElementById('modal-conn-err').style.display = 'none';
     document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
@@ -3300,10 +3392,17 @@ SHELL_WINDOW_PANELS_HTML +
   }
 
   document.getElementById('conn-f-auth').onchange = _connAuthChange;
-  document.getElementById('conn-toggle-view').onclick = _connToggleView;
+  document.getElementById('conn-toggle-view').onclick = function () { _connDirty = true; _connToggleView(); };
+  // Track unsaved edits inside the connection editor so leaving the page first asks.
+  var _connModalEl = document.getElementById('modal-conn');
+  if (_connModalEl) {
+    _connModalEl.addEventListener('input', function () { _connDirty = true; });
+    _connModalEl.addEventListener('change', function () { _connDirty = true; });
+  }
 
   // ---- jump chain events ----
   document.getElementById('conn-add-jump').onclick = function () {
+    _connDirty = true;
     jumpCards.push(_newJumpCard());
     jumpEditingIdx = jumpCards.length - 1;
     jumpEditingNew = true;
@@ -3356,6 +3455,7 @@ SHELL_WINDOW_PANELS_HTML +
     var idx = card ? parseInt(card.getAttribute('data-idx'), 10) : NaN;
     if (isNaN(idx)) return;
     if (e.target.classList.contains('jump-rm')) {
+      _connDirty = true;
       jumpCards.splice(idx, 1);
       if (jumpEditingIdx === idx) { jumpEditingIdx = -1; jumpEditingNew = false; }
       else if (jumpEditingIdx > idx) { jumpEditingIdx -= 1; }
@@ -3363,11 +3463,13 @@ SHELL_WINDOW_PANELS_HTML +
       return;
     }
     if (e.target.classList.contains('jump-save')) {
+      _connDirty = true;
       jumpEditingIdx = -1; jumpEditingNew = false;
       renderJumps();
       return;
     }
     if (e.target.classList.contains('jump-cancel')) {
+      _connDirty = true;
       if (jumpEditingNew && jumpEditingIdx === idx) {
         jumpCards.splice(idx, 1);
       }
@@ -3395,7 +3497,7 @@ SHELL_WINDOW_PANELS_HTML +
     btn.onclick = function() { _toggleEye(this); };
   });
 
-  document.getElementById('modal-conn-close').onclick = function () { hideModal('modal-conn'); };
+  document.getElementById('modal-conn-close').onclick = function () { _connDirty = false; hideModal('modal-conn'); };
   document.getElementById('conn-save').onclick = function () {
     var err = document.getElementById('modal-conn-err');
     err.style.display = 'none';
@@ -3424,6 +3526,7 @@ SHELL_WINDOW_PANELS_HTML +
     fetch(url, { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        _connDirty = false;
         hideModal('modal-conn');
         loadConnections();
       })
@@ -3446,6 +3549,7 @@ SHELL_WINDOW_PANELS_HTML +
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        _connDirty = false;
         hideModal('modal-conn');
         loadConnections();
       })
