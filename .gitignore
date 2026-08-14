@@ -30,3 +30,6 @@ docs/superpowers/
 # other program
 templates/
 .env
+
+# Local-only changelog (not for git)
+/CHANGELOG.local.md
