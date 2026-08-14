@@ -179,13 +179,13 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	mcpServer.AddTool(mcpgo.NewTool("local_forward",
 		mcpgo.WithDescription("Local port forward (ssh -L). termcp listens on a local port and tunnels traffic through SSH to the remote target. local_port=0 picks a random free port."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
-		mcpgo.WithString("remote_host", mcpgo.Description("Target host (relative to the remote side)"), mcpgo.DefaultString("localhost")),
+		mcpgo.WithString("remote_host", mcpgo.Description("Target host as reachable from the remote SSH server (usually localhost)"), mcpgo.DefaultString("localhost")),
 		mcpgo.WithNumber("remote_port", mcpgo.Required(), mcpgo.Description("Target port on remote host")),
 		mcpgo.WithNumber("local_port", mcpgo.Description("Local port to listen on (0=random)"), mcpgo.DefaultNumber(0)),
 	), withLogging("local_forward", s.handleLocalForward))
 
 	mcpServer.AddTool(mcpgo.NewTool("remote_forward",
-		mcpgo.WithDescription("Remote port forward (ssh -R). The remote side listens on a port and tunnels traffic back to a termcp-side target."),
+		mcpgo.WithDescription("Remote port forward (ssh -R). Note the naming: local_host/local_port configure the listener that the REMOTE SSH server opens; remote_host/remote_port configure the target dialed from the termcp host (a service reachable from the machine running termcp). Example: remote_forward(session_id, local_port=8080, remote_host=\"127.0.0.1\", remote_port=9000) makes the SSH server listen on its own :8080 and tunnel connections to 127.0.0.1:9000 on the termcp host."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
 		mcpgo.WithString("local_host", mcpgo.Description("Host for the remote side to listen on"), mcpgo.DefaultString("0.0.0.0")),
 		mcpgo.WithNumber("local_port", mcpgo.Required(), mcpgo.Description("Port for the remote side to listen on")),
@@ -210,23 +210,23 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 
 	// --- File operation tools (session-scoped SFTP) ---
 	mcpServer.AddTool(mcpgo.NewTool("file_read",
-		mcpgo.WithDescription("Read a remote file or file segment via SSH/SFTP. Mode 'text' returns readable text with \\xHH escapes for non-printable bytes. Mode 'hex' returns hex dump. Mode 'file' writes to a local file on termcp. Omit offset/length for whole file read."),
+		mcpgo.WithDescription("Read a remote file or file segment via SSH/SFTP. Mode 'text' returns readable text with \\xHH escapes for non-printable bytes. Mode 'hex' returns hex dump. Mode 'file' downloads to a file on the termcp host (the machine running the termcp server — NOT the remote SSH host). Omit offset/length for whole file read. Example: read first 1KB of /var/log/syslog in hex — {\"session_id\":\"...\",\"remote_path\":\"/var/log/syslog\",\"mode\":\"hex\",\"offset\":0,\"length\":1024}."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
 		mcpgo.WithNumber("offset", mcpgo.Description("Start byte offset (0-based)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0=all)"), mcpgo.DefaultNumber(0)),
-		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text")),
-		mcpgo.WithString("local_path", mcpgo.Description("Local file path for mode=file")),
+		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex", "file")),
+		mcpgo.WithString("local_path", mcpgo.Description("Download destination path on the termcp host (the machine running termcp, e.g. your local machine) — not the remote SSH host. Only used with mode=file.")),
 	), withLogging("file_read", s.handleFileRead))
 
 	mcpServer.AddTool(mcpgo.NewTool("file_write",
-		mcpgo.WithDescription("Write to a remote file via SSH/SFTP. Use inline data (text mode with \\xHH escapes, or hex mode) for small writes; use local_path + local_offset + length to stream from a termcp-side file for large/binary writes."),
+		mcpgo.WithDescription("Write to a remote file via SSH/SFTP. Use inline data (text mode with \\xHH escapes, or hex mode) for small writes; use local_path + local_offset + length to stream from a file on the termcp host (the machine running the termcp server — NOT the remote SSH host) for large/binary writes. Example: write \"hello\\n\" to /tmp/note.txt — {\"session_id\":\"...\",\"remote_path\":\"/tmp/note.txt\",\"mode\":\"text\",\"data\":\"hello\\n\"}."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from start_session")),
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
-		mcpgo.WithNumber("offset", mcpgo.Description("Write start offset (0=beginning, truncates if 0)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("offset", mcpgo.Description("Write start offset: 0 rewrites the file from the beginning (truncates); >0 writes at that byte position without truncating (to append, set offset to the current file size from file_stat)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithString("data", mcpgo.Description("Inline data to write (text or hex per mode)")),
-		mcpgo.WithString("mode", mcpgo.Description("Data encoding: text (default, supports \\xHH) or hex"), mcpgo.DefaultString("text")),
-		mcpgo.WithString("local_path", mcpgo.Description("Termcp-side file path to read data from")),
+		mcpgo.WithString("mode", mcpgo.Description("Data encoding: text (default, supports \\xHH) or hex"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex")),
+		mcpgo.WithString("local_path", mcpgo.Description("Source file path on the termcp host (the machine running termcp, e.g. your local machine) — not the remote SSH host")),
 		mcpgo.WithNumber("local_offset", mcpgo.Description("Read start offset in local file"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read from local file (0=all)"), mcpgo.DefaultNumber(0)),
 	), withLogging("file_write", s.handleFileWrite))
