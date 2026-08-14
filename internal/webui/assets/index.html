@@ -4001,6 +4001,7 @@ SHELL_WINDOW_PANELS_HTML +
         _connTOMLToForm(tmpl);
       }).catch(function () {});
     }
+    resetConnPasswordVisibility();
     showModal('modal-conn');
   }
 
@@ -4105,6 +4106,22 @@ SHELL_WINDOW_PANELS_HTML +
     var closedEl = btn.querySelector('.eye-closed');
     if (openEl) openEl.style.display = show ? 'none' : '';
     if (closedEl) closedEl.style.display = show ? '' : 'none';
+  }
+
+  /** 重置连接对话框内所有密码输入框为默认隐藏状态。
+   *  眼睛按钮切换的是 input.type 与图标 display，这些状态保存在常驻 DOM 上；
+   *  若不在重新打开对话框时复位，上次“显示明文”的选择会残留到下次打开。 */
+  function resetConnPasswordVisibility() {
+    var modal = document.getElementById('modal-conn');
+    if (!modal) return;
+    modal.querySelectorAll('.psw-eye').forEach(function (btn) {
+      var inp = btn.parentElement.querySelector('input');
+      if (inp) inp.type = 'password';
+      var openEl = btn.querySelector('.eye-open');
+      var closedEl = btn.querySelector('.eye-closed');
+      if (openEl) openEl.style.display = '';
+      if (closedEl) closedEl.style.display = 'none';
+    });
   }
   document.querySelectorAll('.psw-eye').forEach(function(btn) {
     btn.onclick = function() { _toggleEye(this); };
