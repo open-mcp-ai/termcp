@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -94,7 +95,7 @@ func main() {
 	cfg := config.Default()
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
-	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
+	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage (default: <dir of executable>/data)")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
 	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
 		flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
@@ -103,6 +104,25 @@ func main() {
 	if args := flag.Args(); len(args) > 0 {
 		fmt.Fprintf(os.Stderr, "unknown arguments: %s\n", strings.Join(args, " "))
 		os.Exit(2)
+	}
+
+	// Default data dir lives next to the executable (not the working directory),
+	// so running the binary from anywhere keeps storage in one predictable place.
+	if cfg.DataDir == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot locate executable for default data dir: %v\n", err)
+			os.Exit(1)
+		}
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		cfg.DataDir = filepath.Join(filepath.Dir(exe), "data")
+	}
+	// Fail fast when the data directory cannot be created or written.
+	if err := ensureWritableDir(cfg.DataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "data dir %q is not writable: %v\n", cfg.DataDir, err)
+		os.Exit(1)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -185,6 +205,19 @@ func main() {
 		slog.Error("failed to start MCP server", "err", err)
 		os.Exit(1)
 	}
+}
+
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	probe := filepath.Join(dir, ".write-probe")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return os.Remove(probe)
 }
 
 func buildLogHandler(cfg *config.Config) slog.Handler {

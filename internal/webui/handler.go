@@ -61,8 +61,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/connection-templates", h.handleConnectionTemplates)
 	mux.HandleFunc("GET /api/connections", h.handleListConnections)
 	mux.HandleFunc("GET /api/connections/{name}", h.handleGetConnection)
-	mux.HandleFunc("PUT /api/connections/{name}", h.handlePutConnection)
-	mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
+		mux.HandleFunc("PUT /api/connections/{name}", h.handlePutConnection)
+		mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
+		mux.HandleFunc("POST /api/connections/test", h.handleTestConnection)
 
 	// Sessions
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
@@ -232,6 +233,37 @@ func (h *Handler) handleDeleteConnection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTestConnection probes an SSH profile without opening a session.
+// POST /api/connections/test — body is the same TOML text as PUT /api/connections/{name},
+// so the Web UI can test unsaved editor content. The "internal" profile is a
+// loopback connection and always reports ok without dialing.
+func (h *Handler) handleTestConnection(w http.ResponseWriter, r *http.Request) {
+	if h.SSH == nil {
+		http.Error(w, "ssh store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ent, err := sshconfig.ParseAndValidate(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if ent.Kind != sshconfig.KindRemote {
+		writeJSON(w, http.StatusOK, &session.TestResult{OK: true})
+		return
+	}
+	remote, err := sshconfig.RemoteFromEntry(ent, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, session.TestConnection(remote))
 }
 
 type startSessionBody struct {

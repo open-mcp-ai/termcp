@@ -790,8 +790,10 @@
         <div class="modal-actions">
           <button type="button" class="btn" id="conn-duplicate" style="display:none">Duplicate</button>
           <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
+          <button type="button" class="btn" id="conn-test">Test</button>
           <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
+        <p id="conn-test-result" style="display:none;margin:8px 0 0;font-size:0.82rem;word-break:break-word"></p>
       </div>
     </div>
   </div>
@@ -3498,6 +3500,40 @@ SHELL_WINDOW_PANELS_HTML +
   });
 
   document.getElementById('modal-conn-close').onclick = function () { _connDirty = false; hideModal('modal-conn'); };
+  document.getElementById('conn-test').onclick = function () {
+    var err = document.getElementById('modal-conn-err');
+    var out = document.getElementById('conn-test-result');
+    err.style.display = 'none';
+    out.style.display = 'none';
+    var btn = this;
+    var body = _connGetBody();
+    btn.disabled = true;
+    btn.textContent = 'Testing…';
+    fetch('/api/connections/test', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        return r.json();
+      })
+      .then(function (j) {
+        out.style.display = 'block';
+        if (j.ok) {
+          out.textContent = '✓ Connected in ' + (j.duration_ms || 0) + ' ms';
+          out.style.color = '#1a7f37';
+        } else {
+          out.textContent = '✗ ' + (j.error || 'connection failed');
+          out.style.color = '#cf222e';
+        }
+      })
+      .catch(function (e) {
+        out.style.display = 'block';
+        out.textContent = '✗ ' + String(e.message || e);
+        out.style.color = '#cf222e';
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+      });
+  };
   document.getElementById('conn-save').onclick = function () {
     var err = document.getElementById('modal-conn-err');
     err.style.display = 'none';

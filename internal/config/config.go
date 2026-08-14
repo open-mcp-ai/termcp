@@ -8,7 +8,7 @@ import (
 type Config struct {
 	Host             string // HTTP server bind address (default: "127.0.0.1" = loopback; use 0.0.0.0 for all interfaces)
 	Port             int    // HTTP server port, must be 1-65535 (default: 18765)
-	DataDir          string // persistent storage directory, must be non-empty (default: "./data")
+	DataDir          string // persistent storage directory; empty means default "<exe_dir>/data"
 	LogLevel         string // log verbosity: debug|info|warn|error (default: "info")
 	NoInternal       bool   // disable the built-in loopback SSH profile
 	MCPManageSSHConfigs bool // enable MCP tools for creating/editing/deleting SSH configs (default: false)
@@ -19,7 +19,7 @@ func Default() *Config {
 	return &Config{
 		Host:     "127.0.0.1",
 		Port:     18765,
-		DataDir:  "./data",
+		DataDir:  "", // resolved to <exe_dir>/data at startup
 		LogLevel: "info",
 	}
 }
