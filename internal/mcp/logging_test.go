@@ -248,7 +248,7 @@ func TestWithLogging_ExtractsTextParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("send_input", h)
+	wrapped := withLogging("shell_input", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -281,7 +281,7 @@ func TestWithLogging_ExtractsCommandParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_session", h)
+	wrapped := withLogging("session_start", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -314,7 +314,7 @@ func TestWithLogging_ExtractsModeParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_session", h)
+	wrapped := withLogging("session_start", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -343,7 +343,7 @@ func TestWithLogging_ExtractsRowsAndCols(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_session", h)
+	wrapped := withLogging("session_start", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -453,7 +453,7 @@ func TestWithLogging_ExtractsArgsParam(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_session", h)
+	wrapped := withLogging("session_start", h)
 
 	req := mcpgo.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
@@ -483,7 +483,7 @@ func TestWithLogging_TruncatesArgsOver10(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("start_session", h)
+	wrapped := withLogging("session_start", h)
 
 	raw := make([]any, 15)
 	for i := range raw {
@@ -570,7 +570,7 @@ func TestWithLogging_TruncatesLongText(t *testing.T) {
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		return mcpgo.NewToolResultText("ok"), nil
 	}
-	wrapped := withLogging("send_input", h)
+	wrapped := withLogging("shell_input", h)
 
 	longText := strings.Repeat("x", 250)
 
