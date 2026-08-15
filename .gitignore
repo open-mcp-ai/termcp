@@ -33,3 +33,6 @@ templates/
 
 # Local-only changelog (not for git)
 /CHANGELOG.local.md
+
+# ZCode agent runtime
+.zcode/
