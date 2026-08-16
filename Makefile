@@ -3,6 +3,9 @@
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 BIN := termcp-$(GOOS)-$(GOARCH)
+ifeq ($(GOOS),windows)
+BIN := $(BIN).exe
+endif
 
 LDFLAGS_RELEASE := -s -w
 

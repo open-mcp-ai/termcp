@@ -1870,7 +1870,7 @@
       var badge = dead ? '<span class="sess-dead" title="' + escapeHtml(reasonLabel(s.reason)) + '">dead</span>' : '';
       tile.innerHTML =
         '<div class="conn-tile-stack">' +
-        '<button type="button" class="sess-x" title="' + (dead ? 'Delete this dead session (history erased permanently)' : 'Disconnect and delete this session (history erased permanently)') + '" aria-label="End and delete session">' +
+        '<button type="button" class="sess-x" title="Delete session" aria-label="Delete session">' +
           '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
         '</button>' +
         '<div class="icon-wrap" title="' + (dead ? 'Open history' : 'Open terminal') + '"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
@@ -1885,9 +1885,7 @@
         '<div class="sess-fwd-info" style="display:none;font-size:0.62rem;color:#656d76;margin-top:2px;text-align:center"></div>';
       tile.title = (dead ? 'Open history (read-only)' : 'Open terminal') + ' · ' + sid;
       var sx = tile.querySelector('.sess-x');
-      var delConf = dead
-        ? { title: 'Delete dead session', message: 'Permanently delete "' + entryLine + '" and erase all of its message history? This cannot be undone.', okText: 'Delete', danger: true }
-        : { title: 'Disconnect & delete session', message: 'Disconnect and permanently erase "' + entryLine + '" and its message history? This cannot be undone.', okText: 'Delete', danger: true };
+      var delConf = { title: 'Delete session', message: 'Delete "' + entryLine + '"?', okText: 'Delete', danger: true };
       sx.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();

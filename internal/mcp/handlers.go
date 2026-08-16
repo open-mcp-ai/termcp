@@ -370,6 +370,9 @@ func (s *Server) handleTerminateSession(ctx context.Context, request mcpgo.CallT
 		return bad, nil
 	}
 	s.sessMgr.Terminate(sessionID, force, time.Duration(gracePeriod*float64(time.Second)))
+	// Deliberate close: move the session into the history archive and drop it
+	// from the live registry (so it is not reloaded as a DEAD tile after restart).
+	_ = s.sessMgr.ArchiveAndForget(sessionID, api.ArchiveExplicit)
 	return successResult(), nil
 }
 

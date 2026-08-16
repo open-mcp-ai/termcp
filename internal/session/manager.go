@@ -203,6 +203,47 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	}
 }
 
+func (m *Manager) ArchiveAndForget(id string, reason api.ArchiveReason) error {
+	s := m.Get(id)
+	if s == nil {
+		return fmt.Errorf("session %q not found", id)
+	}
+	// Terminate the process and mark DEAD (flushes final output onto the message
+	// log). Idempotent even if the session already exited via transport abort.
+	s.Terminate(true, 0)
+
+	// Move it into the history archive so transcript/screenshot/search keep
+	// working, then drop it from the live registry so a restart does not reload
+	// it as a DEAD tile. On-disk message files stay (ForgetSession only
+	// frees in-memory state; only a later purge erases them).
+	rec := api.ArchivedSession{
+		Session: s.Info(),
+		Shells:  s.SnapshotShells(),
+		Reason:  reason,
+	}
+	if m.hist != nil {
+		m.historyMu.Lock()
+		err := m.hist.Add(rec)
+		m.historyMu.Unlock()
+		if err != nil {
+			slog.Warn("archive: failed to record history", "session_id", id, "err", err)
+		}
+	}
+
+	// Release the transport, remaining shells, and in-memory buffer now that the
+	// output has been flushed and persisted; only the on-disk message files stay.
+	s.finalize()
+
+	m.sessions.Delete(id)
+	if m.msgMgr != nil {
+		m.msgMgr.ForgetSession(id)
+	}
+	m.persist()
+	m.notifyListChange()
+	m.notifySessionClosed(id)
+	return nil
+}
+
 // Shutdown delegates to Terminate during server shutdown; it still only DEADs
 // the session (disconnect ≠ delete).
 func (m *Manager) Shutdown(id string, force bool) {

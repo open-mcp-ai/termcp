@@ -383,7 +383,13 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.Sessions.Terminate(id, true, 0)
+	// Deliberate close (web UI terminate/disconnect): terminate + move into the
+	// history archive and drop the live DEAD tile. Use DELETE /api/sessions/{id}
+	// to fully purge (erase history + messages).
+	if err := h.Sessions.ArchiveAndForget(id, api.ArchiveExplicit); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

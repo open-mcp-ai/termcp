@@ -20,29 +20,29 @@ import (
 // of stopping after narrative plans; compliance still depends on the host client + model.
 const mcpServerInstructions = `termcp agent rules (follow in order until the user's task is done or a tool returns a hard error):
 
-0) Tool groups (2-level naming <group>_<action>): session_* — connection lifecycle (start/list/info/terminate); shell_* — terminal channels (open/list/close/input/key/output/resize/detect, reader_register/reader_unregister); forward_* — port forwarding (local/remote/dynamic/list/close); file_* — SFTP file operations (read/write/stat/delete/rename/mkdir/chmod/...); ssh_config_* — SSH profile management (list/create/edit/copy/delete); message_* — stored message history (list/get); history_* — archived/dead sessions (list/get_transcript/search/rename/update_meta/screenshot/purge).
+0) Tool groups (<group>_<action>): session_* lifecycle (start/list/info/terminate); shell_* channels (open/list/close/input/key/output/resize/detect, reader_register/unregister); forward_* port forwarding (local/remote/dynamic/list/close); file_* SFTP (read/write/stat/delete/rename/mkdir/chmod/...); ssh_config_* profiles (list/create/edit/copy/delete); message_* stored msgs (list/get); history_* archived/dead sessions (list/get_transcript/search/rename/update_meta/screenshot/purge).
 
-1) IDs: session_id is the connection container (forwards, files, terminate, shell_open). shell_id is a terminal channel (shell_input, shell_key, shell_output, shell_resize, shell_close, readers). Never invent either; take them from session_start / shell_open / list_*.
+1) IDs: session_id = connection container (forwards, files, terminate, shell_open); shell_id = terminal channel (input/key/output/resize/close, readers). Never invent either; take from session_start / shell_open / list_*.
 
-2) Run a command: shell_input(shell_id, text) types the command text, then shell_key(shell_id, key="enter") sends the enter key to execute it, then shell_output(shell_id, timeout≤3) reads the result. Prefer shell_key for sending special keys (enter, ctrl+c, arrows, etc.) instead of embedding raw control sequences in shell_input text. The only input/output tools are shell_input, shell_key, and shell_output.
+2) Run a command: shell_input(shell_id, text) types, shell_key(shell_id, key="enter") executes, then shell_output(shell_id, timeout≤3) reads. Prefer shell_key for special keys over raw escape sequences; shell_input/key/output are the only I/O tools.
 
-3) After session_list, ssh_config_list, session_start, or any discovery tool, immediately proceed with concrete tool calls. A discovery result should be followed by the next action, not a prose summary.
+3) After any discovery tool, act immediately with concrete tool calls, not a prose summary.
 
-4) Shell output is not visible until shell_output. For long commands, shell_input + shell_key(enter), then poll shell_output with short timeouts (≤3s). When managing multiple shells, poll in round-robin.
+4) Output is visible only via shell_output. For long commands, poll shell_output with short timeouts (≤3s); round-robin across multiple shells.
 
-5) Verify a remote command succeeded by checking the terminal output from shell_output or an explicit success field in the tool result.
+5) Verify success via shell_output text or an explicit success field.
 
-6) Lifecycle: session_terminate(session_id) closes the connection (cascades shells + forwards) and removes the session from the live registry, but RETAINS its history (it becomes an archived/dead session, listed by history_list). Use history_purge to permanently delete an archived session and erase its message history; use history_get_transcript / history_screenshot to read a finished session. Use force=true for immediate kill. shell_close only closes one channel.
+6) Lifecycle: session_terminate closes the connection (cascades shells+forwards) and removes it from the live registry but RETAINS history as archived/dead (history_list). history_purge deletes permanently; history_get_transcript / history_screenshot read a finished session. force=true = immediate kill. shell_close only closes one channel.
 
-7) Passwords and secrets: If shell_output shows a password prompt, sudo password, passphrase, MFA/2FA, or SSH keyboard-interactive challenge, stop automated input and tell the user to type the secret in the termcp Web UI terminal for that same shell. Only the user can enter secrets; the agent must not attempt to guess or paste them. Continue with non-secret commands only after the user confirms they entered it.
+7) Secrets: if shell_output shows a password/sudo/passphrase/MFA/SSH keyboard-interactive prompt, stop automated input and ask the user to type it in the termcp Web UI terminal for that shell. Agent must never guess or paste secrets; continue non-secret work only after the user confirms.
 
-8) Use shell_key for enter, tab, esc, arrows, backspace, delete, home, end, ctrl+c/d/z/l/u/w. For keys not in shell_key's list, use JSON \\u001b escape sequences in shell_input — not raw \\x1b or other literal byte escapes.
+8) Use shell_key for enter, tab, esc, arrows, backspace, delete, home, end, ctrl+c/d/z/l/u/w. For other keys use JSON \\u001b escape sequences in shell_input, never raw \\x1b.
 
-9) Crash-loop detection: if shell_output returns a large traceback repeating the same error pattern (e.g. Python _pyrepl / fancy_termios with termios.error or recursion), the process is in an unrecoverable loop. Immediately session_terminate, then retry with PYTHON_BASIC_REPL=1 in the process environment. If a command succeeds but then hangs (output goes silent while session stays running), check session_info for status and decide whether to wait or terminate.
+9) Crash-loop: if shell_output returns a large traceback repeating the same error (e.g. Python _pyrepl / fancy_termios termios.error or recursion), session_terminate then retry with PYTHON_BASIC_REPL=1. If a command succeeds but hangs (silent and still running), check session_info and decide.
 
-10) Forwards (OpenSSH names): forward_local = ssh -L (listen local, target remote); forward_remote = ssh -R (listen remote, target local/termcp); forward_dynamic = ssh -D (SOCKS5). All take session_id.
+10) Forwards (OpenSSH): forward_local = ssh -L (listen local→remote); forward_remote = ssh -R (listen remote→termcp); forward_dynamic = ssh -D (SOCKS5). All take session_id.
 
-11) SSH configs: ssh_config_list returns only profile names (no host/user/secrets). When enabled, ssh_config_create / ssh_config_edit / ssh_config_copy / ssh_config_delete manage profiles. NEVER echo, quote, log, or restate password, private_key, key_passphrase, or proxy credentials from tool arguments or results — write secrets into tools only, do not surface them in chat. There is no read/get tool for full config bodies by design; do not invent one or try to dump secrets via shell/file tools.
+11) SSH configs: ssh_config_list returns only profile names. ssh_config_create/edit/copy/delete (if enabled) manage profiles. NEVER echo/quote/log/restate password, private_key, key_passphrase, or proxy credentials — write secrets into tools only, never surface them in chat. There is no read/get tool for full config bodies by design; do not invent one or dump secrets via shell/file tools.
 `
 
 // Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
@@ -79,7 +79,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpserver.WithInstructions(mcpServerInstructions),
 	)
 	mcpServer.AddTool(mcpgo.NewTool("session_start",
-		mcpgo.WithDescription("Start a session (connection container) with one primary shell channel. Profiles live under data-dir/ssh_configs/<name>/config.toml. Use ssh_config \"internal\" (or omit) for loopback on the termcp host; other names are remote SSH. Returns session_id (connection) and shell_id (terminal I/O). Leave command/args empty for login shell / profile defaults."),
+		mcpgo.WithDescription("Start a session (connection container) with one primary shell. ssh_config \"internal\" (default) = loopback on termcp host; other = remote SSH profile. Returns session_id (connection) and shell_id (terminal I/O). Empty command/args = login shell / profile defaults."),
 		mcpgo.WithString("command", mcpgo.Description("Executable or shell builtin line; leave empty with no args for login shell / profile default_shell")),
 		mcpgo.WithArray("args", mcpgo.Description("Argv after command; only valid when command is non-empty"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("pty: pseudo-terminal (interactive TUI); pipe: no TTY, line-oriented"), mcpgo.DefaultString("pty")),
@@ -100,12 +100,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_open", s.handleStartSubShell))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_list",
-		mcpgo.WithDescription("List shell channels on a session. Returns session_id and shells (each with id, name, status, timestamps). Use shell ids with shell_input/shell_key/shell_output/shell_close."),
+		mcpgo.WithDescription("List shell channels on a session: session_id + shells (id, name, status, timestamps). Use ids with shell_input/shell_key/shell_output/shell_close."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start / session_list")),
 	), withLogging("shell_list", s.handleListSubshells))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_close",
-		mcpgo.WithDescription("Close one shell channel by shell_id without tearing down the session connection. Other shells and forwards stay up. For internal primary shell, close is a no-op (process outlives the tab). Use session_terminate to stop the whole session."),
+		mcpgo.WithDescription("Close one shell channel by shell_id without tearing down the session. For internal primary shell, close is a no-op (process outlives the tab). Use session_terminate to stop the whole session."),
 		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id from session_start / shell_open / shell_list")),
 	), withLogging("shell_close", s.handleCloseShell))
 
@@ -116,14 +116,14 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_input", s.handleSendInput))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_key",
-		mcpgo.WithDescription("Send a named key to a shell. Supported: enter, tab, esc, up, down, left, right, backspace, delete, home, end, ctrl+c, ctrl+d, ctrl+z, ctrl+l, ctrl+u, ctrl+w. Use enter after shell_input to execute a command."),
+		mcpgo.WithDescription("Send a named key to a shell. Supported: enter, tab, esc, up/down/left/right, backspace, delete, home, end, ctrl+c/d/z/l/u/w. Use enter after shell_input to run a command."),
 		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id from session_start / shell_open")),
 		mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("Named key (e.g. enter, ctrl+c, up)")),
 		mcpgo.WithNumber("repeat", mcpgo.Description("Times to send the key (1–20)"), mcpgo.DefaultNumber(1)),
 	), withLogging("shell_key", s.handlePressKey))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_output",
-		mcpgo.WithDescription("Return newly produced stdout/stderr since the last read on the given reader_id. Prefer timeout ≤ 3 when polling multiple shells. Use timeout=0 for non-blocking (available data only). Response JSON: output, has_more, lines_returned, bytes_returned, session_status, session_uptime_seconds."),
+		mcpgo.WithDescription("Return newly produced stdout/stderr since the last read on reader_id. timeout=0 is non-blocking; when polling multiple shells prefer timeout ≤ 3. Returns {output, has_more, lines_returned, bytes_returned, session_status, session_uptime_seconds}."),
 		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id from session_start / shell_open")),
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes for plain-text logs"), mcpgo.DefaultBool(true)),
 		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output, in seconds (0.1–60); 0 = non-blocking; prefer ≤3 for multi-shell polling"), mcpgo.DefaultNumber(3)),
@@ -133,7 +133,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_output", s.handleReadOutput))
 
 	mcpServer.AddTool(mcpgo.NewTool("session_list",
-		mcpgo.WithDescription("Return metadata for every running parent session in the registry. Exited sessions are removed automatically. Child shells are NOT included — use shell_list."),
+		mcpgo.WithDescription("Return metadata for every running parent session (exited ones are auto-removed). Child shells excluded — use shell_list."),
 	), withLogging("session_list", s.handleListSessions))
 	mcpServer.AddTool(mcpgo.NewTool("session_info",
 		mcpgo.WithDescription("Return a JSON document with detailed fields for one session: identifiers, command line, mode, PTY size, remote connection metadata, exit state, etc."),
@@ -141,7 +141,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("session_info", s.handleGetSessionInfo))
 
 	mcpServer.AddTool(mcpgo.NewTool("session_terminate",
-		mcpgo.WithDescription("Stop and archive a session: terminate all shells, close the SSH connection, cascade attached forwards, and drop the registry entry. The session's history record and message files are RETAINED (it becomes an 'archived/dead' session) and can be read via history_list / history_get_transcript / history_screenshot. Use history_purge to permanently delete a session and erase its history. force=true kills immediately; force=false waits grace_period after SIGTERM. To close only one shell channel, use shell_close."),
+		mcpgo.WithDescription("Stop and archive a session: terminate all shells, close SSH, cascade forwards, drop registry entry. History/messages are RETAINED as an archived/dead session, read via history_list / history_get_transcript / history_screenshot; history_purge permanently deletes them. force=true = immediate kill; force=false waits grace_period after SIGTERM. To close one shell only, use shell_close."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
 		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
@@ -155,11 +155,11 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_resize", s.handleResizePty))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_detect",
-		mcpgo.WithDescription("Probe the termcp host only (not an arbitrary ssh_config) for a suitable interactive shell: returns executable path, family enum (unix, powershell, cmd), and a short hint string."),
+		mcpgo.WithDescription("Probe the termcp host (not a remote ssh_config) for an interactive shell: returns path, family (unix/powershell/cmd), and a hint."),
 	), withLogging("shell_detect", s.handleDetectShell))
 
 	mcpServer.AddTool(mcpgo.NewTool("ssh_config_list",
-		mcpgo.WithDescription("Return the sorted list of profile names that may be passed as ssh_config to session_start—one entry per directory under data-dir/ssh_configs plus the built-in \"internal\" profile. Does not return JSON bodies, secrets, or hostnames."),
+		mcpgo.WithDescription("List profile names accepted as ssh_config by session_start — one per data-dir/ssh_configs/<name> plus built-in \"internal\". Never returns bodies, secrets, or hostnames."),
 	), withLogging("ssh_config_list", s.handleListSSHConfigs))
 
 	mcpServer.AddTool(mcpgo.NewTool("message_list",
@@ -174,12 +174,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("message_get", s.handleGetMessage))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_reader_register",
-		mcpgo.WithDescription("Allocate a new output reader_id for this shell. That reader only observes bytes written after registration (cursor starts at buffer end). Pair every shell_output(..., reader_id) with the id returned here."),
+		mcpgo.WithDescription("Allocate a new output reader_id for a shell, observing only bytes written after registration (no backlog). Pair every shell_output(..., reader_id) with the returned id."),
 		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id from session_start / shell_open")),
 	), withLogging("shell_reader_register", s.handleRegisterReader))
 
 	mcpServer.AddTool(mcpgo.NewTool("history_list",
-		mcpgo.WithDescription("Enumerate archived (dead) sessions retained across termcp restarts. Each entry includes session metadata, exit code, archive reason, notes, and tags. Use history_get_transcript / history_search_messages / history_screenshot for CTF writeup work."),
+		mcpgo.WithDescription("List archived (dead) sessions persisted across restarts. Each entry includes metadata, exit code, reason, notes, tags. Use history_get_transcript / history_search_messages / history_screenshot."),
 	), withLogging("history_list", s.handleListHistory))
 
 	mcpServer.AddTool(mcpgo.NewTool("history_get_transcript",
@@ -208,12 +208,12 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("history_update_session_meta", s.handleUpdateSessionMeta))
 
 	mcpServer.AddTool(mcpgo.NewTool("history_purge",
-		mcpgo.WithDescription("Permanently delete an archived (or live) session: removes its history record AND its on-disk message files. This cannot be undone. Use history_rename_session/history_update_session_meta to annotate a session you want to keep."),
+		mcpgo.WithDescription("Permanently delete an archived (or live) session: removes its history AND on-disk messages; cannot be undone. Use history_rename_session / history_update_session_meta to annotate one you want to keep."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id to delete permanently")),
 	), withLogging("history_purge", s.handlePurgeSession))
 
 	mcpServer.AddTool(mcpgo.NewTool("history_screenshot",
-		mcpgo.WithDescription("Return the HTTP download URL for a PNG screenshot of an archived session's messages, rendered as a fixed-bitmap terminal image (ASCII letters/digits only). start is the first display line, lines the count to render (0 = all), theme dark or light."),
+		mcpgo.WithDescription("Return an HTTP download URL for a PNG screenshot of an archived session's terminal output. start = first display line, lines = count to render (0=all), theme dark/light."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id of an archived session")),
 		mcpgo.WithNumber("start", mcpgo.Description("First display line to include (0-based)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("lines", mcpgo.Description("Number of display lines to render; 0 = all"), mcpgo.DefaultNumber(0)),
@@ -237,7 +237,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("forward_local", s.handleLocalForward))
 
 	mcpServer.AddTool(mcpgo.NewTool("forward_remote",
-		mcpgo.WithDescription("Remote port forward (ssh -R). Note the naming: local_host/local_port configure the listener that the REMOTE SSH server opens; remote_host/remote_port configure the target dialed from the termcp host (a service reachable from the machine running termcp). Example: forward_remote(session_id, local_port=8080, remote_host=\"127.0.0.1\", remote_port=9000) makes the SSH server listen on its own :8080 and tunnel connections to 127.0.0.1:9000 on the termcp host."),
+		mcpgo.WithDescription("Remote port forward (ssh -R). local_host/local_port set the listener the REMOTE SSH server opens; remote_host/remote_port set the target dialed from termcp. Example: forward_remote(session_id, local_port=8080, remote_host=\"127.0.0.1\", remote_port=9000) makes the SSH server listen on :8080 and tunnel to 127.0.0.1:9000 on termcp."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithString("local_host", mcpgo.Description("Host for the remote side to listen on"), mcpgo.DefaultString("0.0.0.0")),
 		mcpgo.WithNumber("local_port", mcpgo.Required(), mcpgo.Description("Port for the remote side to listen on")),
@@ -262,23 +262,23 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 
 	// --- File operation tools (session-scoped SFTP) ---
 	mcpServer.AddTool(mcpgo.NewTool("file_read",
-		mcpgo.WithDescription("Read a remote file or file segment via SSH/SFTP. Mode 'text' returns readable text with \\xHH escapes for non-printable bytes. Mode 'hex' returns hex dump. Mode 'file' downloads to a file on the termcp host (the machine running the termcp server — NOT the remote SSH host). Omit offset/length for whole file read. Example: read first 1KB of /var/log/syslog in hex — {\"session_id\":\"...\",\"remote_path\":\"/var/log/syslog\",\"mode\":\"hex\",\"offset\":0,\"length\":1024}."),
+		mcpgo.WithDescription("Read a remote file via SSH/SFTP. mode text = printable with \\xHH escapes; hex = hex dump; file = download to the termcp host. Omit offset/length for whole file. Example: read first 1KB hex of /var/log/syslog — {session_id, remote_path, mode:\"hex\", offset:0, length:1024}."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
 		mcpgo.WithNumber("offset", mcpgo.Description("Start byte offset (0-based)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0=all)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex", "file")),
-		mcpgo.WithString("local_path", mcpgo.Description("Download destination path on the termcp host (the machine running termcp, e.g. your local machine) — not the remote SSH host. Only used with mode=file.")),
+		mcpgo.WithString("local_path", mcpgo.Description("Download destination path on the termcp host. Only used with mode=file.")),
 	), withLogging("file_read", s.handleFileRead))
 
 	mcpServer.AddTool(mcpgo.NewTool("file_write",
-		mcpgo.WithDescription("Write to a remote file via SSH/SFTP. Use inline data (text mode with \\xHH escapes, or hex mode) for small writes; use local_path + local_offset + length to stream from a file on the termcp host (the machine running the termcp server — NOT the remote SSH host) for large/binary writes. Example: write \"hello\\n\" to /tmp/note.txt — {\"session_id\":\"...\",\"remote_path\":\"/tmp/note.txt\",\"mode\":\"text\",\"data\":\"hello\\n\"}."),
+		mcpgo.WithDescription("Write a remote file via SSH/SFTP. Small writes: inline data (text with \\xHH, or hex). Large/binary: local_path + local_offset + length streams from a file on the termcp host. offset>0 writes without truncating (use file_stat size to append)."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
 		mcpgo.WithNumber("offset", mcpgo.Description("Write start offset: 0 rewrites the file from the beginning (truncates); >0 writes at that byte position without truncating (to append, set offset to the current file size from file_stat)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithString("data", mcpgo.Description("Inline data to write (text or hex per mode)")),
 		mcpgo.WithString("mode", mcpgo.Description("Data encoding: text (default, supports \\xHH) or hex"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex")),
-		mcpgo.WithString("local_path", mcpgo.Description("Source file path on the termcp host (the machine running termcp, e.g. your local machine) — not the remote SSH host")),
+		mcpgo.WithString("local_path", mcpgo.Description("Source file path on the termcp host")),
 		mcpgo.WithNumber("local_offset", mcpgo.Description("Read start offset in local file"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read from local file (0=all)"), mcpgo.DefaultNumber(0)),
 	), withLogging("file_write", s.handleFileWrite))
@@ -344,7 +344,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("file_readlink", s.handleFileReadlink))
 
 	mcpServer.AddTool(mcpgo.NewTool("file_symlink",
-		mcpgo.WithDescription("Create a symbolic link on the remote via SSH/SFTP. target is the existing path, link_path is the new symlink to create (like 'ln -s target link_path')."),
+		mcpgo.WithDescription("Create a remote symlink via SSH/SFTP (like 'ln -s target link_path'); target must exist."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithString("target", mcpgo.Required(), mcpgo.Description("The existing file/directory to point to")),
 		mcpgo.WithString("link_path", mcpgo.Required(), mcpgo.Description("The new symlink path to create")),
@@ -393,7 +393,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 // and ssh_config_delete tools. Call only when -mcp-manage-ssh-configs is set.
 func (s *Server) RegisterSSHConfigWriteTools() {
 	s.mcpServer.AddTool(mcpgo.NewTool("ssh_config_create",
-		mcpgo.WithDescription("Create a new remote SSH profile under data-dir/ssh_configs/<name>/config.toml. Fails if name already exists. Requires host, user, and password or private_key. Never echo password/private_key/key_passphrase/proxy credentials back in chat."),
+		mcpgo.WithDescription("Create a new remote SSH profile. Requires host, user, and password or private_key. Fails if name exists. Never echo credentials back."),
 		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Profile name (letters, digits, _, -; max 64). Passed later as ssh_config to session_start.")),
 		mcpgo.WithString("host", mcpgo.Required(), mcpgo.Description("SSH hostname or IP")),
 		mcpgo.WithString("user", mcpgo.Required(), mcpgo.Description("SSH username")),
@@ -421,7 +421,7 @@ func (s *Server) RegisterSSHConfigWriteTools() {
 	), withLogging("ssh_config_create", s.handleCreateSSHConfig))
 
 	s.mcpServer.AddTool(mcpgo.NewTool("ssh_config_edit",
-		mcpgo.WithDescription("Patch an existing remote SSH profile. Only provided (non-empty) fields are updated; omitted fields keep their stored values including secrets. Never returns config body or credentials. Never expose secrets in chat."),
+		mcpgo.WithDescription("Patch an existing remote SSH profile: only provided non-empty fields are written; omitted fields (incl. secrets) keep stored values. Never returns/exposes credentials."),
 		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Existing profile name to edit")),
 		mcpgo.WithString("host", mcpgo.Description("SSH hostname or IP")),
 		mcpgo.WithString("user", mcpgo.Description("SSH username")),
@@ -449,7 +449,7 @@ func (s *Server) RegisterSSHConfigWriteTools() {
 	), withLogging("ssh_config_edit", s.handleEditSSHConfig))
 
 	s.mcpServer.AddTool(mcpgo.NewTool("ssh_config_copy",
-		mcpgo.WithDescription("Duplicate an existing SSH profile (including secrets) to a new name on the server — a server-side copy, secrets never reach the agent. Use then ssh_config_edit to change host/user without re-providing keys. Fails when target_name already exists."),
+		mcpgo.WithDescription("Server-side duplicate of an SSH profile including secrets (never reach the agent). Then ssh_config_edit to change host/user without re-keying. Fails if target_name exists."),
 		mcpgo.WithString("source_name", mcpgo.Required(), mcpgo.Description("Existing profile to copy from")),
 		mcpgo.WithString("target_name", mcpgo.Required(), mcpgo.Description("New profile name (must not already exist)")),
 	), withLogging("ssh_config_copy", s.handleCopySSHConfig))
