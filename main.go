@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-mcp-ai/termcp/internal/config"
 	"github.com/open-mcp-ai/termcp/internal/forward"
+	"github.com/open-mcp-ai/termcp/internal/history"
 	"github.com/open-mcp-ai/termcp/internal/logansi"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
@@ -150,7 +151,16 @@ func main() {
 	// Initialize storage and managers
 	store := storage.New(cfg.DataDir)
 	msgMgr := message.NewManager(store)
+	historyMgr := history.New(store)
+	if err := historyMgr.Load(); err != nil {
+		slog.Error("failed to load session history", "err", err)
+		os.Exit(1)
+	}
 	sessMgr := session.NewManager(msgMgr, store, sshSrv)
+	sessMgr.SetHistory(historyMgr)
+	if err := sessMgr.RestoreDead(); err != nil {
+		slog.Warn("failed to restore previous DEAD sessions", "err", err)
+	}
 
 	sshStore := sshconfig.NewStore(cfg.DataDir)
 
@@ -162,6 +172,7 @@ func main() {
 	sessMgr.SetTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
+	mcpSrv.SetHistory(historyMgr)
 	mcpSrv.NoInternal = cfg.NoInternal
 	if cfg.MCPManageSSHConfigs {
 		mcpSrv.RegisterSSHConfigWriteTools()
@@ -169,7 +180,7 @@ func main() {
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
-	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
+	(&webui.Handler{Sessions: sessMgr, History: historyMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
 
 	host := strings.TrimSpace(cfg.Host)
 	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)
@@ -188,7 +199,9 @@ func main() {
 		<-sigCh
 		shuttingDown.Store(true)
 		slog.Info("shutting down")
-		sessMgr.CleanupAll(true)
+		// Disconnect ≠ delete: DEAD all running sessions (retain history) instead
+		// of killing/clearing every shell.
+		sessMgr.MarkAllDead()
 		if sshSrv != nil {
 			sshSrv.Stop()
 		}

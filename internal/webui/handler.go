@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/forward"
+	"github.com/open-mcp-ai/termcp/internal/history"
+	"github.com/open-mcp-ai/termcp/internal/screenshot"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
@@ -38,6 +41,7 @@ func embeddedStaticServer() http.Handler {
 // Handler serves the browser UI and JSON/SSE APIs at / and /api/... .
 type Handler struct {
 	Sessions   *session.Manager
+	History    *history.Manager
 	SSH        *sshconfig.Store
 	ForwardMgr *forward.ForwardManager
 	NoInternal bool // when true, hide and refuse the built-in loopback profile
@@ -69,12 +73,23 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
 	mux.HandleFunc("POST /api/sessions", h.handleCreateSession)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
-	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
+	mux.HandleFunc("PATCH /api/sessions/{id}", h.handleRenameSession)
+	// DELETE purges the session (terminate + clear history/messages).
+	mux.HandleFunc("DELETE /api/sessions/{id}", h.handlePurgeSession)
 	mux.HandleFunc("GET /api/ui/ws", h.handleWebUIWS)
 	// output-range path id is shell_id (or session_id for primary-shell fallback).
 	mux.HandleFunc("GET /api/sessions/{id}/output-range", h.handleSessionOutputRange)
 	mux.HandleFunc("POST /api/sessions/{id}/shells", h.handleCreateShell)
 	mux.HandleFunc("GET /api/sessions/{id}/shells", h.handleListShells)
+
+	// Archived session history (survives termcp restarts until explicitly purged).
+	mux.HandleFunc("GET /api/history", h.handleListHistory)
+	mux.HandleFunc("GET /api/history/search", h.handleSearchHistory)
+	mux.HandleFunc("GET /api/history/{id}", h.handleGetHistory)
+	mux.HandleFunc("PATCH /api/history/{id}", h.handleUpdateHistory)
+	mux.HandleFunc("DELETE /api/history/{id}", h.handleDeleteHistory)
+	mux.HandleFunc("GET /api/history/{id}/transcript", h.handleHistoryTranscript)
+	mux.HandleFunc("GET /api/history/{id}/screenshot", h.handleHistoryScreenshot)
 
 	// Shells (globally unique IDs — virtual top-level resource)
 	mux.HandleFunc("GET /api/shells/{id}/output-range", h.handleShellOutputRange)
@@ -372,6 +387,250 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handlePurgeSession terminates a live session and permanently clears its
+// history record and message files (DELETE /api/sessions/{id}). For an already
+// archived session it clears the record directly.
+func (h *Handler) handlePurgeSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if h.Sessions.Get(id) != nil {
+		if err := h.Sessions.Delete(id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if h.History != nil {
+		if _, ok := h.History.Get(id); ok {
+			if err := h.History.Delete(id); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+type sessionRenameBody struct {
+	Name *string `json:"name"`
+}
+
+// handleRenameSession renames a live or archived session (PATCH /api/sessions/{id}).
+func (h *Handler) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body sessionRenameBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if body.Name == nil || strings.TrimSpace(*body.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+		return
+	}
+	name := strings.TrimSpace(*body.Name)
+
+	if sess := h.Sessions.Get(id); sess != nil {
+		if err := h.Sessions.Rename(id, name); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, h.Sessions.Get(id).Info())
+		return
+	}
+	if h.History != nil {
+		if _, ok := h.History.Get(id); ok {
+			if err := h.History.Update(id, &name, nil, nil); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			if a, ok := h.History.Get(id); ok {
+				writeJSON(w, http.StatusOK, a)
+				return
+			}
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// handleListHistory lists archived (dead) sessions.
+func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []api.ArchivedSession{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": h.History.List()})
+}
+
+func (h *Handler) handleGetHistory(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	a, ok := h.History.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *Handler) handleSearchHistory(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"hits": []any{}})
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "q query parameter required"})
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hits": h.History.Search(q, limit)})
+}
+
+type historyUpdateBody struct {
+	Name  *string   `json:"name"`
+	Notes *string   `json:"notes"`
+	Tags  *[]string `json:"tags"`
+}
+
+func (h *Handler) handleUpdateHistory(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	var body historyUpdateBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if _, ok := h.History.Get(id); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.History.Update(id, body.Name, body.Notes, body.Tags); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	a, _ := h.History.Get(id)
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *Handler) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if h.Sessions.Get(id) != nil {
+		if err := h.Sessions.Delete(id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if h.History == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if _, ok := h.History.Get(id); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.History.Delete(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleHistoryTranscript(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if _, ok := h.History.Get(id); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	format := strings.TrimSpace(r.URL.Query().Get("format"))
+	switch format {
+	case "text", "markdown", "html":
+	default:
+		format = "text"
+	}
+	var shellID string
+	if sid := strings.TrimSpace(r.URL.Query().Get("shell_id")); sid != "" {
+		shellID = sid
+	}
+	text, err := h.History.Transcript(id, format, shellID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	switch format {
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	case "markdown":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.md", id))
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.txt", id))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, text)
+}
+
+func (h *Handler) handleHistoryScreenshot(w http.ResponseWriter, r *http.Request) {
+	if h.History == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if _, ok := h.History.Get(id); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	msgs, err := h.History.Messages(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	opts := screenshot.Options{
+		Start: atoiDefault(r.URL.Query().Get("start"), 0),
+		Lines: atoiDefault(r.URL.Query().Get("lines"), 0),
+		Cols:  atoiDefault(r.URL.Query().Get("cols"), 80),
+		Theme: r.URL.Query().Get("theme"),
+	}
+	img, err := screenshot.Render(msgs, opts)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.png", id))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(img)
+}
+
+func atoiDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 // handleCreateShell creates a new shell channel on an existing session.
 // POST /api/sessions/{id}/shells
 func (h *Handler) handleCreateShell(w http.ResponseWriter, r *http.Request) {
@@ -451,11 +710,6 @@ func (h *Handler) writeOutputRange(w http.ResponseWriter, r *http.Request, id st
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	shell := h.resolveOutputShell(id)
-	if shell == nil {
-		http.NotFound(w, r)
-		return
-	}
 
 	const hardMax = 512 * 1024
 	max, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("max")))
@@ -468,14 +722,7 @@ func (h *Handler) writeOutputRange(w http.ResponseWriter, r *http.Request, id st
 
 	tail := strings.TrimSpace(r.URL.Query().Get("tail")) == "1"
 	var start int64
-	if tail {
-		total := shell.BufferLen()
-		t := total - int64(max)
-		if t < 0 {
-			t = 0
-		}
-		start = t
-	} else {
+	if !tail {
 		start, err = strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("start")), 10, 64)
 		if err != nil || start < 0 {
 			http.Error(w, "invalid start", http.StatusBadRequest)
@@ -483,11 +730,51 @@ func (h *Handler) writeOutputRange(w http.ResponseWriter, r *http.Request, id st
 		}
 	}
 
-	data, total, err := shell.OutputByteRange(start, max)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var data []byte
+	var total int64
+	shell := h.resolveOutputShell(id)
+	if shell == nil {
+		// DEAD/restored sessions have no live shell or buffer; serve the read-only
+		// view from the persisted message log so tabs still work after a transport
+		// teardown or a termcp restart.
+		sid, shid, ok := h.persistedOutputFor(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		blob := h.persistedOutputBlob(sid, shid)
+		total = int64(len(blob))
+		if tail {
+			t := total - int64(max)
+			if t < 0 {
+				t = 0
+			}
+			start = t
+		}
+		if start > total {
+			start = total
+		}
+		end := start + int64(max)
+		if end > total {
+			end = total
+		}
+		data = blob[start:end]
+	} else {
+		if tail {
+			total := shell.BufferLen()
+			t := total - int64(max)
+			if t < 0 {
+				t = 0
+			}
+			start = t
+		}
+		data, total, err = shell.OutputByteRange(start, max)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
+
 	end := start + int64(len(data))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"start": start,
@@ -497,6 +784,50 @@ func (h *Handler) writeOutputRange(w http.ResponseWriter, r *http.Request, id st
 	})
 }
 
+// persistedOutputFor resolves a DEAD/restored session (and optional shell) for a
+// read-only output range. id may be a session_id (whole merged stream) or a
+// shell_id (single-shell stream). ok is false for known-live sessions (which use
+// their in-memory buffer) and for unknown ids.
+func (h *Handler) persistedOutputFor(id string) (sessionID, shellID string, ok bool) {
+	if h.History == nil {
+		return "", "", false
+	}
+	if sess := h.Sessions.Get(id); sess != nil {
+		if sess.Info().Status != api.SessionRunning {
+			return sess.ID, "", true
+		}
+		return "", "", false
+	}
+	if sess := h.Sessions.GetSessionByShellID(id); sess != nil {
+		if sess.Info().Status != api.SessionRunning {
+			return sess.ID, id, true
+		}
+	}
+	return "", "", false
+}
+
+// persistedOutputBlob concatenates the raw output bytes for a shell (or the whole
+// session when shellID is empty), in message order, from the on-disk log. This
+// reconstructs the terminal content that a DEAD/restored session no longer keeps
+// in a live ring buffer.
+func (h *Handler) persistedOutputBlob(sessionID, shellID string) []byte {
+	msgs, err := h.History.Messages(sessionID)
+	if err != nil {
+		return nil
+	}
+	var buf bytes.Buffer
+	for _, m := range msgs {
+		if m.Type != api.MsgOutput {
+			continue
+		}
+		if shellID != "" && m.ShellID != shellID {
+			continue
+		}
+		buf.WriteString(m.Content)
+	}
+	return buf.Bytes()
+}
+
 func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess := h.Sessions.Get(id)
@@ -504,8 +835,9 @@ func (h *Handler) handleListShells(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// All shells are peers in the session's shell map (including primary).
-	shells := sess.ListChildShells()
+	// Live sessions list in-memory channel children; DEAD/restored sessions fall
+	// back to the persisted shell snapshot so their tabs survive a restart.
+	shells := sess.ShellsForView()
 	if shells == nil {
 		shells = []api.Session{}
 	}

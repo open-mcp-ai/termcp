@@ -9,6 +9,7 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/open-mcp-ai/termcp/internal/forward"
+	"github.com/open-mcp-ai/termcp/internal/history"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
@@ -19,7 +20,7 @@ import (
 // of stopping after narrative plans; compliance still depends on the host client + model.
 const mcpServerInstructions = `termcp agent rules (follow in order until the user's task is done or a tool returns a hard error):
 
-0) Tool groups (2-level naming <group>_<action>): session_* — connection lifecycle (start/list/info/terminate); shell_* — terminal channels (open/list/close/input/key/output/resize/detect, reader_register/reader_unregister); forward_* — port forwarding (local/remote/dynamic/list/close); file_* — SFTP file operations (read/write/stat/delete/rename/mkdir/chmod/...); ssh_config_* — SSH profile management (list/create/edit/copy/delete); message_* — stored message history (list/get).
+0) Tool groups (2-level naming <group>_<action>): session_* — connection lifecycle (start/list/info/terminate); shell_* — terminal channels (open/list/close/input/key/output/resize/detect, reader_register/reader_unregister); forward_* — port forwarding (local/remote/dynamic/list/close); file_* — SFTP file operations (read/write/stat/delete/rename/mkdir/chmod/...); ssh_config_* — SSH profile management (list/create/edit/copy/delete); message_* — stored message history (list/get); history_* — archived/dead sessions (list/get_transcript/search/rename/update_meta/screenshot/purge).
 
 1) IDs: session_id is the connection container (forwards, files, terminate, shell_open). shell_id is a terminal channel (shell_input, shell_key, shell_output, shell_resize, shell_close, readers). Never invent either; take them from session_start / shell_open / list_*.
 
@@ -31,7 +32,7 @@ const mcpServerInstructions = `termcp agent rules (follow in order until the use
 
 5) Verify a remote command succeeded by checking the terminal output from shell_output or an explicit success field in the tool result.
 
-6) Lifecycle: session_terminate(session_id) closes the connection (cascades shells + forwards) and removes the session. Use force=true for immediate kill. shell_close only closes one channel.
+6) Lifecycle: session_terminate(session_id) closes the connection (cascades shells + forwards) and removes the session from the live registry, but RETAINS its history (it becomes an archived/dead session, listed by history_list). Use history_purge to permanently delete an archived session and erase its message history; use history_get_transcript / history_screenshot to read a finished session. Use force=true for immediate kill. shell_close only closes one channel.
 
 7) Passwords and secrets: If shell_output shows a password prompt, sudo password, passphrase, MFA/2FA, or SSH keyboard-interactive challenge, stop automated input and tell the user to type the secret in the termcp Web UI terminal for that same shell. Only the user can enter secrets; the agent must not attempt to guess or paste them. Continue with non-secret commands only after the user confirms they entered it.
 
@@ -51,10 +52,16 @@ type Server struct {
 	streamServer *mcpserver.StreamableHTTPServer
 	sessMgr      *session.Manager
 	msgMgr       *message.Manager
+	historyMgr   *history.Manager
 	sshConfigs   *sshconfig.Store
 	forwardMgr   *forward.ForwardManager
 	baseURL      string // http://host:port, set from Start()
 	NoInternal   bool   // when true, hide and refuse the built-in loopback profile
+}
+
+// SetHistory attaches the archived-session history manager (list/transcript/search/purge tools).
+func (s *Server) SetHistory(h *history.Manager) {
+	s.historyMgr = h
 }
 
 // New creates and configures the MCP server with all tools registered.
@@ -134,7 +141,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("session_info", s.handleGetSessionInfo))
 
 	mcpServer.AddTool(mcpgo.NewTool("session_terminate",
-		mcpgo.WithDescription("Stop and remove a session: terminate all shells, close the SSH connection, cascade attached forwards, and drop the registry entry. force=true kills immediately; force=false waits grace_period after SIGTERM. To close only one shell channel, use shell_close."),
+		mcpgo.WithDescription("Stop and archive a session: terminate all shells, close the SSH connection, cascade attached forwards, and drop the registry entry. The session's history record and message files are RETAINED (it becomes an 'archived/dead' session) and can be read via history_list / history_get_transcript / history_screenshot. Use history_purge to permanently delete a session and erase its history. force=true kills immediately; force=false waits grace_period after SIGTERM. To close only one shell channel, use shell_close."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id from session_start")),
 		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
 		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
@@ -170,6 +177,49 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithDescription("Allocate a new output reader_id for this shell. That reader only observes bytes written after registration (cursor starts at buffer end). Pair every shell_output(..., reader_id) with the id returned here."),
 		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id from session_start / shell_open")),
 	), withLogging("shell_reader_register", s.handleRegisterReader))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_list",
+		mcpgo.WithDescription("Enumerate archived (dead) sessions retained across termcp restarts. Each entry includes session metadata, exit code, archive reason, notes, and tags. Use history_get_transcript / history_search_messages / history_screenshot for CTF writeup work."),
+	), withLogging("history_list", s.handleListHistory))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_get_transcript",
+		mcpgo.WithDescription("Export an interleaved input/output timeline of an archived session. format: text (plain), markdown (code-block, for pasting into writeups), or html."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id of an archived session from history_list")),
+		mcpgo.WithString("format", mcpgo.Description("Output format: text, markdown, or html"), mcpgo.DefaultString("markdown")),
+	), withLogging("history_get_transcript", s.handleGetTranscript))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_search_messages",
+		mcpgo.WithDescription("Full-text search across all archived sessions' messages. Returns matching input/output message snippets grouped by session."),
+		mcpgo.WithString("query", mcpgo.Required(), mcpgo.Description("Case-insensitive substring to search for in message content")),
+		mcpgo.WithNumber("limit", mcpgo.Description("Max number of matching snippets to return (0 = no limit)"), mcpgo.DefaultNumber(50)),
+	), withLogging("history_search_messages", s.handleSearchMessages))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_rename_session",
+		mcpgo.WithDescription("Rename an archived (or live) session to a friendlier label for writeups."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id to rename")),
+		mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("New display name")),
+	), withLogging("history_rename_session", s.handleRenameSession))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_update_session_meta",
+		mcpgo.WithDescription("Set or clear notes/tags on an archived session (writeup annotations). Omit a field to leave it unchanged; pass empty string / empty array to clear."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id of an archived session")),
+		mcpgo.WithString("notes", mcpgo.Description("Writeup notes to set (omit to keep, empty string to clear)")),
+		mcpgo.WithArray("tags", mcpgo.Description("Tags to set (omit to keep, empty array to clear)"), mcpgo.WithStringItems()),
+	), withLogging("history_update_session_meta", s.handleUpdateSessionMeta))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_purge",
+		mcpgo.WithDescription("Permanently delete an archived (or live) session: removes its history record AND its on-disk message files. This cannot be undone. Use history_rename_session/history_update_session_meta to annotate a session you want to keep."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id to delete permanently")),
+	), withLogging("history_purge", s.handlePurgeSession))
+
+	mcpServer.AddTool(mcpgo.NewTool("history_screenshot",
+		mcpgo.WithDescription("Return the HTTP download URL for a PNG screenshot of an archived session's messages, rendered as a fixed-bitmap terminal image (ASCII letters/digits only). start is the first display line, lines the count to render (0 = all), theme dark or light."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id of an archived session")),
+		mcpgo.WithNumber("start", mcpgo.Description("First display line to include (0-based)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("lines", mcpgo.Description("Number of display lines to render; 0 = all"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("cols", mcpgo.Description("Terminal width in columns"), mcpgo.DefaultNumber(80)),
+		mcpgo.WithString("theme", mcpgo.Description("dark (default) or light"), mcpgo.DefaultString("dark")),
+	), withLogging("history_screenshot", s.handleScreenshot))
 
 	mcpServer.AddTool(mcpgo.NewTool("shell_reader_unregister",
 		mcpgo.WithDescription("Release a reader_id previously returned by shell_reader_register."),

@@ -36,11 +36,19 @@ func (m *Manager) ForgetSession(sessionID string) {
 	m.session.Delete(sessionID)
 }
 
-// Append records a new message and persists it.
+// Append records a new message and persists it. The shell id is empty, meaning
+// the primary/legacy shell of the session.
 func (m *Manager) Append(sessionID string, typ api.MsgType, content string) (*api.Message, error) {
+	return m.AppendShell(sessionID, "", typ, content)
+}
+
+// AppendShell records a new message tagged with the originating shell id.
+// An empty shellID identifies the primary/legacy shell.
+func (m *Manager) AppendShell(sessionID string, shellID string, typ api.MsgType, content string) (*api.Message, error) {
 	msg := api.Message{
 		ID:        uuid.New().String()[:12],
 		SessionID: sessionID,
+		ShellID:   shellID,
 		Type:      typ,
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
@@ -60,6 +68,7 @@ func (m *Manager) Append(sessionID string, typ api.MsgType, content string) (*ap
 	}
 	entries = append(entries, api.MessageIndexEntry{
 		ID:        msg.ID,
+		ShellID:   msg.ShellID,
 		Type:      msg.Type,
 		CreatedAt: msg.CreatedAt,
 		ByteSize:  msg.ByteSize,

@@ -60,20 +60,28 @@ type Config struct {
 // Session is a connection container; terminal I/O is addressed by shell_id via ChildShell.
 type Session struct {
 	api.Session
-	mu             sync.RWMutex
-	stdinMu        sync.Mutex
-	terminateOnce  sync.Once
-	exitOnce       sync.Once
-	execSession    *sshclient.ExecSession
-	buf            *buffer.Buffer
-	readerID       int
-	msgMgr         *message.Manager
-	onExit         func()
-	onChildChange  func() // called when child shells are added/removed
-	enterCRLF      bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
+	mu            sync.RWMutex
+	stdinMu       sync.Mutex
+	terminateOnce sync.Once
+	deadOnce      sync.Once
+	exitOnce      sync.Once
+	execSession   *sshclient.ExecSession
+	buf           *buffer.Buffer
+	readerID      int
+	msgMgr        *message.Manager
+	onDead        func()
+	onChildChange func() // called when child shells are added/removed
+	enterCRLF     bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
 	primaryShellID string // first shell id (≠ session id); used for legacy Session-level helpers
 
 	shells sync.Map // *ChildShell by ID
+	// shellHistory retains the last-known per-shell metadata (id, name, status)
+	// so a DEAD session can still render per-shell tabs after shells leave the
+	// live map on exit. Also persisted to sessions.json for restart restore.
+	shellHistory sync.Map // string → api.Session
+	// doneWG tracks live output pipe goroutines so markDead can flush their final
+	// message Appends before the session is observed as exited.
+	doneWG sync.WaitGroup
 }
 
 // New creates and starts a new Session.
@@ -167,7 +175,6 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 		enterCRLF:   enterCRLF,
 		mode:        cfg.Mode,
 	}
-	root.startReaders()
 
 	s := &Session{
 		Session: api.Session{
@@ -194,8 +201,13 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
+	// Attach the root to the session BEFORE starting its readers so the output
+	// pipe and exit watcher see a live parent + message manager from the first
+	// byte. Starting readers first used to drop early output (never persisted).
 	root.parent = s
 	s.shells.Store(root.ID, root)
+	s.shellHistory.Store(root.ID, root.Info())
+	root.startReaders()
 
 	slog.Debug("session started", "session_id", sessionID, "shell_id", shellID, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
@@ -352,7 +364,7 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 		} else {
 			logged = string(data)
 		}
-		s.msgMgr.Append(s.ID, api.MsgInput, logged)
+		s.msgMgr.AppendShell(s.ID, s.primaryShellID, api.MsgInput, logged)
 	}
 	return nil
 }
@@ -367,9 +379,8 @@ func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Dur
 		output = ansi.Strip(output)
 		output = ansi.Compact(output)
 	}
-	if output != "" && persist && s.msgMgr != nil {
-		s.msgMgr.Append(s.ID, api.MsgOutput, output)
-	}
+	// Output is archived at the write source (pipeToBuffer), not here, so it is
+	// recorded exactly once regardless of which reader consumes it.
 	return output, nil
 }
 
@@ -416,53 +427,82 @@ func (s *Session) BufferLen() int64 {
 	return s.buf.Len()
 }
 
-// Terminate gracefully or forcefully stops the process.
-// The exit goroutine is the single authority for final Status/ExitCode.
+// Terminate ends the remote process/transport and marks the session DEAD
+// (exited) in place. The session object, its shells' metadata and retained
+// buffers, and its message history are all kept for read-only viewing; nothing
+// is removed from the registry or purged. Only Manager.Delete/finalize release
+// resources.
 func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 	s.terminateOnce.Do(func() {
+		es := s.execSession
+		if es == nil {
+			// Restored (restart) placeholder with no live transport.
+			s.markDead()
+			return
+		}
 		if !force {
-			s.execSession.Signal(ssh.SIGTERM)
+			es.Signal(ssh.SIGTERM)
 			select {
-			case <-s.execSession.Done():
-				s.terminateChildren()
+			case <-es.Done():
+				s.markDead()
 				return
 			case <-time.After(gracePeriod):
 			}
 		}
 
-		// Terminate child shells, then close the session channel.
-		// For remote sessions the SSH client stays alive for multiplexing (Disconnect() closes it).
-		// For internal sessions there's no multiplexing, so close everything.
-		s.terminateChildren()
+		// Close the session's own transport, not sibling session channels.
+		// For remote sessions the shared SSH client is left for Disconnect(); for
+		// internal loopback there's no multiplexing so close everything here.
 		if s.SSHEndpoint == "internal" {
-			s.execSession.Close()
+			es.Close()
 		} else {
-			s.execSession.CloseSessionOnly()
+			es.CloseSessionOnly()
 		}
+		s.markDead()
+	})
+}
 
+// markDead transitions a Running session to exited (DEAD) in place, retaining
+// the object in the registry, its retained buffers, and its message history.
+// Idempotent (runs once). It never removes the registry entry, forgets
+// messages, or closes retained buffers; only Manager.Delete → finalize do that.
+func (s *Session) markDead() {
+	s.deadOnce.Do(func() {
+		// Flush output pipe goroutines so the last bytes are appended to the
+		// message log before DEAD becomes observable.
+		flushDone := make(chan struct{})
+		go func() { s.doneWG.Wait(); close(flushDone) }()
 		select {
-		case <-s.execSession.Done():
-		case <-time.After(2 * time.Second):
+		case <-flushDone:
+		case <-time.After(500 * time.Millisecond):
 		}
 
-		// Remote sessions: exit processing skipped (connection stays alive).
-		// Internal sessions: normal exit processing.
-		if s.SSHEndpoint == "internal" {
-			s.exitOnce.Do(func() {
-				s.done()
-			})
+		s.mu.Lock()
+		if s.Status == api.SessionRunning {
+			s.Status = api.SessionExited
+			s.UpdatedAt = time.Now().UTC()
+		}
+		s.mu.Unlock()
+
+		slog.Debug("session DEAD", "session_id", s.ID)
+		if fn := s.onDead; fn != nil {
+			fn()
 		}
 	})
 }
 
-// done closes the session's buffer and removes it from the registry.
-// Must run inside s.exitOnce.
-func (s *Session) done() {
-	s.buf.Close()
-	slog.Debug("session closed", "session_id", s.ID)
-	if fn := s.onExit; fn != nil {
-		fn()
-	}
+// finalize releases the session's resources: remaining shells, buffers, and
+// transport. Its only caller is Manager.Delete. Runs once.
+func (s *Session) finalize() {
+	s.exitOnce.Do(func() {
+		s.terminateChildren()
+		if s.buf != nil {
+			s.buf.Close()
+		}
+		if s.execSession != nil {
+			_ = s.execSession.Close()
+		}
+	})
 }
 
 // TerminateShellOnly closes the primary shell channel by shell id. For internal sessions this is a
@@ -477,14 +517,13 @@ func (s *Session) TerminateShellOnly() {
 	}
 }
 
-// Disconnect closes the underlying SSH session/client and marks the session as fully exited.
+// Disconnect closes the session transport and marks the session DEAD in place,
+// preserving the object, buffers, and history for read-only viewing.
 func (s *Session) Disconnect() {
-	s.exitOnce.Do(func() {
-		s.done()
-	})
 	if s.execSession != nil {
-		_ = s.execSession.Close()
+		s.execSession.Close()
 	}
+	s.markDead()
 }
 
 // terminateChildren closes all child shells. Called during parent session termination.
@@ -789,6 +828,9 @@ func (cs *ChildShell) TerminateShell() {
 	code := -1
 	cs.ExitCode = &code
 	cs.mu.Unlock()
+	if cs.parent != nil {
+		cs.parent.shellHistory.Store(cs.ID, cs.Info())
+	}
 	cs.buf.Close()
 	// Ensure Done() channel is closed for any waiters (closeOnce prevents races with the exit watcher goroutine).
 	cs.closeOnce.Do(func() { close(cs.done) })
@@ -796,12 +838,26 @@ func (cs *ChildShell) TerminateShell() {
 
 // pipeChildToBuffer pipes child shell output into the buffer.
 func (cs *ChildShell) pipeToBuffer(r io.Reader) {
+	p := cs.parent
+	if p != nil {
+		p.doneWG.Add(1)
+	}
 	go func() {
+		if p != nil {
+			defer p.doneWG.Done()
+		}
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
 				cs.buf.Write(buf[:n])
+				// Archive output once at the source so every session (WebUI stream and
+				// MCP read alike) leaves a transcript — regardless of which reader
+				// consumes it. Never double-recorded because each write fires once.
+				// Tagged with the originating shell so archived history can split tabs.
+				if p := cs.parent; p != nil && p.msgMgr != nil {
+					p.msgMgr.AppendShell(p.ID, cs.ID, api.MsgOutput, string(buf[:n]))
+				}
 			}
 			if err != nil {
 				return
@@ -836,6 +892,10 @@ func (cs *ChildShell) startReaders() {
 		code := cs.execSession.ExitCode()
 		cs.ExitCode = &code
 		cs.mu.Unlock()
+		// Retain this shell's final metadata for the archived per-shell tabs.
+		if p := cs.parent; p != nil {
+			p.shellHistory.Store(cs.ID, cs.Info())
+		}
 		cs.buf.Close()
 		// Remove from parent's map and notify UI.
 		cs.cleanupOnce.Do(func() {
@@ -847,11 +907,19 @@ func (cs *ChildShell) startReaders() {
 		// clean process exit), tear down the session. exitOnce ensures once.
 		cs.mu.RLock()
 		deliberate := cs.deliberateClose
+		reparent := cs.parent
 		cs.mu.RUnlock()
-		if cs.parent != nil && !deliberate && cs.execSession.Aborted() {
-			cs.parent.exitOnce.Do(func() {
-				cs.parent.done()
-			})
+		if reparent != nil && !deliberate && cs.execSession.Aborted() {
+			// Only SSH transport loss DEADs the parent. A single shell's clean
+			// close must never cascade into siblings or the connection container;
+			// drop out if the parent already left running.
+			reparent.mu.RLock()
+			parentRunning := reparent.Status == api.SessionRunning
+			reparent.mu.RUnlock()
+			if parentRunning {
+				slog.Debug("session DEAD via transport abort", "session_id", reparent.ID, "child_shell_id", cs.ID)
+				reparent.markDead()
+			}
 		}
 		slog.Debug("child shell exited", "child_shell_id", cs.ID, "exit_code", code)
 	}()
@@ -896,9 +964,9 @@ func (s *Session) CreateChildShell(command string, args []string, pty bool, rows
 		mode:        mode,
 	}
 
-	cs.startReaders()
-
 	s.shells.Store(id, cs)
+	s.shellHistory.Store(id, cs.Info())
+	cs.startReaders()
 	if s.onChildChange != nil {
 		s.onChildChange()
 	}
@@ -950,4 +1018,30 @@ func (s *Session) ListChildShells() []api.Session {
 		out[i] = e.info
 	}
 	return out
+}
+
+// SnapshotShells returns the last-known per-shell metadata (still populated for
+// shells dropped from the live map on exit), sorted by creation time. This is
+// what gets persisted and what a DEAD session renders into its tabs.
+func (s *Session) SnapshotShells() []api.Session {
+	var out []api.Session
+	s.shellHistory.Range(func(_, v any) bool {
+		out = append(out, v.(api.Session))
+		return true
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out
+}
+
+// ShellsForView returns shell metadata for session rendering. Running sessions
+// report live shells; DEAD/restored sessions fall back to the retained shell
+// snapshot so their tabs survive transport teardown or a restart.
+func (s *Session) ShellsForView() []api.Session {
+	s.mu.RLock()
+	status := s.Status
+	s.mu.RUnlock()
+	if status == api.SessionRunning {
+		return s.ListChildShells()
+	}
+	return s.SnapshotShells()
 }

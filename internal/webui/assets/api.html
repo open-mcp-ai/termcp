@@ -212,7 +212,12 @@
           <tr><td>Connections</td><td>GET</td><td><code class="inline">/api/connections</code></td></tr>
           <tr><td>Connection</td><td>GET / PUT / DELETE</td><td><code class="inline">/api/connections/{name}</code></td></tr>
           <tr><td>Sessions</td><td>GET / POST</td><td><code class="inline">/api/sessions</code></td></tr>
-          <tr><td>Session</td><td>GET / DELETE</td><td><code class="inline">/api/sessions/{id}</code></td></tr>
+          <tr><td>Session</td><td>GET / PATCH / DELETE</td><td><code class="inline">/api/sessions/{id}</code> <span class="muted">(DELETE permanently erases history)</span></td></tr>
+          <tr><td>Dead sessions</td><td>GET</td><td><code class="inline">/api/history</code></td></tr>
+          <tr><td>Dead session</td><td>GET / PATCH / DELETE</td><td><code class="inline">/api/history/{id}</code> <span class="muted">(DELETE permanently erases history)</span></td></tr>
+          <tr><td>History search</td><td>GET</td><td><code class="inline">/api/history/search?q=...</code></td></tr>
+          <tr><td>Transcript</td><td>GET</td><td><code class="inline">/api/history/{id}/transcript?format=text|markdown|html</code></td></tr>
+          <tr><td>Screenshot</td><td>GET</td><td><code class="inline">/api/history/{id}/screenshot?start=0&amp;lines=40&amp;cols=80&amp;theme=dark</code></td></tr>
           <tr><td>Shells</td><td>GET / POST</td><td><code class="inline">/api/sessions/{id}/shells</code></td></tr>
           <tr><td>Shell</td><td>DELETE</td><td><code class="inline">/api/shells/{id}</code> <span class="muted">(shell_id)</span></td></tr>
           <tr><td>Output history</td><td>GET</td><td><code class="inline">/api/shells/{id}/output-range</code> <span class="muted">(shell_id)</span></td></tr>
