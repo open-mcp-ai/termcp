@@ -4,17 +4,68 @@
 
 ### Breaking
 
+- **MCP 工具全面改名**：所有工具改为两级 `<group>_<action>` 命名（如 `session_start`、`shell_send_input`），与 resource model 对齐。旧名称无别名。
+- **默认数据目录改为 `~/.termcp`**：优先级 `--data-dir` > `$TERMCP_DATA_DIR` > `~/.termcp`。目录权限收紧为 `0700`（SSH 配置属敏感数据）。
+
+### 新功能
+
+- **Web UI 平铺工作区**：终端窗口可一键平铺为网格布局（iTerm2 风格），支持单窗格最大化、活动窗格高亮、自动/列/行/双列四种排布策略。
+- **平铺/浮动单按钮切换**：切换按钮并入标签栏右侧，与 eye（隐藏全部）、排布策略下拉同行；平铺时按钮蓝色高亮提示当前状态。
+- **SSH 连接测试按钮**：新建连接前可直接测试连通性。
+- **离开页面保护**：关闭页面前提醒，防止误关正在运行的会话；终端新增"回到最新输出"按钮。
+
+### 改进
+
+- **构建**：新增平台感知 Makefile；默认按 release 模式构建（`-s -w -trimpath`）。
+- 修正多处 MCP 工具描述的歧义表述。
+
+## v0.1.11 — 2026-08-02
+
+### Breaking
+
 - **删除 admin HTTP API**：移除 `--admin-host` / `--admin-port` / `--admin-token` 开关与独立 admin 端口。SSH 配置管理改为 MCP 工具（用 `--mcp-manage-ssh-configs` 启用）。
 - **删除 `ssh-config init` / `ssh-config list` CLI 子命令**（从未出现在 `--help`）。SSH 配置改由 Web UI、`list_ssh_configs` 及 `--mcp-manage-ssh-configs` 的 MCP 工具管理。
-- **新增 `--mcp-manage-ssh-configs` 开关**（默认关闭）：开启后 MCP 客户端可调用 `create_ssh_config` / `edit_ssh_config` / `copy_ssh_config` / `delete_ssh_config` 管理 SSH profile。凭据写入后不可读取，日志不记录敏感字段。
 
-### Added
+### 新功能
 
-- `create_ssh_config`：结构化参数创建 remote SSH profile（host/user/password/private_key/jump）。
-- `edit_ssh_config`：增量修补已有 profile，省略字段保持原值（含凭据）。
-- `copy_ssh_config`：服务端复制 profile（含凭据），凭据不会经过 AI。
-- `delete_ssh_config`：按名称删除 profile。
-- WebUI Entries/Sessions 面板可折叠，状态持久化到 localStorage。
+- **MCP SSH 配置管理**（`--mcp-manage-ssh-configs`，默认关闭）：
+  - `create_ssh_config`：结构化参数创建 remote SSH profile（host/user/password/private_key/jump）。
+  - `edit_ssh_config`：增量修补已有 profile，省略字段保持原值（含凭据）。
+  - `copy_ssh_config`：服务端复制 profile（含凭据），凭据不会经过 AI。
+  - `delete_ssh_config`：按名称删除 profile。
+  - 凭据写入后不可读取，日志不记录敏感字段。
+- **WebUI 面板折叠**：Entries/Sessions 面板可折叠，状态持久化到 localStorage。
+- **连接删除确认弹窗**：样式与整体 UI 统一。
+
+### 修复
+
+- 修正用户可见字符串中的配置文件名。
+
+### 文档
+
+- 新增 Docker 部署文档；README 全面重写；新增演示视频。
+
+## v0.1.10 — 2026-07-20
+
+### 修复
+
+- **会话级联清理**：会话退出时级联回收子 shell 与转发资源，并对齐 shell API 行为。
+
+## v0.1.9 — 2026-07-15
+
+### 修复
+
+- **转发生命周期**：端口转发创建时与会话绑定，UI 入口统一封装，不再出现孤儿转发。
+
+## v0.1.8 — 2026-07-14
+
+### 文档
+
+- **Web UI `api.html`**：首页标题栏新增 **API / MCP** 入口；精简为 MCP 可复制配置 + HTTP/WebSocket API 速查表，含 `claude mcp add --transport http`、通用 `mcpServers` JSON 与 URL-only 说明；`/sse` 与 `/stream` 对等说明同步补齐（README / README.zh / `docs/mcp-tools.md` / `docs/api.md` / architecture）。
+
+## v0.1.7 — 2026-07-11
+
+### Breaking（MCP 重设计）
 
 - **Session / Shell 双 ID**：`start_session` 返回互不相同的 `session_id`（连接容器）与 `shell_id`（终端通道）。首个 shell 不再与 session 共用 id。
 - **I/O 只认 `shell_id`**：`send_input` / `press_key` / `read_output` / `resize_pty` / `register_reader` / `unregister_reader` / `close_shell` 参数改为 `shell_id`。连接级操作（forwards、files、terminate、delete、start_subshell）仍用 `session_id`。
@@ -26,16 +77,87 @@
 - **去掉恒空 `initial_output`**；`read_output` 默认 `timeout` 从 5 改为 3。
 - **生命周期叙事**：MCP 只保留 `terminate_session`；`force=true` 立即强杀，HTTP `DELETE /api/sessions/{id}` 仍保留。
 
-### 文档
-
-- 重写 MCP `instructions`、`docs/mcp-tools.md`、CLAUDE multi-session 规则；对齐 resource-model。
-- **`/sse` 与 `/stream` 对等说明**：README / README.zh / `docs/mcp-tools.md` / `docs/api.md` / architecture 同步补齐端点、配套路径、客户端样例与常见误配。
-- **Web UI `api.html`**：首页标题栏 **API / MCP** 入口；精简为 MCP 可复制配置 + HTTP/WebSocket API 速查表，含 `claude mcp add --transport http`、通用 `mcpServers` JSON 与 URL-only 说明。
-
 ### 修复
 
 - **`read_output.max_lines` 丢数据**：行数限制改为 buffer 层按换行截断游标；未返回行保留且 `has_more=true`（原先先消费再字符串截断）。
 - **internal `close_shell` 误拆会话**：子 shell 主动关闭设 `deliberateClose`，退出 watcher 不再把 intentional channel close 当 SSH 断连。
+
+### 文档
+
+- 重写 MCP `instructions`、`docs/mcp-tools.md`、CLAUDE multi-session 规则；对齐 resource-model。
+
+## v0.1.6 — 2026-07-11
+
+### 新功能
+
+- **SSH profile 改名**：配置文件同步迁移，引用不断链。
+- **internal profile 虚拟化**：内置 loopback 连接不再落盘，且禁止编辑/删除。
+- **`--no-internal` 开关**：禁用内建 loopback SSH profile。
+
+## v0.1.5 — 2026-07-10
+
+### 修复
+
+- 密码框眼睛按钮纵向居中；密码/私钥字段自动 trim，防止首尾空格干扰认证。
+
+## v0.1.4 — 2026-07-10
+
+### 修复
+
+- **`go install` 后 Web UI 资源缺失**：`vendor` 目录重命名为 `static`，避免 Go module zip 默认排除 `vendor` 路径导致 xterm.js 等静态资源丢失。
+
+## v0.1.3 — 2026-07-09
+
+### 修复
+
+- 新建连接弹窗中 Key Passphrase 字段随 Auth 方式切换显隐，仅在 Private Key 时显示。
+
+## v0.1.2 — 2026-07-03
+
+### 新功能
+
+- **SFTP 文件工具套件**：新增 10 个文件管理 MCP 工具（读写、列目录、删除、重命名、建目录等），统一走 SSH 路径。
+
+### 改进
+
+- **REST API 统一**：清理冗余端点，统一资源式设计。
+- **转发/子 shell 变更实时推送**：创建与删除后通过 WebSocket 自动刷新 UI，无需手动刷新。
+- Shell 平等化与会话层重构（sync.Map、SSH 断线检测）。
+
+### 修复
+
+- **exited session panic**：`SendTerminalBytes` 增加 nil 检查，会话退出后写入不再崩溃。
+
+## v0.1.1 — 2026-07-01
+
+### 新功能
+
+- **SOCKS5 代理与跳板链**：SSH 配置支持 SOCKS5 代理与 ProxyJump 多级跳板。
+
+### 修复
+
+- **Enter 按目标系统发送**：换行符按目标 shell 所属平台（Windows CRLF / Unix LF）而非 termcp 本机 OS 决定，修复从 Windows 管理 Unix 主机时的输入异常。
+
+## v0.1.0 — 2026-06-30
+
+### 新功能
+
+- **单会话多 shell 通道**：SSH shell 通道多路复用（统一 ChildShell 模型），一个会话内可开多个终端通道。
+- **`close_shell` / `list_subshells` MCP 工具**：父子 shell 生命周期拆分，支持显式关闭单个 shell 与列出全部子 shell。
+- **MCP 文件工具回归**：重新引入 SFTP 文件读写工具。
+
+### 改进
+
+- internal SSH 支持 SFTP subsystem；SSH 配置迁移至 TOML；包结构与命名重构、清理死代码。
+
+### 修复
+
+- **root shell 自然退出不再带垮 internal session**：主 shell 退出时正确区分连接关闭与整体断开。
+- WebUI 连接加载指示器纵向居中，清理启动日志。
+
+### 文档
+
+- 文档与代码同步（31 个 MCP 工具清单、内存 SSH 架构说明）。
 
 ## v0.0.4 — 2026-05-23
 
@@ -69,7 +191,7 @@
 
 - **优化 .gitignore**：防范二进制文件误提交。
 
-## v0.0.3 — 2026-05-11
+## v0.0.3 — 2026-05-12
 
 ### 新功能
 
@@ -97,20 +219,24 @@
 
 ### 改进
 
-- **SSH 库替换**：`gliderlabs/ssh` → `charmbracelet/ssh`（`39e85e4`）。charmbracelet/ssh 内置 `AllocatePty()` 自动管理 PTY 生命周期，移除手工 `pty.StartWithSize`/`io.Copy`/`pty.Setsize` 代码。公共 API（`New`/`Start`/`Stop`/`Addr` 等）签名不变。
+- **SSH 库替换**：`gliderlabs/ssh` → `charmbracelet/ssh`。charmbracelet/ssh 内置 `AllocatePty()` 自动管理 PTY 生命周期，移除手工 `pty.StartWithSize`/`io.Copy`/`pty.Setsize` 代码。公共 API（`New`/`Start`/`Stop`/`Addr` 等）签名不变。
 
-- **跨平台输入处理**：`SendInput` 在 `press_enter=true` 时自动选择平台换行符 — Windows 用 CRLF（`\r\n`），Unix 用 LF（`\n`）（`83bfd12`）。
+- **跨平台输入处理**：`SendInput` 在 `press_enter=true` 时自动选择平台换行符 — Windows 用 CRLF（`\r\n`），Unix 用 LF（`\n`）。
 
-- **SFTP 路径规范化**：远程路径自动将反斜杠转为正斜杠，避免 Windows 路径分隔符导致 SSH 文件操作失败（`83bfd12`）。
+- **SFTP 路径规范化**：远程路径自动将反斜杠转为正斜杠，避免 Windows 路径分隔符导致 SSH 文件操作失败。
 
-- **PowerShell 优化**：交互测试使用 `powershell.exe -NoLogo -NoProfile` 抑制启动横幅，用 `Write-Output`（原生 cmdlet）替代 `echo` 别名确保 ConPTY 下输出稳定（`3411511`、`5816374`）。
-
-- **信号转发验证**：新增 `TestServer_SignalTerm` 和 `TestServer_SignalInterrupt` 验证 SIGTERM/SIGINT 通过 SSH 通道正确转发至目标进程（`96ba75c`）。
+- **信号转发验证**：新增 `TestServer_SignalTerm` 和 `TestServer_SignalInterrupt` 验证 SIGTERM/SIGINT 通过 SSH 通道正确转发至目标进程。
 
 ### 修复
 
-- **Windows PTY 交互输出为空**：ARM64 上 PowerShell/ConPTY 输出时序问题导致首次读取为空。改为 `Write-Output` 原生命令配合 marker 轮询读取（`testReadOutputUntil`）解决（`5816374`）。
+- **Windows PTY 交互输出为空**：ARM64 上 PowerShell/ConPTY 输出时序问题导致首次读取为空。改为 `Write-Output` 原生命令配合 marker 轮询读取（`testReadOutputUntil`）解决。
 
-- **Windows 进程退出行为不确定**：PowerShell `-Command` 在 ConPTY 下完成命令后保持交互态，自然退出测试在 Windows 跳过（`3411511`、`e501489`）。
+- **Windows 进程退出行为不确定**：PowerShell `-Command` 在 ConPTY 下完成命令后保持交互态，自然退出测试在 Windows 跳过。
 
-- **Windows 跳过 POSIX signal 测试**：`SIGTERM`/`SIGINT` 测试在 Windows 跳过，Windows 不支持 POSIX 信号（`e501489`）。
+- **Windows 跳过 POSIX signal 测试**：`SIGTERM`/`SIGINT` 测试在 Windows 跳过，Windows 不支持 POSIX 信号。
+
+## v0.0.1 — 2026-05-05
+
+### 初始发布
+
+- termcp 首个版本：把交互式程序作为持久 SSH 会话暴露给 AI Agent 的 MCP server。
