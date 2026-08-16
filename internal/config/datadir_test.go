@@ -45,13 +45,3 @@ func TestDefaultDataDir_NoHomeErrors(t *testing.T) {
 		t.Fatal("expected error when home directory cannot be determined")
 	}
 }
-
-func TestLegacyExeDataDir_IsExeDirPlusData(t *testing.T) {
-	dir, err := LegacyExeDataDir()
-	if err != nil {
-		t.Fatalf("LegacyExeDataDir() error: %v", err)
-	}
-	if want := "data"; filepath.Base(dir) != want {
-		t.Fatalf("LegacyExeDataDir() = %q, want base %q", dir, want)
-	}
-}

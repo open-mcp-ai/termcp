@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -118,16 +117,6 @@ func main() {
 		}
 		cfg.DataDir = dir
 	}
-	// One-time migration from the previous default (<dir of executable>/data):
-	// moves the old tree into the resolved dir when the target is still empty.
-	if legacy, err := config.LegacyExeDataDir(); err == nil {
-		moved, err := migrateDataDir(legacy, cfg.DataDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not migrate legacy data dir %q: %v\n", legacy, err)
-		} else if moved {
-			fmt.Fprintf(os.Stderr, "migrated legacy data dir %q -> %q\n", legacy, cfg.DataDir)
-		}
-	}
 	// Fail fast when the data directory cannot be created or written.
 	if err := ensureWritableDir(cfg.DataDir); err != nil {
 		fmt.Fprintf(os.Stderr, "data dir %q is not writable: %v\n", cfg.DataDir, err)
@@ -227,74 +216,6 @@ func ensureWritableDir(dir string) error {
 	}
 	f.Close()
 	return os.Remove(probe)
-}
-
-// migrateDataDir moves legacy data into dir when dir does not exist or is
-// empty. It reports whether a migration happened; on failure the legacy tree
-// is left untouched.
-func migrateDataDir(legacy, dir string) (bool, error) {
-	if legacy == "" || dir == "" || legacy == dir {
-		return false, nil
-	}
-	entries, err := os.ReadDir(legacy)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	if len(entries) == 0 {
-		return false, nil
-	}
-	if existing, err := os.ReadDir(dir); err == nil && len(existing) > 0 {
-		return false, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
-		return false, err
-	}
-	// Rename is atomic within one filesystem; copy as fallback across devices.
-	if err := os.Rename(legacy, dir); err == nil {
-		return true, nil
-	}
-	if err := copyTree(legacy, dir); err != nil {
-		return false, err
-	}
-	if err := os.RemoveAll(legacy); err != nil {
-		return false, fmt.Errorf("copied but could not remove legacy dir: %w", err)
-	}
-	return true, nil
-}
-
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o700)
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, info.Mode().Perm())
-	})
 }
 
 func buildLogHandler(cfg *config.Config) slog.Handler {

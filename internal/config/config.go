@@ -44,19 +44,6 @@ func DefaultDataDir() (string, error) {
 	return filepath.Join(home, ".termcp"), nil
 }
 
-// LegacyExeDataDir returns the previous default data dir (<dir of executable>/data).
-// It exists only to migrate old installs to the new default.
-func LegacyExeDataDir() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("cannot locate executable: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	return filepath.Join(filepath.Dir(exe), "data"), nil
-}
-
 // Validate checks that all fields are within valid ranges.
 func (c *Config) Validate() error {
 	if c.Port < 1 || c.Port > 65535 {

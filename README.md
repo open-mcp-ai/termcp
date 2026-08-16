@@ -128,7 +128,7 @@ termcp [flags]
 | --------------- | ------------- | ------------------------------------------------------------------------ |
 | `--host`        | `127.0.0.1`   | HTTP bind address. `0.0.0.0` listens on all interfaces.                  |
 | `--port`        | `18765`       | HTTP port. Shared by the Web UI, MCP SSE, and MCP streamable HTTP.       |
-| `--data-dir`    | `~/.termcp`   | Persistence directory (sessions, messages, SSH configs). Auto-created. Default overridable via `$TERMCP_DATA_DIR`; a legacy `<exe dir>/data` is migrated on first start. |
+| `--data-dir`    | `~/.termcp`   | Persistence directory (sessions, messages, SSH configs). Auto-created. Default overridable via `$TERMCP_DATA_DIR`. |
 | `--log-level`   | `info`        | Log level: `debug` / `info` / `warn` / `error`. `debug` shows MCP tool calls. |
 | `--no-internal` | `false`       | Disable the built-in loopback SSH profile.                                   |
 | `--mcp-manage-ssh-configs` | `false` | Enable MCP tools to create/edit/delete SSH configs (secrets are never exposed). |
