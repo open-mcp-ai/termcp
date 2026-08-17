@@ -108,8 +108,8 @@ cd termcp
 # 编译
 go build -o termcp .
 
-# 运行（默认：loopback，端口 18765）
-./termcp --data-dir ./data
+# 运行（默认：loopback，端口 18765；数据存于 ~/.termcp）
+./termcp
 ```
 
 浏览器打开 `http://127.0.0.1:18765` 即可进入 **Web 界面**。
@@ -126,7 +126,7 @@ termcp [flags]
 | --------------- | ----------- | ------------------------------------------------------------ |
 | `--host`        | `127.0.0.1` | HTTP 绑定地址。`0.0.0.0` 监听所有网卡。                      |
 | `--port`        | `18765`     | HTTP 端口。Web UI、MCP SSE、MCP streamable HTTP 共用。       |
-| `--data-dir`    | `./data`    | 持久化目录（会话、消息、SSH 配置）。不存在则自动创建。       |
+| `--data-dir`    | `~/.termcp` | 持久化目录（会话、消息、SSH 配置）。不存在则自动创建。默认值可用环境变量 `$TERMCP_DATA_DIR` 覆盖。 |
 | `--log-level`   | `info`      | 日志级别：`debug` / `info` / `warn` / `error`。`debug` 显示 MCP 工具调用。 |
 | `--no-internal` | `false`     | 禁用内建 loopback SSH profile。                                |
 | `--mcp-manage-ssh-configs` | `false` | 允许 AI 通过 MCP 管理 SSH 配置（凭据永不暴露）。                |
@@ -135,10 +135,10 @@ termcp [flags]
 
 ```bash
 # 监听所有网卡
-./termcp --data-dir ./data --host 0.0.0.0
+./termcp --host 0.0.0.0
 
 # 允许 AI Agent 管理 SSH 配置
-./termcp --data-dir ./data --mcp-manage-ssh-configs
+./termcp --mcp-manage-ssh-configs
 ```
 
 ## Docker 部署

@@ -1,9 +1,12 @@
 package session
 
 import (
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/open-mcp-ai/termcp/internal/history"
 	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
@@ -16,7 +19,9 @@ type Manager struct {
 	internalSSH *sshserver.Server
 	msgMgr      *message.Manager
 	store       *storage.Store
+	hist        *history.Manager
 
+	historyMu    sync.Mutex
 	listChangeMu sync.RWMutex
 	onListChange func()
 	onTerminate  func(sessionID string)
@@ -29,6 +34,12 @@ func NewManager(msgMgr *message.Manager, store *storage.Store, internalSSH *sshs
 		msgMgr:      msgMgr,
 		store:       store,
 	}
+}
+
+// SetHistory attaches a backward-compat history manager used for download/transcript
+// tooling and legacy purge. It takes no part in the running→DEAD transition.
+func (m *Manager) SetHistory(h *history.Manager) {
+	m.hist = h
 }
 
 // SetSessionListListener registers a callback invoked without holding Manager locks whenever
@@ -49,17 +60,15 @@ func (m *Manager) notifyListChange() {
 }
 
 // SetTerminateListener registers a callback for session resource-tree teardown.
-// It is invoked exactly once per session ID when the session root is finally closed
-// (explicit terminate/delete/disconnect, or abnormal SSH disconnect that ends the session).
-// Use this for child resources that cannot outlive a session (forwards, etc.).
+// It is invoked exactly once per session ID when the session is finally deleted
+// (Manager.Delete). Use this for child resources that cannot outlive a session
+// (forwards, etc.). A mere disconnect/DEAD transition does NOT fire it.
 func (m *Manager) SetTerminateListener(fn func(sessionID string)) {
 	m.listChangeMu.Lock()
 	m.onTerminate = fn
 	m.listChangeMu.Unlock()
 }
 
-// notifySessionClosed runs the terminate listener for sessionID.
-// Callers must ensure this runs at most once (Session.done is exitOnce-guarded).
 func (m *Manager) notifySessionClosed(sessionID string) {
 	m.listChangeMu.RLock()
 	fn := m.onTerminate
@@ -74,29 +83,22 @@ func (m *Manager) NotifyChange() {
 	m.notifyListChange()
 }
 
-// Create starts a new session and registers it.
-// The session is auto-removed from the registry only when the session root is
-// closed (Terminate/Disconnect/abnormal SSH disconnect). Natural root-shell
-// exit alone leaves the session in the registry (connection container may still
-// host other shells/forwards), marking just the shell exited.
+// Create starts a new session and registers it. A session stays in the registry
+// until explicitly deleted; disconnect/terminate/abort only turn it DEAD.
 func (m *Manager) Create(cfg Config) (*Session, error) {
 	s, err := New(m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
 		return nil, err
 	}
-
 	m.sessions.Store(s.ID, s)
 
 	sid := s.ID
-	s.onExit = func() {
-		// Session is the resource-tree root: remove it and release child resources.
-		m.sessions.Delete(sid)
+	s.onDead = func() {
+		// DEAD keeps the object in the registry. Nothing is removed, forgotten,
+		// or purged here — only the new state is persisted and the UI notified.
+		slog.Debug("session marked DEAD", "session_id", sid)
 		m.persist()
 		m.notifyListChange()
-		if m.msgMgr != nil {
-			m.msgMgr.ForgetSession(sid)
-		}
-		m.notifySessionClosed(sid)
 	}
 	s.onChildChange = m.notifyListChange
 
@@ -142,6 +144,27 @@ func (m *Manager) GetByShellID(shellID string) *Session {
 	return found
 }
 
+// GetSessionByShellID returns the session that owns a shell_id, searching both
+// live in-memory shells and retained DEAD/restored shell snapshots. This keeps
+// output-range resolvable for read-only DEAD views after a transport teardown
+// or restart when no live ChildShell object exists for the id.
+func (m *Manager) GetSessionByShellID(shellID string) *Session {
+	var found *Session
+	m.sessions.Range(func(_, v any) bool {
+		s := v.(*Session)
+		if s.GetChildShell(shellID) != nil {
+			found = s
+			return false
+		}
+		if _, ok := s.shellHistory.Load(shellID); ok {
+			found = s
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // CloseChildShell terminates a child shell by its ID and removes it from the owning
 // parent session's map. Returns found=false if no such child shell exists.
 // The parent session and its SSH connection are unaffected.
@@ -161,7 +184,7 @@ func (m *Manager) CloseChildShell(id string) (bool, error) {
 	return true, parent.CloseChildShell(id)
 }
 
-// ListAll returns metadata for all sessions.
+// ListAll returns metadata for all sessions (running and DEAD).
 func (m *Manager) ListAll() []api.Session {
 	var result []api.Session
 	m.sessions.Range(func(_, v any) bool {
@@ -171,26 +194,105 @@ func (m *Manager) ListAll() []api.Session {
 	return result
 }
 
-// Terminate stops a session and tears down its resource tree.
-// Shells are signalled/closed first, then Disconnect closes the SSH client and
-// fires onExit (registry removal + one-shot child-resource cleanup).
+// Terminate ends a session's process/transport and turns it DEAD in place. The
+// session stays in the registry with its buffers/history retained. Use Delete to
+// release resources.
 func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
-	v, ok := m.sessions.Load(id)
-	if !ok {
-		return
+	if s := m.Get(id); s != nil {
+		s.Terminate(force, gracePeriod)
 	}
-	s := v.(*Session)
-	s.Terminate(force, gracePeriod)
-	// Always close the session root so child resources cannot outlive it.
-	s.Disconnect()
 }
 
-// Delete forcefully removes a session. Running sessions are terminated and disconnected first.
-func (m *Manager) Delete(id string) error {
-	if m.Get(id) == nil {
-		return nil
+func (m *Manager) ArchiveAndForget(id string, reason api.ArchiveReason) error {
+	s := m.Get(id)
+	if s == nil {
+		return fmt.Errorf("session %q not found", id)
 	}
-	m.Terminate(id, true, 0)
+	// Terminate the process and mark DEAD (flushes final output onto the message
+	// log). Idempotent even if the session already exited via transport abort.
+	s.Terminate(true, 0)
+
+	// Move it into the history archive so transcript/screenshot/search keep
+	// working, then drop it from the live registry so a restart does not reload
+	// it as a DEAD tile. On-disk message files stay (ForgetSession only
+	// frees in-memory state; only a later purge erases them).
+	rec := api.ArchivedSession{
+		Session: s.Info(),
+		Shells:  s.SnapshotShells(),
+		Reason:  reason,
+	}
+	if m.hist != nil {
+		m.historyMu.Lock()
+		err := m.hist.Add(rec)
+		m.historyMu.Unlock()
+		if err != nil {
+			slog.Warn("archive: failed to record history", "session_id", id, "err", err)
+		}
+	}
+
+	// Release the transport, remaining shells, and in-memory buffer now that the
+	// output has been flushed and persisted; only the on-disk message files stay.
+	s.finalize()
+
+	m.sessions.Delete(id)
+	if m.msgMgr != nil {
+		m.msgMgr.ForgetSession(id)
+	}
+	m.persist()
+	m.notifyListChange()
+	m.notifySessionClosed(id)
+	return nil
+}
+
+// Shutdown delegates to Terminate during server shutdown; it still only DEADs
+// the session (disconnect ≠ delete).
+func (m *Manager) Shutdown(id string, force bool) {
+	m.Terminate(id, force, 0)
+}
+
+// Delete is the only operation that releases a session's resources. It finalizes
+// a running/DEAD session (stops remaining shells, closes buffers/transport),
+// removes it from the registry, forgets its messages, and clears on-disk message
+// history and any backward-compat record.
+func (m *Manager) Delete(id string) error {
+	if v, ok := m.sessions.Load(id); ok {
+		s := v.(*Session)
+		s.finalize()
+		m.sessions.Delete(id)
+		if m.msgMgr != nil {
+			m.msgMgr.ForgetSession(id)
+		}
+		m.persist()
+		m.notifyListChange()
+		m.notifySessionClosed(id)
+	}
+	if m.hist != nil {
+		m.historyMu.Lock()
+		err := m.hist.Delete(id)
+		m.historyMu.Unlock()
+		if err != nil {
+			return err
+		}
+	} else if m.store != nil {
+		if err := m.store.DeleteSessionMessages(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Rename updates the display name of a live session.
+func (m *Manager) Rename(id, name string) error {
+	s := m.Get(id)
+	if s == nil {
+		return fmt.Errorf("session %q not found", id)
+	}
+	s.mu.Lock()
+	s.Name = name
+	s.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+	m.persist()
+	m.notifyListChange()
 	return nil
 }
 
@@ -213,47 +315,78 @@ func (m *Manager) FindActiveBySSHConfig(sshConfig string) *Session {
 	return found
 }
 
-func (m *Manager) CleanupAll(force bool) {
-	// Snapshot all session IDs, then terminate each one via Manager.Terminate
-	// so the session resource tree (including forwards) is released once.
-	var ids []string
-	m.sessions.Range(func(k, _ any) bool {
-		ids = append(ids, k.(string))
+// MarkAllDead transitions every running session to DEAD (exited) at server
+// shutdown, then persists and notifies. It never finalizes (does not kill
+// remaining shells or purge history). Disconnect ≠ delete.
+func (m *Manager) MarkAllDead() {
+	var live []*Session
+	m.sessions.Range(func(_, v any) bool {
+		if v.(*Session).Info().Status == api.SessionRunning {
+			live = append(live, v.(*Session))
+		}
 		return true
 	})
-	for _, id := range ids {
-		m.Terminate(id, force, 0)
+	for _, s := range live {
+		s.Terminate(true, 0)
 	}
-
-	// Wait for exit goroutines to update status before persisting.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		allExited := true
-		for _, id := range ids {
-			if s := m.Get(id); s != nil && s.Info().Status == api.SessionRunning {
-				allExited = false
-				break
-			}
-		}
-		if allExited {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
 	m.persist(m.ListAll())
 	m.notifyListChange()
 }
 
+// Persist shells is called by persist to reconstruct per-shell snapshots so a
+// restart can restore DEAD session tabs.
 func (m *Manager) persist(sessions ...[]api.Session) {
 	if m.store == nil {
 		return
 	}
 	var list []api.Session
-	if len(sessions) > 0 {
+	if len(sessions) > 0 && sessions[0] != nil {
 		list = sessions[0]
 	} else {
 		list = m.ListAll()
 	}
+	for i := range list {
+		if s := m.Get(list[i].ID); s != nil {
+			list[i].Shells = s.SnapshotShells()
+		}
+	}
 	_ = m.store.SaveSessions(list)
+}
+
+// RestoreDead loads persisted sessions into the registry as read-only DEAD
+// sessions (no SSH connection), so previously disconnected sessions reappear as
+// tiles after a restart and their history is viewable. Call once at boot.
+func (m *Manager) RestoreDead() error {
+	if m.store == nil {
+		return nil
+	}
+	list, err := m.store.LoadSessions()
+	if err != nil {
+		return err
+	}
+	for _, meta := range list {
+		if _, ok := m.sessions.Load(meta.ID); ok {
+			continue
+		}
+		// A restarted process holds no live SSH connection, so any session left
+		// "running" is really DEAD; never advertise a fake live tile.
+		if meta.Status == api.SessionRunning {
+			meta.Status = api.SessionExited
+		}
+		s := &Session{Session: meta}
+		s.onDead = m.notifyListChange
+		s.onChildChange = m.notifyListChange
+		for _, sh := range meta.Shells {
+			s.shellHistory.Store(sh.ID, sh)
+		}
+		m.sessions.Store(meta.ID, s)
+		m.slogf("restored DEAD session", meta.ID)
+	}
+	m.persist(m.ListAll())
+	m.notifyListChange()
+	return nil
+}
+
+func (m *Manager) slogf(msg, id string) {
+	slog.Debug(msg, "session_id", id)
 }

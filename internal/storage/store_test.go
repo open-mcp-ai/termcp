@@ -156,6 +156,92 @@ func TestStore_PathTraversalLoadMessage(t *testing.T) {
 	}
 }
 
+func TestStore_SaveLoadHistory(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	archived := []api.ArchivedSession{
+		{Session: api.Session{ID: "aaa", Name: "CTF-1", Status: api.SessionArchived}, Notes: "note", Tags: []string{"web"}},
+		{Session: api.Session{ID: "bbb", Name: "CTF-2", Status: api.SessionArchived}},
+	}
+	if err := s.SaveHistory(archived); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := s.LoadHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 archived sessions, got %d", len(loaded))
+	}
+	if loaded[0].ID != "aaa" || loaded[0].Notes != "note" || len(loaded[0].Tags) != 1 {
+		t.Fatalf("unexpected first record: %+v", loaded[0])
+	}
+	if loaded[0].Status != api.SessionArchived {
+		t.Fatalf("expected status archived, got %q", loaded[0].Status)
+	}
+}
+
+func TestStore_LoadHistoryEmpty(t *testing.T) {
+	s := New(t.TempDir())
+	loaded, err := s.LoadHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("expected empty history, got %d", len(loaded))
+	}
+}
+
+func TestStore_DeleteSessionMessagesRemovesDir(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	msg := api.Message{ID: "m1", SessionID: "sess9", Type: api.MsgOutput, Content: "data"}
+	if err := s.SaveMessage("sess9", msg); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMessageIndex("sess9", []api.MessageIndexEntry{{ID: "m1", Type: api.MsgOutput}}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.MessageDirExists("sess9") {
+		t.Fatal("expected message dir to exist before delete")
+	}
+
+	if err := s.DeleteSessionMessages("sess9"); err != nil {
+		t.Fatal(err)
+	}
+	if s.MessageDirExists("sess9") {
+		t.Fatal("expected message dir removed after delete")
+	}
+}
+
+func TestStore_DeleteSessionMessagesUnrelatedKept(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	msg := api.Message{ID: "m1", SessionID: "keepme", Type: api.MsgOutput, Content: "x"}
+	if err := s.SaveMessage("keepme", msg); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMessageIndex("keepme", []api.MessageIndexEntry{{ID: "m1", Type: api.MsgOutput}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSessionMessages("other"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.MessageDirExists("keepme") {
+		t.Fatal("unrelated session messages must survive deletion of another session")
+	}
+}
+
+func TestStore_DeleteSessionMessagesTraversalBlocked(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.DeleteSessionMessages("../etc"); err == nil {
+		t.Fatal("expected traversal sessionID to be rejected")
+	}
+}
+
 func TestStore_PathTraversalSaveMessage(t *testing.T) {
 	dir := t.TempDir()
 	s := New(dir)

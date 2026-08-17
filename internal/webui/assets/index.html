@@ -47,6 +47,9 @@
       transition: transform 0.2s ease, opacity .12s;
     }
     .section-body.collapsed { display: none; }
+    .conn-tile.sess-tile .sess-dead { display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 10px; background: #eaeef2; color: #57606a; font-size: 0.62rem; text-transform: uppercase; letter-spacing: .03em; vertical-align: middle; }
+    .conn-tile.sess-tile.archived { opacity: .68; }
+    .conn-tile.sess-tile.archived:hover { opacity: .9; }
     .conn-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
     .conn-tile { position: relative; text-align: center; user-select: none; }
     /* Entry card: horizontal layout; address only in icon title */
@@ -272,6 +275,37 @@
     /* Floating terminal: dark theme; main page stays light */
     .shell-windows-container { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
     .shell-windows-container > * { pointer-events: auto; }
+    .session-tabbar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; z-index: 20000; background: rgba(29,29,31,.94); border: 1px solid #333; border-radius: 8px; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.35); max-width: 92vw; pointer-events: auto; }
+    .session-tabs-scroll { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: thin; min-width: 0; max-width: calc(92vw - 170px); }
+    .session-tabbar-actions { display: flex; align-items: center; gap: 4px; padding-left: 6px; margin-left: 2px; border-left: 1px solid #3a3a3a; flex-shrink: 0; }
+    .session-tabbar.hidden { display: none; }
+    .session-tab { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; font-size: 12px; color: #ccc; background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 6px; cursor: pointer; white-space: nowrap; flex: 0 1 auto; min-width: 48px; max-width: 200px; overflow: hidden; }
+    .session-tab:hover { color: #fff; border-color: #555; }
+    .session-tab.active { color: #fff; background: #1e1e1e; border-color: #58a6ff; }
+    .session-tab .session-tab-label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .session-tab .session-tab-num { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; background: #3a3a3a; color: #8b949e; font-size: 10px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .session-tab.active .session-tab-num { background: #58a6ff; color: #1e1e1e; }
+    .session-tab .session-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; border-radius: 4px; background: transparent; color: #8b949e; cursor: pointer; padding: 0; flex-shrink: 0; }
+    .session-tab .session-tab-close:hover { background: #cf222e; color: #fff; }
+    /* ---- pane workspace (tiled mode) ---- */
+    .pane-workspace { position: fixed; inset: 0; z-index: 10000; background: rgba(13,17,23,.72); backdrop-filter: blur(2px); display: none; flex-direction: column; }
+    .pane-workspace.open { display: flex; }
+    .pane-grid > .shell-window.pane-maxed { grid-column: 1 / -1; grid-row: 1 / -1; }
+    .pane-grid { flex: 1; display: grid; gap: 6px; padding: 6px; min-height: 0; overflow: hidden; align-content: stretch; }
+    .pane-grid > .shell-window { position: static !important; inset: auto; width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; z-index: auto !important; box-shadow: none; }
+    .pane-grid > .shell-window .shell-window-resize-handle { display: none; }
+    .pane-grid > .shell-window .shell-window-header { cursor: default; }
+    .pane-grid > .shell-window.pane-active { outline: 2px solid #58a6ff; outline-offset: -2px; }
+    .pane-grid > .shell-window.pane-maxed { grid-column: 1 / -1; grid-row: 1 / -1; }
+    .shell-window.win-hidden { display: none !important; }
+    .session-tabbar-toggle { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid #3a3a3a; border-radius: 6px; background: #2d2d2d; color: #8b949e; cursor: pointer; padding: 0; flex-shrink: 0; }
+    .session-tabbar-toggle:hover { color: #fff; border-color: #555; }
+    .session-tabbar-tile { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 8px; border: 1px solid #3a3a3a; border-radius: 6px; background: #2d2d2d; color: #8b949e; cursor: pointer; font-size: 11px; white-space: nowrap; }
+    .session-tabbar-tile:hover { color: #fff; border-color: #555; }
+    .session-tabbar-tile.active { background: #58a6ff; border-color: #58a6ff; color: #1e1e1e; }
+    .session-tabbar-select { height: 26px; padding: 0 4px; border: 1px solid #3a3a3a; border-radius: 6px; background: #2d2d2d; color: #8b949e; cursor: pointer; font-size: 11px; }
+    .session-tabbar-select:hover { color: #fff; border-color: #555; }
+    .session-tabbar-select option { color: #ccc; }
     .shell-window { position: fixed; width: 640px; height: 480px; min-width: 320px; min-height: 240px; background: #1e1e1e; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); border: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; z-index: 10001; }
     .shell-window-header { display: flex; justify-content: space-between; align-items: stretch; gap: 0; padding: 0 8px 0 0; border-bottom: 1px solid #333; background: #2d2d2d; cursor: move; user-select: none; flex-shrink: 0; z-index: 2; min-height: 34px; flex-wrap: nowrap; }
     .shell-window-title-cluster { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 8px; }
@@ -287,6 +321,22 @@
       overflow: hidden;
     }
     .shell-window-title .sw-conn { color: #ccc; flex-shrink: 0; }
+    .shell-window-title .shell-dead-badge {
+      flex-shrink: 0;
+      align-self: center;
+      margin-left: 2px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: rgba(207,34,46,.16);
+      color: #ff7b72;
+      border: 1px solid rgba(255,123,114,.5);
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      font-weight: 600;
+      line-height: 1.3;
+      vertical-align: middle;
+    }
     .shell-title-id-group {
       display: inline-flex;
       align-items: center;
@@ -413,6 +463,21 @@
       border: 2px solid #1e1e1e;
     }
     .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6e7681; }
+    /* Floating "back to latest output" button (appears only when scrolled away from the live tail) */
+    .shell-term-scroll-fab {
+      position: absolute; right: 14px; bottom: 10px; z-index: 15;
+      width: 30px; height: 30px; padding: 0;
+      border: 1px solid rgba(255,255,255,.18); border-radius: 50%;
+      background: rgba(46,58,76,.92); color: #d4d4d4;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .15s, background .15s, transform .1s;
+      box-shadow: 0 2px 10px rgba(0,0,0,.4);
+    }
+    .shell-term-scroll-fab.visible { opacity: 1; pointer-events: auto; }
+    .shell-term-scroll-fab:hover { background: rgba(66,82,104,.96); color: #fff; }
+    .shell-term-scroll-fab:active { transform: scale(.94); }
+    .shell-term-scroll-fab svg { width: 16px; height: 16px; display: block; }
     .shell-window.shell-window-collapsed .shell-window-content,
     .shell-window.shell-window-collapsed .shell-window-resize-handle { display: none; }
     .shell-window.shell-window-collapsed { height: auto; min-height: 0; }
@@ -469,6 +534,19 @@
       white-space: nowrap;
       flex: 1;
       min-width: 0;
+    }
+    .shell-channel-tab-ended {
+      flex-shrink: 0;
+      padding: 0 4px;
+      border-radius: 8px;
+      background: rgba(207,34,46,.16);
+      color: #ff7b72;
+      border: 1px solid rgba(255,123,114,.5);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      font-weight: 600;
+      line-height: 1.4;
     }
     .shell-channel-tab-close {
       flex-shrink: 0;
@@ -643,9 +721,7 @@
       <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
       <div id="session-grid" class="conn-grid"></div>
     </div>
-
-
-  <div id="panel-tools" class="shell-window tools-panel" style="display:none;width:520px;height:70vh;min-width:340px;min-height:280px">
+    <div id="panel-tools" class="shell-window tools-panel" style="display:none;width:520px;height:70vh;min-width:340px;min-height:280px">
     <div class="shell-window-header">
       <div class="shell-window-title-cluster">
         <h3 class="shell-window-title">
@@ -735,6 +811,13 @@
       </div>
     </div>
   </div>
+  <div id="pane-workspace" class="pane-workspace" aria-hidden="true">
+    <div class="pane-grid" id="pane-grid"></div>
+  </div>
+  <div id="session-tabbar" class="session-tabbar hidden" role="tablist" aria-label="Open sessions">
+    <div class="session-tabs-scroll" id="session-tabs-scroll"></div>
+    <div class="session-tabbar-actions" id="session-tabbar-actions"></div>
+  </div>
   <div id="shell-windows-container" class="shell-windows-container" aria-live="polite"></div>
 
   <div id="modal-conn" class="modal-backdrop hidden" role="dialog" aria-modal="true">
@@ -775,8 +858,10 @@
         <div class="modal-actions">
           <button type="button" class="btn" id="conn-duplicate" style="display:none">Duplicate</button>
           <button type="button" class="btn btn-danger" id="conn-delete" style="display:none">Delete</button>
+          <button type="button" class="btn" id="conn-test">Test</button>
           <button type="button" class="btn btn-primary" id="conn-save">Save</button>
         </div>
+        <p id="conn-test-result" style="display:none;margin:8px 0 0;font-size:0.82rem;word-break:break-word"></p>
       </div>
     </div>
   </div>
@@ -823,6 +908,7 @@
   var shellWindowCount = 0;
   var startConnName = '';
   var editingConnName = '';
+  var _connDirty = false; // unsaved edits in the connection editor
   window._pendingTerminalWatch = Object.create(null);
 
   function escapeHtml(s) {
@@ -934,10 +1020,415 @@
 
   function bringShellWindowToFront(win) {
     if (!win || !win.classList.contains('shell-window')) return;
+    if (isTiledWin(win)) { setActivePane(win, false); return; }
     if (!window._shellZSeq) window._shellZSeq = 10050;
     window._shellZSeq += 1;
     win.style.zIndex = String(window._shellZSeq);
+    refreshSessionTabbar();
   }
+
+  // ---- session tab bar (multi-session switching) ----
+  function sessionTabbarEl() {
+    return document.getElementById('session-tabbar');
+  }
+
+  function sessionTabLabel(win) {
+    if (win._placeholder) return (win._pendingConnName || 'connecting') + '…';
+    if (win._connName) return win._connName + ' · ' + (win._sid ? stripSessionPrefix(win._sid) : '');
+    return win._sid ? stripSessionPrefix(win._sid) : 'session';
+  }
+
+  /** Open-order sequence number (matches the shell-window-N counter). */
+  function sessionTabNum(win) {
+    var m = /^shell-window-(\d+)$/.exec(win.id || '');
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  /** Rebuild tabs from open .shell-window elements; the topmost (max z-index) is active. */
+  function refreshSessionTabbar() {
+    var bar = sessionTabbarEl();
+    if (!bar) return;
+    var wins = allShellWins();
+    // Keep the bar (and its layout controls) visible in tile mode even with no windows,
+    // so the tiled overlay always offers an exit; float mode hides it when empty.
+    bar.classList.toggle('hidden', wins.length === 0 && _layoutMode !== 'tile');
+    var topWin = null;
+    if (_layoutMode === 'tile') {
+      topWin = (_paneActiveWin && isTiledWin(_paneActiveWin)) ? _paneActiveWin : null;
+    } else {
+      var topZ = -1;
+      wins.forEach(function (w) {
+        if (isTiledWin(w)) return;
+        var z = parseInt(w.style.zIndex, 10) || 0;
+        if (z > topZ) { topZ = z; topWin = w; }
+      });
+    }
+    // Reuse existing tab nodes keyed by window id to keep hover state and avoid flicker.
+    var scroll = document.getElementById('session-tabs-scroll');
+    if (!scroll) return;
+    var byId = {};
+    Array.prototype.slice.call(scroll.children).forEach(function (t) {
+      if (t._win && t._win.parentNode) byId[t._win.id] = t;
+      else t.remove();
+    });
+    var order = [];
+    wins.forEach(function (w) {
+      var tab = byId[w.id];
+      if (!tab) {
+        tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'session-tab';
+        tab.setAttribute('role', 'tab');
+        tab._win = w;
+        tab.innerHTML = '<span class="session-tab-num"></span>' +
+          '<span class="session-tab-label"></span>' +
+          '<span class="session-tab-close" role="button" title="Close window (session keeps running)" aria-label="Close window">' +
+          '<svg viewBox="0 0 12 12" width="10" height="10"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg></span>';
+        tab.addEventListener('click', function (e) {
+          if (e.target.closest('.session-tab-close')) return;
+          if (_winsHidden) showAllWindows();
+          if (isTiledWin(w)) {
+            if (_paneMaxedWin && _paneMaxedWin !== w) { _paneMaxedWin = null; applyPaneGrid(); }
+            try { w.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e2) {}
+          }
+          bringShellWindowToFront(w);
+          var ch = w._activeChannelSid && w._channels && w._channels[w._activeChannelSid];
+          var t = ch ? ch.term : w._term;
+          if (t) { try { t.focus(); } catch (e2) {} }
+        });
+        tab.addEventListener('mousedown', function (e) {
+          if (e.button === 1) { // middle-click closes the window
+            e.preventDefault();
+            closeShellWindow(w);
+          }
+        });
+        var x = tab.querySelector('.session-tab-close');
+        x.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          closeShellWindow(w);
+        });
+      }
+      tab.querySelector('.session-tab-num').textContent = sessionTabNum(w);
+      tab.querySelector('.session-tab-label').textContent = sessionTabLabel(w);
+      tab.title = sessionTabLabel(w);
+      tab.classList.toggle('active', w === topWin);
+      tab.setAttribute('aria-selected', w === topWin ? 'true' : 'false');
+      order.push(tab);
+    });
+    order.forEach(function (t) { scroll.appendChild(t); });
+  }
+
+  // Keep the tab bar in sync as shell windows are opened/closed anywhere.
+  (function () {
+    var c = shellWindowsEl();
+    if (!c || typeof MutationObserver === 'undefined') return;
+    new MutationObserver(function () { refreshSessionTabbar(); }).observe(c, { childList: true });
+  })();
+
+  // Fixed action cluster at the right end of the session tab bar (Chrome-style):
+  // eye (show/hide) · layout toggle (float<->tile, highlighted while tiled) · strategy select.
+  (function () {
+    var actions = document.getElementById('session-tabbar-actions');
+    if (!actions) return;
+    if (!document.getElementById('session-tabbar-toggle')) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'session-tabbar-toggle';
+      btn.className = 'session-tabbar-toggle';
+      btn.addEventListener('click', function () { toggleAllWindowsVisible(); });
+      actions.appendChild(btn);
+      updateSessionTabbarToggle();
+    }
+    if (!document.getElementById('session-tabbar-tile')) {
+      var tile = document.createElement('button');
+      tile.type = 'button';
+      tile.id = 'session-tabbar-tile';
+      tile.className = 'session-tabbar-tile';
+      tile.addEventListener('click', function () { setLayoutMode(_layoutMode === 'tile' ? 'float' : 'tile'); });
+      actions.appendChild(tile);
+      updateTileToggleButton();
+    }
+    if (!document.getElementById('session-tabbar-strategy')) {
+      var sel = document.createElement('select');
+      sel.id = 'session-tabbar-strategy';
+      sel.className = 'session-tabbar-select';
+      sel.title = 'Pane arrangement strategy';
+      sel.innerHTML = '<option value="auto">Auto</option><option value="cols">Columns</option><option value="rows">Rows</option><option value="pairs">2 cols</option>';
+      try {
+        var saved = localStorage.getItem('termcp_pane_strategy');
+        if (saved) sel.value = saved;
+        _paneStrategy = sel.value;
+      } catch (e) {}
+      sel.addEventListener('change', function () {
+        _paneStrategy = sel.value;
+        _paneColFr = [];
+        try { localStorage.setItem('termcp_pane_strategy', sel.value); } catch (e) {}
+        applyPaneGrid();
+      });
+      actions.appendChild(sel);
+    }
+  })();
+
+  /** Toggle button reflects the current mode: grid icon when floating, float icon when tiled; active (blue) while tiled. */
+  function updateTileToggleButton() {
+    var b = document.getElementById('session-tabbar-tile');
+    if (!b) return;
+    var tiled = _layoutMode === 'tile';
+    b.classList.toggle('active', tiled);
+    b.title = tiled ? 'Switch to floating windows' : 'Tile all terminal windows';
+    b.innerHTML = tiled
+      ? '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2 5V2h3M12 9v3H9M2 2l4 4M12 12L8 8"/></svg>'
+      : '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>';
+  }
+
+  // ---- pane workspace: tiled mode, maximize, auto-merge ----
+  var _layoutMode = 'float';        // 'float' | 'tile'
+  var _paneActiveWin = null;        // highlighted pane in tile mode
+  var _paneMaxedWin = null;         // pane temporarily filling the grid
+  var _paneStrategy = 'auto';        // auto | cols | rows | pairs (iTerm2-style arrangements)
+  var _paneColFr = [];               // grid column ratios (unitless fr)
+  var _autoTileArmed = true;        // re-arms when floating count drops to/below threshold
+  var AUTO_TILE_THRESHOLD = 0;      // 0 disables auto-tiling; panes are entered manually only
+
+  function paneGridEl() { return document.getElementById('pane-grid'); }
+  function paneWorkspaceEl() { return document.getElementById('pane-workspace'); }
+
+  function allShellWins() {
+    var out = [];
+    var sel = '.shell-window';
+    var c = shellWindowsEl();
+    if (c) Array.prototype.push.apply(out, c.querySelectorAll(sel));
+    var g = paneGridEl();
+    if (g) Array.prototype.push.apply(out, g.querySelectorAll(sel));
+    return out;
+  }
+
+  function isTiledWin(win) { return !!(win && win.parentNode && win.parentNode.id === 'pane-grid'); }
+
+  function tileWindow(win) {
+    if (isTiledWin(win) || !win.classList.contains('shell-window')) return;
+    win._floatRect = { left: win.style.left, top: win.style.top, width: win.style.width, height: win.style.height };
+    win.classList.add('tiled');
+    paneGridEl().appendChild(win);
+    setActivePane(win, false);
+  }
+
+  function untileWindow(win) {
+    if (!isTiledWin(win)) return;
+    if (_paneMaxedWin === win) _paneMaxedWin = null;
+    win.classList.remove('tiled', 'pane-active', 'pane-maxed');
+    var r = win._floatRect || {};
+    win.style.left = r.left || '';
+    win.style.top = r.top || '';
+    win.style.width = r.width || '';
+    win.style.height = r.height || '';
+    shellWindowsEl().appendChild(win);
+    bringShellWindowToFront(win);
+    _fitWinSoon(win);
+  }
+
+  function setActivePane(win, focusTerm) {
+    var g = paneGridEl();
+    if (g) Array.prototype.forEach.call(g.children, function (w) { w.classList.remove('pane-active'); });
+    _paneActiveWin = win;
+    if (win && isTiledWin(win)) win.classList.add('pane-active');
+    refreshSessionTabbar();
+    if (focusTerm) {
+      var ch = win && win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      var t = ch ? ch.term : (win && win._term);
+      if (t) { try { t.focus(); } catch (e) {} }
+    }
+  }
+
+  /** Column/row counts per strategy (iTerm2-style): auto = square-ish grid, cols = side-by-side, rows = stacked, pairs = two columns. */
+  function paneGridShape(n) {
+    switch (_paneStrategy) {
+      case 'cols':  return { cols: n, rows: 1 };
+      case 'rows':  return { cols: 1, rows: n };
+      case 'pairs': return { cols: 2, rows: Math.ceil(n / 2) };
+      default:      return { cols: Math.ceil(Math.sqrt(n)), rows: Math.ceil(n / Math.ceil(Math.sqrt(n))) };
+    }
+  }
+
+  function applyPaneGrid() {
+    var g = paneGridEl();
+    if (!g) return;
+    var wins = Array.prototype.filter.call(g.children, function (w) { return w.classList.contains('shell-window'); });
+    var n = wins.length;
+    var shape = paneGridShape(Math.max(1, n));
+    var cols = Math.max(1, shape.cols);
+    if (_paneColFr.length !== cols) _paneColFr = new Array(cols).fill(1);
+    g.style.gridTemplateColumns = _paneColFr.map(function (fr) { return fr + 'fr'; }).join(' ');
+    g.style.gridTemplateRows = 'repeat(' + Math.max(1, shape.rows) + ', 1fr)';
+    var maxed = _paneMaxedWin && _paneMaxedWin.parentNode === g ? _paneMaxedWin : null;
+    wins.forEach(function (w) { w.classList.toggle('pane-maxed', w === maxed); });
+    if (!_paneActiveWin || _paneActiveWin.parentNode !== g) setActivePane(wins[0] || null, false);
+    wins.forEach(_fitWinSoon);
+  }
+
+  function _fitWinSoon(win) {
+    requestAnimationFrame(function () {
+      if (!win._channels) return;
+      Object.keys(win._channels).forEach(function (sid) {
+        var ch = win._channels[sid];
+        if (ch && ch.term && ch.instEl) {
+          try { fitShellTerminal(ch.term, ch.instEl, win, true); } catch (e) {}
+        }
+      });
+    });
+  }
+
+  /** Ensure the tiled overlay is visible (e.g. first window after restoring a saved tile preference). */
+  function openPaneWorkspace() {
+    var ws = paneWorkspaceEl();
+    if (!ws) return;
+    ws.classList.add('open');
+    ws.setAttribute('aria-hidden', 'false');
+    applyPaneGrid();
+  }
+
+  function setLayoutMode(mode) {
+    _layoutMode = mode === 'tile' ? 'tile' : 'float';
+    try { localStorage.setItem('termcp_layout_mode', _layoutMode); } catch (e) {}
+    document.body.classList.toggle('tile-mode', _layoutMode === 'tile');
+    updateTileToggleButton();
+    var ws = paneWorkspaceEl();
+    if (!ws) return;
+    if (_layoutMode === 'tile') {
+      allShellWins().forEach(function (w) { if (!isTiledWin(w)) tileWindow(w); });
+      _paneColFr = [];
+      openPaneWorkspace();
+    } else {
+      _paneMaxedWin = null;
+      Array.prototype.slice.call(paneGridEl().children).forEach(function (w) { if (w.classList.contains('shell-window')) untileWindow(w); });
+      applyPaneGrid();
+      ws.classList.remove('open');
+      ws.setAttribute('aria-hidden', 'true');
+    }
+    refreshSessionTabbar();
+  }
+
+  /** Auto-merge: more than AUTO_TILE_THRESHOLD floating windows tiles everything once; re-arms at/below threshold. */
+  function _layoutMaybeAutoTile() {
+    if (AUTO_TILE_THRESHOLD <= 0) return; // disabled
+    if (_layoutMode === 'tile') { applyPaneGrid(); return; }
+    var floating = allShellWins().filter(function (w) { return !isTiledWin(w); }).length;
+    if (floating <= AUTO_TILE_THRESHOLD) _autoTileArmed = true;
+    else if (_autoTileArmed) {
+      _autoTileArmed = false;
+      setLayoutMode('tile');
+    }
+  }
+
+  // Toolbar lives in the session tab bar; see the action-cluster init above.
+
+  // ---- hide/show all terminal windows (main-page focus mode) ----
+  var _winsHidden = false;
+
+  function hideAllWindows() {
+    _winsHidden = true;
+    var ws = paneWorkspaceEl();
+    if (ws && _layoutMode === 'tile') { ws.classList.remove('open'); ws.setAttribute('aria-hidden', 'true'); }
+    allShellWins().forEach(function (w) {
+      if (!isTiledWin(w)) w.classList.add('win-hidden');
+    });
+    updateSessionTabbarToggle();
+  }
+
+  function showAllWindows() {
+    _winsHidden = false;
+    var ws = paneWorkspaceEl();
+    if (ws && _layoutMode === 'tile') { ws.classList.add('open'); ws.setAttribute('aria-hidden', 'false'); applyPaneGrid(); }
+    allShellWins().forEach(function (w) { w.classList.remove('win-hidden'); _fitWinSoon(w); });
+    updateSessionTabbarToggle();
+  }
+
+  function toggleAllWindowsVisible() { _winsHidden ? showAllWindows() : hideAllWindows(); }
+
+  function updateSessionTabbarToggle() {
+    var btn = document.getElementById('session-tabbar-toggle');
+    if (!btn) return;
+    btn.title = _winsHidden ? 'Show terminal windows' : 'Hide terminal windows';
+    btn.setAttribute('aria-label', btn.title);
+    btn.innerHTML = _winsHidden
+      ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>'
+      : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><path d="M3.5 11.5l9-7"/></svg>';
+  }
+
+  // Keep the grid recomputed as panes are added/removed.
+  (function () {
+    var g = paneGridEl();
+    if (!g || typeof MutationObserver === 'undefined') return;
+    new MutationObserver(function () {
+      if (_layoutMode !== 'tile') return;
+      // Closing the last pane leaves an empty overlay with nothing to act on:
+      // drop back to float mode so the main page becomes reachable again.
+      if (!g.querySelector('.shell-window')) { setLayoutMode('float'); return; }
+      applyPaneGrid();
+      // applyPaneGrid skips setActivePane (and its tabbar refresh) when the active
+      // pane is unaffected, so closed non-active panes would leave stale tabs.
+      refreshSessionTabbar();
+    }).observe(g, { childList: true });
+  })();
+
+  // Restore last mode preference on load; keep the toggle button and tab bar in
+  // sync so a restored "tile" preference is reflected before the first window opens.
+  try { if (localStorage.getItem('termcp_layout_mode') === 'tile') _layoutMode = 'tile'; } catch (e) {}
+  updateTileToggleButton();
+  refreshSessionTabbar();
+
+  /** Toggle maximize: floating window fills the viewport; a pane fills the grid. */
+  function toggleShellWindowMax(win) {
+    if (!win || !win.classList.contains('shell-window')) return;
+    if (isTiledWin(win)) {
+      _paneMaxedWin = (_paneMaxedWin === win) ? null : win;
+      applyPaneGrid();
+      setActivePane(win, true);
+      return;
+    }
+    if (win._maxed) {
+      win._maxed = false;
+      var r = win._maxSavedRect || {};
+      win.style.left = r.left || ''; win.style.top = r.top || '';
+      win.style.width = r.width || ''; win.style.height = r.height || '';
+      win.querySelector('.shell-window-max-btn').title = 'Maximize (dblclick header)';
+    } else {
+      win._maxed = true;
+      win._maxSavedRect = { left: win.style.left, top: win.style.top, width: win.style.width, height: win.style.height };
+      win.style.left = '8px'; win.style.top = '8px';
+      win.style.width = 'calc(100vw - 16px)'; win.style.height = 'calc(100vh - 16px)';
+      win.querySelector('.shell-window-max-btn').title = 'Restore (dblclick header / Esc)';
+    }
+    bringShellWindowToFront(win);
+    _fitWinSoon(win);
+  }
+
+  function bindShellWindowMaxButton(win) {
+    var btn = win.querySelector('.shell-window-max-btn');
+    var header = win.querySelector('.shell-window-header');
+    if (btn && !btn._termcpMaxBound) {
+      btn._termcpMaxBound = true;
+      btn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      btn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleShellWindowMax(win); });
+    }
+    if (header && !header._termcpDblMaxBound) {
+      header._termcpDblMaxBound = true;
+      header.addEventListener('dblclick', function (e) {
+        if (e.target.closest('button')) return;
+        toggleShellWindowMax(win);
+      });
+    }
+  }
+
+  // Esc restores a maximized floating window / maxed pane.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (_paneMaxedWin && isTiledWin(_paneMaxedWin)) { _paneMaxedWin = null; applyPaneGrid(); return; }
+    var wins = allShellWins();
+    for (var i = 0; i < wins.length; i++) {
+      if (wins[i]._maxed && !isTiledWin(wins[i])) { toggleShellWindowMax(wins[i]); return; }
+    }
+  });
 
   /** Initial placement for a new .shell-window (caller must have incremented shellWindowCount). */
   function positionShellWindowFromClick(win, clickEvent) {
@@ -981,9 +1472,7 @@
   }
 
   function getShellWindowBySid(sessionId) {
-    var c = shellWindowsEl();
-    if (!c) return null;
-    var wins = c.querySelectorAll('.shell-window');
+    var wins = allShellWins();
     for (var i = 0; i < wins.length; i++) {
       if (wins[i]._sid === sessionId) return wins[i];
     }
@@ -991,25 +1480,29 @@
   }
 
   function findShellWindowByChannelSid(sessionId) {
-    var c = shellWindowsEl();
-    if (!c) return null;
-    var wins = c.querySelectorAll('.shell-window');
+    var wins = allShellWins();
     for (var i = 0; i < wins.length; i++) {
       if (wins[i]._channels && wins[i]._channels[sessionId]) return wins[i];
     }
     return null;
   }
 
-  function openOrFocusShellWindow(connLabel, sessionId, clickEvent) {
+  function openOrFocusShellWindow(connLabel, sessionId, clickEvent, opts) {
+    opts = opts || {};
     var ex = getShellWindowBySid(sessionId);
     if (ex) {
+      if (isTiledWin(ex)) {
+        if (_paneMaxedWin && _paneMaxedWin !== ex) { _paneMaxedWin = null; applyPaneGrid(); }
+        try { ex.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+      }
       bringShellWindowToFront(ex);
+      if (opts.readOnly) lockWindowReadonly(ex);
       var ch = ex._activeChannelSid && ex._channels && ex._channels[ex._activeChannelSid];
       var t = ch ? ch.term : ex._term;
       if (t) { try { t.focus(); } catch (e) {} }
       return;
     }
-    openShellWindow(connLabel, sessionId, clickEvent);
+    openShellWindow(connLabel, sessionId, clickEvent, opts);
   }
 
 
@@ -1356,43 +1849,56 @@
     if (!grid) return;
     setLoadBanner(document.getElementById('session-load-banner'), bannerMsg);
     grid.innerHTML = '';
-    var running = (sessions || []).filter(function (s) { return s.status === 'running'; });
-    if (running.length === 0) {
+    // Unified grid: running + DEAD sessions now both come from /api/sessions
+    // (the registry retains exited sessions). DEAD tiles open the same terminal
+    // window in read-only mode — no separate history window.
+    var all = (sessions || []).slice();
+    if (all.length === 0) {
       var empty = document.createElement('div');
       empty.style.cssText = 'padding:8px 4px;font-size:0.85rem;color:#656d76';
-      empty.textContent = 'No running sessions.';
+      empty.textContent = 'No sessions.';
       grid.appendChild(empty);
       return;
     }
-    running.forEach(function (s) {
+    all.forEach(function (s) {
+      var dead = !(s.status === 'running');
       var tile = document.createElement('div');
-      tile.className = 'conn-tile sess-tile';
+      tile.className = 'conn-tile sess-tile' + (dead ? ' archived' : '');
       var sid = s.id || '';
       var nm = String((s.name || '').trim());
       var entryLine = nm && nm.indexOf('session-') !== 0 ? nm : displaySessionShort(s);
+      var badge = dead ? '<span class="sess-dead" title="' + escapeHtml(reasonLabel(s.reason)) + '">dead</span>' : '';
       tile.innerHTML =
         '<div class="conn-tile-stack">' +
-        '<button type="button" class="sess-x" title="End session (disconnect)" aria-label="End session">' +
+        '<button type="button" class="sess-x" title="Delete session" aria-label="Delete session">' +
           '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
         '</button>' +
-        '<div class="icon-wrap" title="Open terminal"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
+        '<div class="icon-wrap" title="' + (dead ? 'Open history' : 'Open terminal') + '"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
         '</div>' +
         '<div class="sess-tile-body">' +
-        '<div class="sess-entry-line" title="' + escapeHtml(entryLine) + '">' + escapeHtml(entryLine) + '</div>' +
+        '<div class="sess-entry-line" title="' + escapeHtml(entryLine) + '">' + escapeHtml(entryLine) + badge + '</div>' +
         '<div class="sess-meta-row">' +
         '<span class="sess-sid-line" title="' + escapeHtml(sid) + '">' + escapeHtml(sid) + '</span>' +
         '<button type="button" class="sess-copy-btn" title="Copy session id" aria-label="Copy session id">' + SVG_COPY_12 + '</button>' +
         '</div>' +
         '</div>' +
         '<div class="sess-fwd-info" style="display:none;font-size:0.62rem;color:#656d76;margin-top:2px;text-align:center"></div>';
-      tile.title = 'Open terminal · ' + sid;
+      tile.title = (dead ? 'Open history (read-only)' : 'Open terminal') + ' · ' + sid;
       var sx = tile.querySelector('.sess-x');
+      var delConf = { title: 'Delete session', message: 'Delete "' + entryLine + '"?', okText: 'Delete', danger: true };
       sx.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
-        fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' }).catch(function () {});
-        var w = getShellWindowBySid(s.id);
-        if (w) closeShellWindow(w);
+        confirmDialog(delConf).then(function (ok) {
+          if (!ok) return;
+          fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
+            .then(function (r) {
+              if (!r.ok && r.status !== 204) return r.json().then(function (er) { throw new Error((er && er.error) || 'HTTP ' + r.status); });
+              var w = getShellWindowBySid(s.id);
+              if (w) closeShellWindow(w);
+            })
+            .catch(function (err) { showCopyToast('Delete failed: ' + String(err.message || err)); });
+        });
       };
       var copyBtn = tile.querySelector('.sess-copy-btn');
       copyBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
@@ -1404,40 +1910,111 @@
 
       tile.onclick = function (e) {
         if (e.target.closest('.sess-x') || e.target.closest('.sess-copy-btn')) return;
-        openOrFocusShellWindow(s.name || '', s.id, e);
+        openOrFocusShellWindow(s.name || '', s.id, e, dead ? { readOnly: true } : null);
       };
-      var fwdInfo = tile.querySelector('.sess-fwd-info');
-      var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === s.name; });
-      if (fwds.length > 0) {
-        fwdInfo.style.display = 'block';
-        fwdInfo.textContent = fwds.length + ' forward' + (fwds.length > 1 ? 's' : '') + ': ' + fwds.map(function(f){ return f.listen_addr + '\u2192' + f.target_addr; }).join(', ');
+      if (!dead) {
+        var fwdInfo = tile.querySelector('.sess-fwd-info');
+        var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === s.name; });
+        if (fwds.length > 0) {
+          fwdInfo.style.display = 'block';
+          fwdInfo.textContent = fwds.length + ' forward' + (fwds.length > 1 ? 's' : '') + ': ' + fwds.map(function(f){ return f.listen_addr + '\u2192' + f.target_addr; }).join(', ');
+        }
       }
       grid.appendChild(tile);
     });
+  }
+
+  /** Convert a live terminal window to read-only when its session becomes DEAD:
+   *  stop streaming/input while keeping the ordinary xterm screen and tabs. Also
+   *  surfaces a "dead" badge in the window title so the DEAD state is visible
+   *  inside the terminal window (not only on the session tile). Idempotent. */
+  function lockWindowReadonly(win) {
+    if (!win) return;
+    win._lockedReadonly = true;
+    win._readOnly = true;
+    win._inputClosed = true;
+    setWindowDeadBadge(win);
+    var chans = win._channels || {};
+    Object.keys(chans).forEach(function (sid) {
+      var ch = chans[sid];
+      sendTerminalWatch(sid, false);
+      if (ch.term) {
+        ch.streamDone = true;
+        try { ch.term.options.readOnly = true; } catch (e) {}
+        try { ch.term.readOnly = true; } catch (e) {}
+      }
+      // Channel went live→DEAD with its history already fully painted: render the end
+      // marker here as well, so it shows even if the terminal_done frame was lost (e.g.
+      // the WS dropped before the server emitted it). Freshly opened DEAD channels have
+      // historyLoaded=false and get the marker from the bootstrap .finally instead, so
+      // we never paint before their persisted output lands.
+      if (ch.historyLoaded === true) showTerminalEndedMarker(win, ch);
+    });
+  }
+
+  /** Insert (once) a compact "dead" badge into a terminal window's title right
+   *  after the session-id group. Never disturbs layout — flex-shrink:0 and it
+   *  sits inside the existing .shell-window-title flex row. */
+  function setWindowDeadBadge(win) {
+    if (!win) return;
+    if (win._deadBadgeAdded) return;
+    var title = win.querySelector('.shell-window-title');
+    if (!title) return;
+    win._deadBadgeAdded = true;
+    var st = document.createElement('span');
+    st.className = 'shell-dead-badge';
+    st.title = 'Session ended (read-only)';
+    st.textContent = 'dead';
+    title.appendChild(st);
+  }
+
+  /** Append the terminal-end marker to one channel at most once. This is the single
+   *  choke point for the "ended" state: every path that observes a session/shell exiting
+   *  (live terminal_done frame, live window flipping to DEAD, or a freshly opened
+   *  DEAD/read-only channel after its history is restored) calls this once. It is gated
+   *  on ch.endedMarkPrinted, so the marker renders exactly once per channel no matter
+   *  how many events fire. */
+  function showTerminalEndedMarker(win, ch) {
+    if (!ch || ch.endedMarkPrinted) return;
+    ch.endedMarkPrinted = true;
+    if (win && ch.tabEl) {
+      var eb = ch.tabEl.querySelector('.shell-channel-tab-ended');
+      if (eb) eb.style.display = '';
+    }
+    if (ch.term) {
+      try {
+        ch.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
+          shellTermScrollToBottomIfStuck(ch.term, true);
+        });
+      } catch (e) {
+        try { ch.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e2) {}
+        shellTermScrollToBottomIfStuck(ch.term, true);
+      }
+    }
   }
 
   function applySessionsSnapshot(sessions) {
     window._lastSessionsSnapshot = sessions;
     renderSessionGrid(sessions, '');
     loadForwards();
-    // Close shell windows whose parent session is no longer in the registry
-    // (terminated/exited and auto-deleted server-side). Keeps the UI in sync
-    // instead of leaving orphaned window frames after the grid tile vanishes.
-    var liveIds = {};
-    (sessions || []).forEach(function (s) { if (s.id) liveIds[s.id] = true; });
+    // Reconcile open ordinary shell windows with the retained registry:
+    //  - running parent → leave live
+    //  - DEAD parent → lock readonly, keep the window and tabs
+    //  - deleted parent → close the window
+    var sessionById = {};
+    (sessions || []).forEach(function (s) { if (s.id) sessionById[s.id] = s; });
     var c = shellWindowsEl();
     if (c) {
       var wins = c.querySelectorAll('.shell-window');
       for (var i = 0; i < wins.length; i++) {
         var w = wins[i];
-        if (w._parentSid && !liveIds[w._parentSid] && !w._placeholder) {
-          closeShellWindow(w);
-        }
+        if (!w._parentSid || w._placeholder) continue;
+        var s = sessionById[w._parentSid];
+        if (!s) { closeShellWindow(w); continue; }
+        if (s.status !== 'running') lockWindowReadonly(w);
       }
     }
-    // Refresh tabs in open windows (child shells may have changed).
     refreshAllWindowTabs();
-    // Forward and child-shell tab lists are refreshed inside loadForwards() / refreshAllWindowTabs().
   }
 
   /** Per-window tab refresh: fetch child shells for win's parent session and sync tabs.
@@ -1464,8 +2041,17 @@
   }
 
   function syncWindowTabs(win, shells) {
-    var running = shells.filter(function(s) { return s.status === 'running'; });
     var existing = win._channels || {};
+    if (win._readOnly) {
+      // DEAD view: render every retained shell snapshot as a read-only tab. Never
+      // prune on refresh (all snapshot shells report exited) and never send input.
+      (shells || []).forEach(function(s) {
+        var sid = s.shell_id || s.id;
+        if (!existing[sid]) createChannelTab(win, sid);
+      });
+      return;
+    }
+    var running = shells.filter(function(s) { return s.status === 'running'; });
     // Add new running shells that don't have a tab yet.
     // Primary shell tab is created on explicit open (session create / restore). Sync only
     // adds additional shells so closing a tab does not recreate it on the next refresh.
@@ -1473,8 +2059,13 @@
       var sid = s.shell_id || s.id;
       if (!existing[sid] && sid !== win._primaryShellId) createChannelTab(win, sid);
     });
-    // Remove tabs for shells that are no longer running.
+    // Remove tabs for shells that are no longer running. The primary (root) shell
+    // is never pruned here: during teardown its exit can surface in a still-RUNNING
+    // list frame before the session flips to DEAD, and pruning it here would close
+    // the first shell on disconnect/kill. The DEAD lock (readOnly) keeps it; child
+    // shells added via "+" are pruned as before on genuine exit.
     Object.keys(existing).forEach(function(sid) {
+      if (sid === win._primaryShellId) return;
       var found = running.some(function(s) { return s.id === sid; });
       if (!found && existing[sid]) closeChannelTab(win, sid);
     });
@@ -1621,7 +2212,12 @@
     ws.onmessage = function (ev) {
       try {
         var j = JSON.parse(ev.data);
-        if (j.type === 'sessions') { applySessionsSnapshot(j.sessions || []); if (j.connections) renderConnGrid(j.connections, ''); }
+        if (j.type === 'sessions') {
+          // The session registry retains DEAD entries, so the same snapshot
+          // reconciles running and read-only windows without an archive cache.
+          applySessionsSnapshot(j.sessions || []);
+          if (j.connections) renderConnGrid(j.connections, '');
+        }
         else if (j.type === 'terminal') {
           var win = getShellWindowBySid(j.id);
           if (!win) win = findShellWindowByChannelSid(j.id);
@@ -1644,19 +2240,18 @@
           if (win2) {
             var ch2 = win2._channels && win2._channels[j.id];
             if (ch2) {
-              if (!ch2.streamDone) {
-                ch2.streamDone = true;
-                try {
-                  ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m', function () {
-                    shellTermScrollToBottomIfStuck(ch2.term, true);
-                    closeChannelTab(win2, j.id);
-                  });
-                } catch (e2) {
-                  try { ch2.term.writeln('\r\n\x1b[33m[Session ended]\x1b[0m'); } catch (e3) {}
-                  shellTermScrollToBottomIfStuck(ch2.term, true);
-                  closeChannelTab(win2, j.id);
-                }
-              }
+              // End-of-stream for one channel: a whole-session disconnect (DEAD)
+              // or a single child-shell exit. Print the marker on EVERY ending
+              // channel and stop its stream. Never close/delete the shell here —
+              // reconciliation handles tab lifecycle (DEAD sessions lock read-only
+              // and keep tabs; an exited child is pruned by syncWindowTabs).
+              // Deliberately not gated on streamDone/_lockedReadonly: the DEAD
+              // sessions frame may lock the window before the per-shell terminal_done
+              // frames arrive, and gating would print exactly one shell's marker.
+              // A per-channel endedMarkPrinted flag guards against re-print if a
+              // watch re-subscribes after a reconnect and re-emits terminal_done.
+              ch2.streamDone = true;
+              showTerminalEndedMarker(win2, ch2);
             } else if (!win2._streamDone) {
               win2._streamDone = true;
               try {
@@ -1761,6 +2356,7 @@
     }
     header.addEventListener('mousedown', function (e) {
       if (e.target.closest('button')) return;
+      if (isTiledWin(win)) return; // panes are laid out by the grid, not draggable
       e.preventDefault();
       bringShellWindowToFront(win);
       drag.active = true;
@@ -2067,9 +2663,8 @@
   }
 
   function getPendingShellWindowForConn(connName) {
-    var c = shellWindowsEl();
-    if (!c || !connName) return null;
-    var wins = c.querySelectorAll('.shell-window');
+    if (!connName) return null;
+    var wins = allShellWins();
     for (var i = 0; i < wins.length; i++) {
       var w = wins[i];
       if (w._placeholder && w._pendingConnName === connName) return w;
@@ -2112,6 +2707,7 @@
     tab.className = 'shell-channel-tab active';
     tab.setAttribute('data-chsid', sessionId);
     tab.innerHTML = '<span class="shell-channel-tab-label">' + escapeHtml(label || 'shell') + '</span>' +
+      '<span class="shell-channel-tab-ended" style="display:none" title="Session ended">end</span>' +
       '<button type="button" class="shell-channel-tab-close" title="Close shell">&times;</button>';
     if (addBtn) tabsBar.insertBefore(tab, addBtn);
 
@@ -2147,6 +2743,13 @@
     // Hide until first fit to prevent garbled flash.
     inst.style.visibility = 'hidden';
     term.open(inst);
+    // Show the "back to latest" button when the user scrolls this channel away from the tail.
+    var _vp = term.element && term.element.querySelector('.xterm-viewport');
+    if (_vp) {
+      _vp.addEventListener('scroll', function () {
+        if (win._activeChannelSid === sessionId) updateTermScrollButton(win);
+      }, { passive: true });
+    }
     attachXtermViewportScrollbarGuard(term);
     attachTermBrowserChordShield(term);
 
@@ -2156,6 +2759,8 @@
       instEl: inst,
       tabEl: tab,
       streamDone: false,
+      endedMarkPrinted: false,
+      historyLoaded: false,
       fitRo: null
     };
     win._activeChannelSid = sessionId;
@@ -2192,12 +2797,21 @@
     try { fitShellTerminal(term, inst, win, false); } catch (eFit) {}
     inst.style.visibility = '';
     bootstrapShellFullHistory(sessionId, term).finally(function () {
-      queueTerminalWatch(sessionId);
+      var chLoaded = win._channels && win._channels[sessionId];
+      if (chLoaded) chLoaded.historyLoaded = true;
+      if (win._readOnly) {
+        // DEAD/read-only channels have no live terminal_done event; render the same
+        // end marker after their persisted output is restored.
+        showTerminalEndedMarker(win, chLoaded);
+      } else {
+        queueTerminalWatch(sessionId);
+      }
       try {
         var ro = attachShellTerminalResizeObserverForChannel(win, term, inst, sessionId);
         win._channels[sessionId].fitRo = ro;
         shellTermSyncViewportAfterBufferChange(term, inst, win);
       } catch (eBoot) {}
+      updateTermScrollButton(win);
     });
 
     // Tab click → switch
@@ -2249,6 +2863,7 @@
         try { ch.term.focus(); } catch(e) {}
       });
     });
+    updateTermScrollButton(win);
   }
 
   /** Close a channel tab. Terminates the shell process and cleans up. */
@@ -2261,8 +2876,11 @@
     // Unsubscribe
     sendTerminalWatch(sessionId, false);
 
-    // Send terminate request (fire-and-forget) — child shells only close their channel.
-    fetch('/api/shells/' + encodeURIComponent(sessionId), { method: 'DELETE' }).catch(function() {});
+    // DEAD tabs are read-only views; closing one must not release the persisted
+    // shell or session. Live tabs retain the existing close-shell behavior.
+    if (!win._readOnly) {
+      fetch('/api/shells/' + encodeURIComponent(sessionId), { method: 'DELETE' }).catch(function() {});
+    }
 
     // Dispose xterm
     try {
@@ -2289,6 +2907,7 @@
         _showChannelEmpty(win, true);
       }
     }
+    updateTermScrollButton(win);
   }
 
   function _showChannelEmpty(win, show) {
@@ -2300,7 +2919,7 @@
 
   /** "+" button / empty-state click handler. */
   function addChannelClick(win) {
-    if (!win._parentSid) return;
+    if (!win._parentSid || win._readOnly) return;
     fetch('/api/sessions/' + encodeURIComponent(win._parentSid) + '/shells', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2336,6 +2955,41 @@
     return ro;
   }
 
+  /** Floating "back to latest output" button — shown only when the active channel is scrolled away from the live tail. */
+  function setupTermScrollFab(win) {
+    if (win._scrollFab) return win._scrollFab;
+    var body = win.querySelector('.shell-channel-body');
+    if (!body) return null;
+    var fab = document.createElement('button');
+    fab.type = 'button';
+    fab.className = 'shell-term-scroll-fab';
+    fab.title = 'Back to latest output';
+    fab.setAttribute('aria-label', 'Back to latest output');
+    fab.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V3M4 8l4 4 4-4"/></svg>';
+    fab.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    fab.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+      var term = ch ? ch.term : null;
+      if (term) shellTermScrollToBottom(term, true);
+      fab.classList.remove('visible');
+      try { if (term) term.focus(); } catch (e0) {}
+    });
+    body.appendChild(fab);
+    win._scrollFab = fab;
+    return fab;
+  }
+
+  /** Show/hide the scroll FAB based on whether the active channel is at the live tail. */
+  function updateTermScrollButton(win) {
+    var fab = win._scrollFab;
+    if (!fab) return;
+    var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
+    var term = ch ? ch.term : null;
+    if (!term) { fab.classList.remove('visible'); return; }
+    fab.classList.toggle('visible', !xtermViewportNearBottom(term, 64));
+  }
+
   /** Initialize shell window UI (header buttons, drag, resize, tab switching) — no xterm. */
   function _initShellWindowUI(win, connLabel, sessionId, clickEvent) {
     var header = win.querySelector('.shell-window-header');
@@ -2357,6 +3011,7 @@
     bindShellWindowCloseButton(win, closeBtn);
 
     win._inputClosed = false;
+    setupTermScrollFab(win);
 
     collapseBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     collapseBtn.addEventListener('click', function (e) {
@@ -2717,7 +3372,7 @@
           '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
           '</div>' +
         '<div class="shell-window-header-btns">' +
-          '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
+          '<button type="button" class="shell-window-max-btn" title="Maximize (dblclick header)"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 5V2h3M10 7v3H7M2 2l3.5 3.5M10 10L6.5 6.5"/></svg></button><button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
             '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
           '</button>' +
@@ -2750,9 +3405,13 @@ SHELL_WINDOW_PANELS_HTML +
 
     bindShellWindowMouseToFront(win);
     bindShellWindowCloseButton(win, closeBtn);
+    bindShellWindowMaxButton(win);
     setupShellWindowDrag(win, header);
     setupShellWindowResize(win);
     bringShellWindowToFront(win);
+    if (_layoutMode === 'tile') { tileWindow(win); openPaneWorkspace(); }
+    else { _layoutMaybeAutoTile(); }
+    if (_winsHidden) showAllWindows();
     return win;
   }
 
@@ -2773,12 +3432,15 @@ SHELL_WINDOW_PANELS_HTML +
     _wireChannelTabBar(win);
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
     createChannelTab(win, win._primaryShellId);
+    refreshSessionTabbar();
   }
 
-  function openShellWindow(connLabel, sessionId, clickEvent) {
+  function openShellWindow(connLabel, sessionId, clickEvent, opts) {
+    opts = opts || {};
+    var readOnly = !!opts.readOnly;
     if (typeof Terminal === 'undefined') { alert('xterm failed to load'); return; }
     if (getShellWindowBySid(sessionId)) {
-      openOrFocusShellWindow(connLabel, sessionId, clickEvent);
+      openOrFocusShellWindow(connLabel, sessionId, clickEvent, opts);
       return;
     }
     var container = shellWindowsEl();
@@ -2788,6 +3450,7 @@ SHELL_WINDOW_PANELS_HTML +
     win.className = 'shell-window';
     win.id = 'shell-window-' + shellWindowCount;
     win._sid = sessionId;
+    win._readOnly = readOnly;
 
         win.innerHTML =
       '<div class="shell-window-header">' +
@@ -2809,7 +3472,7 @@ SHELL_WINDOW_PANELS_HTML +
           '<button type="button" class="shell-tab-btn" data-stab="file" title="Files"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3v9a1 1 0 001 1h10a1 1 0 001-1V4.5a1 1 0 00-1-1h-5L5.5 2H2a1 1 0 00-1 1z"/></svg></button>' +
           '</div>' +
         '<div class="shell-window-header-btns">' +
-          '<button type="button" class="shell-window-collapse-btn" title="Collapse">' +
+          '<button type="button" class="shell-window-max-btn" title="Maximize (dblclick header)"><svg viewBox="0 0 12 12" width="12" height="12"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M2 5V2h3M10 7v3H7M2 2l3.5 3.5M10 10L6.5 6.5"/></svg></button><button type="button" class="shell-window-collapse-btn" title="Collapse">' +
             '<svg class="ic-d" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>' +
             '<svg class="ic-u" viewBox="0 0 12 8" width="12" height="8" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 6l5-4 5 4"/></svg>' +
           '</button>' +
@@ -2834,29 +3497,41 @@ SHELL_WINDOW_PANELS_HTML +
     positionShellWindowFromClick(win, clickEvent);
     /* First mount only — never re-append this node to reorder; use bringShellWindowToFront (z-index). */
     container.appendChild(win);
+    bindShellWindowMaxButton(win);
     bringShellWindowToFront(win);
+    if (_layoutMode === 'tile') { tileWindow(win); openPaneWorkspace(); }
+    else { _layoutMaybeAutoTile(); }
+    if (_winsHidden) showAllWindows();
     win._parentSid = sessionId;
     win._connName = connLabel || '';
+    win._inputClosed = readOnly;
     _wireChannelTabBar(win);
     _initShellWindowUI(win, connLabel, sessionId, clickEvent);
+    // _initShellWindowUI resets the input gate; enforce read-only DEAD mode after.
+    win._inputClosed = readOnly;
 
-    // Restore all peer shells. If none running, show empty state.
+    // Restore all peer shells. readOnly DEAD views include exited snapshot shells.
     fetch(sessionAPI(sessionId, '/shells'))
       .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
       .then(function(shells) {
-        var running = shells.filter(function(s) { return s.status === 'running'; });
-        if (running.length > 0) {
+        var tabs = shells.filter(function(s) { return readOnly || s.status === 'running'; });
+        if (tabs.length > 0) {
           if (!win._primaryShellId) {
-            win._primaryShellId = (running[0].shell_id || running[0].id);
+            win._primaryShellId = (tabs[0].shell_id || tabs[0].id);
           }
-          running.forEach(function(s) { createChannelTab(win, s.shell_id || s.id); });
+          tabs.forEach(function(s) { createChannelTab(win, s.shell_id || s.id); });
           // Restore last active tab.
           var lastActive = window._shellLastActive && window._shellLastActive[sessionId];
           if (lastActive && win._channels[lastActive]) switchChannelTab(win, lastActive);
+          if (readOnly) lockWindowReadonly(win);
         } else {
           _showChannelEmpty(win, true);
+          if (readOnly) lockWindowReadonly(win);
         }
-      }).catch(function() { addChannelClick(win); });
+      }).catch(function() {
+        if (readOnly) { _showChannelEmpty(win, true); lockWindowReadonly(win); }
+        else addChannelClick(win);
+      });
   }
 
   /** POST /api/sessions/start then open shell window. command/mode may be '' to use server defaults (login shell, profile default_mode). */
@@ -2910,6 +3585,35 @@ SHELL_WINDOW_PANELS_HTML +
 
   function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
   function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+  /**
+   * Leaving the page detaches this tab from live state (open terminal windows,
+   * running sessions, active forwards, unsaved connection edits). Sessions keep
+   * running server-side — the guard only makes the leave deliberate instead of
+   * accidental. Returns a comma-joined summary of what is live, or '' when safe.
+   */
+  function pageHasLiveState() {
+    var reasons = [];
+    var c = shellWindowsEl();
+    var openWins = c ? c.querySelectorAll('.shell-window').length : 0;
+    if (openWins > 0) reasons.push(openWins + ' open terminal window' + (openWins > 1 ? 's' : ''));
+    var running = 0;
+    (window._lastSessionsSnapshot || []).forEach(function (s) { if (s && s.status === 'running') running++; });
+    if (running > 0) reasons.push(running + ' running session' + (running > 1 ? 's' : ''));
+    var fwdCount = (window._lastForwards || []).length;
+    if (fwdCount > 0) reasons.push(fwdCount + ' active forwarding' + (fwdCount > 1 ? 's' : ''));
+    if (_connDirty) reasons.push('unsaved connection changes');
+    return reasons.join(', ');
+  }
+
+  window.addEventListener('beforeunload', function (e) {
+    var live = pageHasLiveState();
+    if (!live) return;
+    e.preventDefault();
+    // Modern browsers always show a generic dialog regardless of text; legacy
+    // browsers render returnValue verbatim.
+    e.returnValue = 'termcp still has ' + live + '. Leaving closes the terminal view — sessions keep running on the server.';
+  });
 
   // Style-consistent replacement for the native confirm() dialog.
   // opts: { title, message, okText, danger }
@@ -3267,6 +3971,7 @@ SHELL_WINDOW_PANELS_HTML +
   function openConnModal(edit, name, kind) {
     if (edit && kind === 'internal') return; // built-in virtual profile is not editable
     editingConnName = edit ? name : '';
+    _connDirty = false;
     connEntries = null; // refresh import dropdown options
     document.getElementById('modal-conn-err').style.display = 'none';
     document.getElementById('modal-conn-title').textContent = edit ? 'Edit connection' : 'Add connection';
@@ -3300,10 +4005,17 @@ SHELL_WINDOW_PANELS_HTML +
   }
 
   document.getElementById('conn-f-auth').onchange = _connAuthChange;
-  document.getElementById('conn-toggle-view').onclick = _connToggleView;
+  document.getElementById('conn-toggle-view').onclick = function () { _connDirty = true; _connToggleView(); };
+  // Track unsaved edits inside the connection editor so leaving the page first asks.
+  var _connModalEl = document.getElementById('modal-conn');
+  if (_connModalEl) {
+    _connModalEl.addEventListener('input', function () { _connDirty = true; });
+    _connModalEl.addEventListener('change', function () { _connDirty = true; });
+  }
 
   // ---- jump chain events ----
   document.getElementById('conn-add-jump').onclick = function () {
+    _connDirty = true;
     jumpCards.push(_newJumpCard());
     jumpEditingIdx = jumpCards.length - 1;
     jumpEditingNew = true;
@@ -3356,6 +4068,7 @@ SHELL_WINDOW_PANELS_HTML +
     var idx = card ? parseInt(card.getAttribute('data-idx'), 10) : NaN;
     if (isNaN(idx)) return;
     if (e.target.classList.contains('jump-rm')) {
+      _connDirty = true;
       jumpCards.splice(idx, 1);
       if (jumpEditingIdx === idx) { jumpEditingIdx = -1; jumpEditingNew = false; }
       else if (jumpEditingIdx > idx) { jumpEditingIdx -= 1; }
@@ -3363,11 +4076,13 @@ SHELL_WINDOW_PANELS_HTML +
       return;
     }
     if (e.target.classList.contains('jump-save')) {
+      _connDirty = true;
       jumpEditingIdx = -1; jumpEditingNew = false;
       renderJumps();
       return;
     }
     if (e.target.classList.contains('jump-cancel')) {
+      _connDirty = true;
       if (jumpEditingNew && jumpEditingIdx === idx) {
         jumpCards.splice(idx, 1);
       }
@@ -3395,7 +4110,41 @@ SHELL_WINDOW_PANELS_HTML +
     btn.onclick = function() { _toggleEye(this); };
   });
 
-  document.getElementById('modal-conn-close').onclick = function () { hideModal('modal-conn'); };
+  document.getElementById('modal-conn-close').onclick = function () { _connDirty = false; hideModal('modal-conn'); };
+  document.getElementById('conn-test').onclick = function () {
+    var err = document.getElementById('modal-conn-err');
+    var out = document.getElementById('conn-test-result');
+    err.style.display = 'none';
+    out.style.display = 'none';
+    var btn = this;
+    var body = _connGetBody();
+    btn.disabled = true;
+    btn.textContent = 'Testing…';
+    fetch('/api/connections/test', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        return r.json();
+      })
+      .then(function (j) {
+        out.style.display = 'block';
+        if (j.ok) {
+          out.textContent = '✓ Connected in ' + (j.duration_ms || 0) + ' ms';
+          out.style.color = '#1a7f37';
+        } else {
+          out.textContent = '✗ ' + (j.error || 'connection failed');
+          out.style.color = '#cf222e';
+        }
+      })
+      .catch(function (e) {
+        out.style.display = 'block';
+        out.textContent = '✗ ' + String(e.message || e);
+        out.style.color = '#cf222e';
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+      });
+  };
   document.getElementById('conn-save').onclick = function () {
     var err = document.getElementById('modal-conn-err');
     err.style.display = 'none';
@@ -3424,6 +4173,7 @@ SHELL_WINDOW_PANELS_HTML +
     fetch(url, { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: body })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        _connDirty = false;
         hideModal('modal-conn');
         loadConnections();
       })
@@ -3446,6 +4196,7 @@ SHELL_WINDOW_PANELS_HTML +
     fetch('/api/connections/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        _connDirty = false;
         hideModal('modal-conn');
         loadConnections();
       })
@@ -3514,6 +4265,17 @@ SHELL_WINDOW_PANELS_HTML +
     }
   })();
 
+  function reasonLabel(r) {
+    if (!r) return '';
+    switch (String(r)) {
+      case 'explicit': return 'ended manually';
+      case 'crash': return 'unexpected disconnect';
+      case 'exited': return 'process exited';
+      case 'shutdown': return 'server shutdown';
+      default: return String(r);
+    }
+  }
+
   loadForwards();
   loadConnections();
   startUIWebSocket();
@@ -3524,10 +4286,11 @@ SHELL_WINDOW_PANELS_HTML +
     var body = document.getElementById('sec-' + key + '-body');
     if (!header || !body) return;
     var stored = localStorage.getItem('termcp.section.' + key);
-    if (stored === 'collapsed') {
-      header.setAttribute('aria-expanded', 'false');
-      body.classList.add('collapsed');
-    }
+    var collapsed = stored
+      ? stored === 'collapsed'
+      : header.getAttribute('aria-expanded') !== 'true';
+    header.setAttribute('aria-expanded', String(!collapsed));
+    body.classList.toggle('collapsed', collapsed);
     header.addEventListener('click', function (e) {
       if (e.target.closest('.icon-btn')) return;
       var collapsed = header.getAttribute('aria-expanded') === 'false';

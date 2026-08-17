@@ -162,8 +162,11 @@ func TestSession_Terminate(t *testing.T) {
 
 	m.Terminate(id, false, 2*time.Second)
 
-	if m.Get(id) != nil {
-		t.Fatal("expected session to be removed after terminate")
+	if m.Get(id) == nil {
+		t.Fatal("expected session to be retained (DEAD) after terminate")
+	}
+	if got := m.Get(id).Info().Status; got != api.SessionExited {
+		t.Fatalf("expected 'exited' after terminate, got %q", got)
 	}
 }
 
@@ -180,12 +183,15 @@ func TestSession_ForceTerminate(t *testing.T) {
 
 	m.Terminate(id, true, 0)
 
-	if m.Get(id) != nil {
-		t.Fatal("expected session to be removed after force terminate")
+	if m.Get(id) == nil {
+		t.Fatal("expected session to be retained (DEAD) after force terminate")
+	}
+	if got := m.Get(id).Info().Status; got != api.SessionExited {
+		t.Fatalf("expected 'exited' after force terminate, got %q", got)
 	}
 }
 
-func TestManager_TerminateReleasesChildResourcesOnce(t *testing.T) {
+func TestManager_TerminateKeepsDeadThenDeleteReleases(t *testing.T) {
 	srv := startTestServer(t)
 
 	command, args := testSleepCommand("60")
@@ -210,23 +216,38 @@ func TestManager_TerminateReleasesChildResourcesOnce(t *testing.T) {
 	id := s.ID
 
 	m.Terminate(id, true, 0)
-	// Second close path must not re-fire child-resource cleanup.
+	// Repeating the DEAD path (e.g. Disconnect after Terminate) must not fire
+	// resource cleanup or remove the registry entry.
 	s.Disconnect()
 
 	mu.Lock()
-	defer mu.Unlock()
+	if count != 0 {
+		t.Fatalf("terminate/disconnect must not fire terminate listener, got %d", count)
+	}
+	mu.Unlock()
+
+	if m.Get(id) == nil {
+		t.Fatal("expected session retained (DEAD) after terminate")
+	}
+	if got := m.Get(id).Info().Status; got != api.SessionExited {
+		t.Fatalf("expected 'exited', got %q", got)
+	}
+
+	// Delete is the only release: fires cleanup once and removes the registry entry.
+	if err := m.Delete(id); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
 	if count != 1 {
-		t.Fatalf("expected resource-tree cleanup once, got %d (ids=%v)", count, ids)
+		t.Fatalf("expected resource cleanup once on delete, got %d (ids=%v)", count, ids)
 	}
-	if len(ids) != 1 || ids[0] != id {
-		t.Fatalf("expected cleanup for %q, got %v", id, ids)
-	}
+	mu.Unlock()
 	if m.Get(id) != nil {
-		t.Fatal("expected session removed after terminate")
+		t.Fatal("expected session removed after delete")
 	}
 }
 
-func TestManager_DisconnectReleasesChildResources(t *testing.T) {
+func TestManager_DisconnectKeepsDead(t *testing.T) {
 	srv := startTestServer(t)
 
 	command, args := testSleepCommand("60")
@@ -235,13 +256,11 @@ func TestManager_DisconnectReleasesChildResources(t *testing.T) {
 	var (
 		mu    sync.Mutex
 		count int
-		gotID string
 	)
 	m.SetTerminateListener(func(sessionID string) {
 		mu.Lock()
 		defer mu.Unlock()
 		count++
-		gotID = sessionID
 	})
 
 	s, err := m.Create(testConfig(command, args, api.ModePipe, ""))
@@ -250,19 +269,31 @@ func TestManager_DisconnectReleasesChildResources(t *testing.T) {
 	}
 	id := s.ID
 
-	// Simulate final session teardown without Manager.Terminate (e.g. SSH abort path).
+	// SSH abort/Disconnect only DEADs the session; it never releases resources.
 	s.Disconnect()
 
+	if m.Get(id) == nil {
+		t.Fatal("expected session retained (DEAD) after disconnect")
+	}
+	if got := m.Get(id).Info().Status; got != api.SessionExited {
+		t.Fatalf("expected 'exited' after disconnect, got %q", got)
+	}
 	mu.Lock()
-	defer mu.Unlock()
+	if count != 0 {
+		t.Fatalf("disconnect must not fire terminate listener, got %d", count)
+	}
+	mu.Unlock()
+
+	if err := m.Delete(id); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
 	if count != 1 {
-		t.Fatalf("expected resource-tree cleanup once via onExit, got %d", count)
+		t.Fatalf("expected resource cleanup once on delete, got %d", count)
 	}
-	if gotID != id {
-		t.Fatalf("expected cleanup for %q, got %q", id, gotID)
-	}
+	mu.Unlock()
 	if m.Get(id) != nil {
-		t.Fatal("expected session removed after disconnect")
+		t.Fatal("expected session removed after delete")
 	}
 }
 
@@ -387,7 +418,7 @@ func TestManager_ListAll(t *testing.T) {
 	}
 }
 
-func TestManager_CleanupAll(t *testing.T) {
+func TestManager_MarkAllDead(t *testing.T) {
 	srv := startTestServer(t)
 
 	mgr := NewManager(nil, nil, srv)
@@ -396,13 +427,20 @@ func TestManager_CleanupAll(t *testing.T) {
 	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
 	mgr.Create(Config{Command: command, Args: args, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
 
-	mgr.CleanupAll(true)
+	// Shutdown semantics: DEAD every running session in place; nothing is
+	// removed from the registry (disconnect ≠ delete).
+	mgr.MarkAllDead()
 
 	time.Sleep(500 * time.Millisecond)
 
-	for _, s := range mgr.ListAll() {
-		// After done(), sessions are removed from registry, not marked exited.
-		_ = s
+	all := mgr.ListAll()
+	if len(all) != 2 {
+		t.Fatalf("expected 2 sessions retained after MarkAllDead, got %d", len(all))
+	}
+	for _, s := range all {
+		if s.Status != api.SessionExited {
+			t.Fatalf("expected session %q exited after MarkAllDead, got %q", s.ID, s.Status)
+		}
 	}
 }
 
@@ -419,24 +457,21 @@ func TestManager_Delete(t *testing.T) {
 
 	sid := s.ID
 
-	// Terminate triggers OnExit → auto-delete from registry.
+	// Terminate only turns the session DEAD; it stays registered.
 	s.Terminate(true, 0)
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if mgr.Get(sid) == nil {
-			break // auto-deleted
-		}
-		time.Sleep(50 * time.Millisecond)
+	if mgr.Get(sid) == nil {
+		t.Fatal("expected session retained (DEAD) after terminate")
+	}
+	if got := mgr.Get(sid).Info().Status; got != api.SessionExited {
+		t.Fatalf("expected 'exited', got %q", got)
 	}
 
-	// After exit, session is auto-deleted by OnExit callback.
-	if mgr.Get(sid) != nil {
-		t.Fatal("expected session to be auto-deleted from registry after exit")
-	}
-
-	// Delete is a no-op for an already-deleted session.
+	// Only Delete removes it from the registry.
 	if err := mgr.Delete(sid); err != nil {
 		t.Fatal(err)
+	}
+	if mgr.Get(sid) != nil {
+		t.Fatal("expected session removed from registry after delete")
 	}
 
 	all := mgr.ListAll()

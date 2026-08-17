@@ -110,8 +110,8 @@ cd termcp
 # Build
 go build -o termcp .
 
-# Run (defaults: loopback, port 18765)
-./termcp --data-dir ./data
+# Run (defaults: loopback, port 18765; data goes to ~/.termcp)
+./termcp
 ```
 
 Open `http://127.0.0.1:18765` in your browser to enter the **Web UI**.
@@ -128,7 +128,7 @@ termcp [flags]
 | --------------- | ------------- | ------------------------------------------------------------------------ |
 | `--host`        | `127.0.0.1`   | HTTP bind address. `0.0.0.0` listens on all interfaces.                  |
 | `--port`        | `18765`       | HTTP port. Shared by the Web UI, MCP SSE, and MCP streamable HTTP.       |
-| `--data-dir`    | `./data`      | Persistence directory (sessions, messages, SSH configs). Auto-created.   |
+| `--data-dir`    | `~/.termcp`   | Persistence directory (sessions, messages, SSH configs). Auto-created. Default overridable via `$TERMCP_DATA_DIR`. |
 | `--log-level`   | `info`        | Log level: `debug` / `info` / `warn` / `error`. `debug` shows MCP tool calls. |
 | `--no-internal` | `false`       | Disable the built-in loopback SSH profile.                                   |
 | `--mcp-manage-ssh-configs` | `false` | Enable MCP tools to create/edit/delete SSH configs (secrets are never exposed). |
@@ -137,10 +137,10 @@ termcp [flags]
 
 ```bash
 # Listen on all interfaces
-./termcp --data-dir ./data --host 0.0.0.0
+./termcp --host 0.0.0.0
 
 # Allow AI agents to manage SSH configs
-./termcp --data-dir ./data --mcp-manage-ssh-configs
+./termcp --mcp-manage-ssh-configs
 ```
 
 ## Docker Deployment

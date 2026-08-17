@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -369,6 +370,9 @@ func (s *Server) handleTerminateSession(ctx context.Context, request mcpgo.CallT
 		return bad, nil
 	}
 	s.sessMgr.Terminate(sessionID, force, time.Duration(gracePeriod*float64(time.Second)))
+	// Deliberate close: move the session into the history archive and drop it
+	// from the live registry (so it is not reloaded as a DEAD tile after restart).
+	_ = s.sessMgr.ArchiveAndForget(sessionID, api.ArchiveExplicit)
 	return successResult(), nil
 }
 
@@ -417,6 +421,136 @@ func (s *Server) handleGetMessage(ctx context.Context, request mcpgo.CallToolReq
 	}
 	result := map[string]any{"messages": messages}
 	return jsonResult(result), nil
+}
+
+func (s *Server) handleListHistory(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.historyMgr == nil {
+		return jsonResult(map[string]any{"sessions": []any{}}), nil
+	}
+	return jsonResult(map[string]any{"sessions": s.historyMgr.List()}), nil
+}
+
+func (s *Server) handleGetTranscript(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	format := strings.TrimSpace(getString(args, "format", "markdown"))
+	switch format {
+	case "text", "markdown", "html":
+	default:
+		return mcpgo.NewToolResultError("format must be text, markdown, or html"), nil
+	}
+	if s.historyMgr == nil {
+		return mcpgo.NewToolResultError("history not configured"), nil
+	}
+	if _, ok := s.historyMgr.Get(sessionID); !ok {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found in history", sessionID)), nil
+	}
+	text, err := s.historyMgr.Transcript(sessionID, format)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return jsonResult(map[string]any{"session_id": sessionID, "format": format, "transcript": text}), nil
+}
+
+func (s *Server) handleSearchMessages(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	query := getString(args, "query", "")
+	limit := int(getFloat64(args, "limit", 50))
+	if s.historyMgr == nil {
+		return jsonResult(map[string]any{"hits": []any{}}), nil
+	}
+	return jsonResult(map[string]any{"query": query, "hits": s.historyMgr.Search(query, limit)}), nil
+}
+
+func (s *Server) handleRenameSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	name := strings.TrimSpace(getString(args, "name", ""))
+	if name == "" {
+		return mcpgo.NewToolResultError("name is required"), nil
+	}
+	if sess := s.sessMgr.Get(sessionID); sess != nil {
+		if err := s.sessMgr.Rename(sessionID, name); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		return successResult(), nil
+	}
+	if s.historyMgr == nil {
+		return mcpgo.NewToolResultError("history not configured"), nil
+	}
+	if err := s.historyMgr.Update(sessionID, &name, nil, nil); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handleUpdateSessionMeta(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	if s.historyMgr == nil {
+		return mcpgo.NewToolResultError("history not configured"), nil
+	}
+	var notes *string
+	if v, ok := args["notes"]; ok {
+		vs := fmt.Sprintf("%v", v)
+		notes = &vs
+	}
+	var tags *[]string
+	if _, ok := args["tags"]; ok {
+		t := getStringSlice(args, "tags")
+		tags = &t
+	}
+	if err := s.historyMgr.Update(sessionID, nil, notes, tags); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handlePurgeSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	if s.sessMgr.Get(sessionID) != nil {
+		if err := s.sessMgr.Delete(sessionID); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		return successResult(), nil
+	}
+	if s.historyMgr == nil {
+		return mcpgo.NewToolResultError("history not configured"), nil
+	}
+	if _, ok := s.historyMgr.Get(sessionID); !ok {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	}
+	if err := s.historyMgr.Delete(sessionID); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
+func (s *Server) handleScreenshot(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	if s.historyMgr == nil {
+		return mcpgo.NewToolResultError("history not configured"), nil
+	}
+	if _, ok := s.historyMgr.Get(sessionID); !ok {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found in history", sessionID)), nil
+	}
+	start := int(getFloat64(args, "start", 0))
+	lines := int(getFloat64(args, "lines", 0))
+	cols := int(getFloat64(args, "cols", 80))
+	theme := getString(args, "theme", "dark")
+	q := url.Values{}
+	q.Set("start", strconv.Itoa(start))
+	q.Set("lines", strconv.Itoa(lines))
+	q.Set("cols", strconv.Itoa(cols))
+	q.Set("theme", theme)
+	u := s.baseURL + "/api/history/" + url.PathEscape(sessionID) + "/screenshot?" + q.Encode()
+	return jsonResult(map[string]any{
+		"session_id": sessionID,
+		"url":        u,
+		"note":       "Fetch this URL to download the PNG. Rendered from persisted messages as a fixed-bitmap terminal image (ASCII only).",
+	}), nil
 }
 
 func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

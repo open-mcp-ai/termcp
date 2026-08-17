@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/ssh"
-	"github.com/pkg/sftp"
 	"github.com/open-mcp-ai/termcp/internal/shell"
+	"github.com/pkg/sftp"
 	sshstd "golang.org/x/crypto/ssh"
 )
 
@@ -76,7 +76,7 @@ func (l *inMemListener) Dial() (net.Conn, error) {
 // version exchange when both sides write before either reads (net.Pipe / io.Pipe
 // are synchronous and block writes until the other side reads).
 type duplexConn struct {
-	writeMu   sync.Mutex  // serializes close(writeCh) and sends to writeCh
+	writeMu   sync.Mutex // serializes close(writeCh) and sends to writeCh
 	readCh    <-chan []byte
 	writeCh   chan []byte // bidirectional; nil after Close (peer reader gets io.EOF via close)
 	closeCh   chan struct{}
@@ -184,7 +184,7 @@ func New() *Server {
 			return true
 		},
 		ChannelHandlers: map[string]ssh.ChannelHandler{
-			"session": ssh.DefaultSessionHandler,
+			"session":      ssh.DefaultSessionHandler,
 			"direct-tcpip": ssh.DirectTCPIPHandler,
 		},
 		SubsystemHandlers: map[string]ssh.SubsystemHandler{
@@ -332,7 +332,6 @@ func (s *Server) handleSession(sess ssh.Session) {
 		sh, shArgs := shell.NewDetector().Argv()
 		cmdArgs = append([]string{sh}, shArgs...)
 	}
-
 
 	if len(sess.Command()) == 0 {
 		cmdArgs = disableHistoryExpansion(cmdArgs)

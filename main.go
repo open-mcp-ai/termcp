@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/open-mcp-ai/termcp/internal/config"
 	"github.com/open-mcp-ai/termcp/internal/forward"
+	"github.com/open-mcp-ai/termcp/internal/history"
 	"github.com/open-mcp-ai/termcp/internal/logansi"
 	mcpmod "github.com/open-mcp-ai/termcp/internal/mcp"
 	"github.com/open-mcp-ai/termcp/internal/message"
@@ -94,15 +96,32 @@ func main() {
 	cfg := config.Default()
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
-	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
+	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage (default: $TERMCP_DATA_DIR or ~/.termcp)")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
 	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
-		flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
+	flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
 	flag.Parse()
 
 	if args := flag.Args(); len(args) > 0 {
 		fmt.Fprintf(os.Stderr, "unknown arguments: %s\n", strings.Join(args, " "))
 		os.Exit(2)
+	}
+
+	// Data dir precedence: --data-dir flag > $TERMCP_DATA_DIR > ~/.termcp.
+	// A fixed per-user location keeps storage in one predictable place no
+	// matter where the binary is installed or from which directory it runs.
+	if cfg.DataDir == "" {
+		dir, err := config.DefaultDataDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot resolve default data dir: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.DataDir = dir
+	}
+	// Fail fast when the data directory cannot be created or written.
+	if err := ensureWritableDir(cfg.DataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "data dir %q is not writable: %v\n", cfg.DataDir, err)
+		os.Exit(1)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -132,7 +151,16 @@ func main() {
 	// Initialize storage and managers
 	store := storage.New(cfg.DataDir)
 	msgMgr := message.NewManager(store)
+	historyMgr := history.New(store)
+	if err := historyMgr.Load(); err != nil {
+		slog.Error("failed to load session history", "err", err)
+		os.Exit(1)
+	}
 	sessMgr := session.NewManager(msgMgr, store, sshSrv)
+	sessMgr.SetHistory(historyMgr)
+	if err := sessMgr.RestoreDead(); err != nil {
+		slog.Warn("failed to restore previous DEAD sessions", "err", err)
+	}
 
 	sshStore := sshconfig.NewStore(cfg.DataDir)
 
@@ -144,6 +172,7 @@ func main() {
 	sessMgr.SetTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
+	mcpSrv.SetHistory(historyMgr)
 	mcpSrv.NoInternal = cfg.NoInternal
 	if cfg.MCPManageSSHConfigs {
 		mcpSrv.RegisterSSHConfigWriteTools()
@@ -151,7 +180,7 @@ func main() {
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
-	(&webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
+	(&webui.Handler{Sessions: sessMgr, History: historyMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
 
 	host := strings.TrimSpace(cfg.Host)
 	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)
@@ -170,7 +199,9 @@ func main() {
 		<-sigCh
 		shuttingDown.Store(true)
 		slog.Info("shutting down")
-		sessMgr.CleanupAll(true)
+		// Disconnect ≠ delete: DEAD all running sessions (retain history) instead
+		// of killing/clearing every shell.
+		sessMgr.MarkAllDead()
 		if sshSrv != nil {
 			sshSrv.Stop()
 		}
@@ -185,6 +216,19 @@ func main() {
 		slog.Error("failed to start MCP server", "err", err)
 		os.Exit(1)
 	}
+}
+
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	probe := filepath.Join(dir, ".write-probe")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return os.Remove(probe)
 }
 
 func buildLogHandler(cfg *config.Config) slog.Handler {

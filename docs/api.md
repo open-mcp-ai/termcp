@@ -114,10 +114,102 @@ Response 200: Session 对象（同列表中的元素）
 
 ### `DELETE /api/sessions/{id}`
 
-完全断开 Session：关闭所有 Shell → 关闭所有 Forward → 关闭 SSH 连接 → 移除。
+**永久删除**：断开 Session（关闭所有 Shell → Forward → SSH 连接），并同时移除其归档记录与落盘消息历史。此操作不可恢复。
 
 ```
 Response: 204 No Content
+```
+
+> 注意：这与 `POST /api/sessions/{id}/terminate`（仅停止并归档、保留历史）不同。
+
+### `PATCH /api/sessions/{id}`
+
+重命名 session（活跃或已归档均可）。
+
+```
+Request:
+{ "name": "my-ctf-box" }
+
+Response 200: Session 对象
+```
+
+---
+
+## 2.5 归档会话历史（Dead Sessions）
+
+会话正常退出、意外断线或服务器关闭后，会保留为**归档会话**，元数据写入 `history.json`、消息保留在 `data/messages/{id}/`，跨 termcp 重启仍然可见。只有 `DELETE`（主动删除）才会真正清空历史。
+
+### `GET /api/history`
+
+列出所有归档（dead）会话。
+
+```
+Response 200:
+{
+  "sessions": [
+    { "id": "abc123", "name": "CTF-1", "status": "archived", "reason": "crash",
+      "notes": "…", "tags": ["web"], "created_at": "..." }
+  ]
+}
+```
+
+### `GET /api/history/{id}`
+
+获取单个归档会话详情。
+
+```
+Response 200: ArchivedSession 对象
+```
+
+### `PATCH /api/history/{id}`
+
+更新归档会话的备注/标签/名称。字段缺省则保持不变；传空字符串/空数组清空。
+
+```
+Request:
+{ "name": "new-name", "notes": "解法要点", "tags": ["web","flag"] }
+
+Response 200: ArchivedSession 对象
+```
+
+### `DELETE /api/history/{id}`
+
+**永久删除**归档会话，并清空其 `data/messages/{id}/` 消息目录。不可恢复。
+
+```
+Response: 204 No Content
+```
+
+### `GET /api/history/search?q=...&limit=...`
+
+在全部归档会话的消息中进行全文搜索（子串、不区分大小写）。
+
+```
+Response 200:
+{
+  "hits": [
+    { "session_id": "abc123", "name": "CTF-1", "type": "output", "snippet": "…keyword…" }
+  ]
+}
+```
+
+### `GET /api/history/{id}/transcript?format=text|markdown|html`
+
+导出交错 input/output 时间线（去掉 ANSI）。默认 `text`。
+
+```
+Response 200:
+$ ls -la
+file.txt
+...
+```
+
+### `GET /api/history/{id}/screenshot?start=0&lines=40&cols=80&theme=dark`
+
+渲染指定行范围的会话截图，返回 PNG。`start` 起始显示行（0 基）、`lines` 渲染行数（0=全部）、`cols` 终端列宽（默认 80）、`theme` 为 `dark`(默认)/`light`。
+
+```
+Response 200: image/png（Content-Disposition 附加下载）
 ```
 
 ---
@@ -356,6 +448,9 @@ Response 200: { "ok": true }
 | `GET /api/sessions/{id}/child-shells` | `GET /api/sessions/{id}/shells` (301) |
 | `POST /api/sessions/{id}/terminate` | `DELETE /api/sessions/{id}` |
 | `POST /api/sessions/{id}/disconnect` | `DELETE /api/sessions/{id}` |
+
+> 注意：遗留的 `terminate` / `disconnect` 仅**停止并归档**（保留历史），等价于归档语义，而非规范 `DELETE` 的永久删除。若需永久删除请用 `DELETE /api/sessions/{id}` 或 `DELETE /api/history/{id}`。
+
 | `POST /api/sessions/{id}/close-shell` | close primary shell of session (`session_id` in path) |
 | `POST /api/forwards` | `POST /api/sessions/{id}/forwards` |
 | `DELETE /api/sessions/{id}/files/delete` | `DELETE /api/sessions/{id}/files` |

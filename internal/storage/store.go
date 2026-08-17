@@ -104,6 +104,64 @@ func (s *Store) LoadSessions() ([]api.Session, error) {
 	return sessions, nil
 }
 
+// SaveHistory writes the full archived-session list.
+func (s *Store) SaveHistory(list []api.ArchivedSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initDir(s.dataDir); err != nil {
+		return err
+	}
+	path := filepath.Join(s.dataDir, "history.json")
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(path, data, 0644)
+}
+
+// LoadHistory reads the archived-session list.
+func (s *Store) LoadHistory() ([]api.ArchivedSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	path := filepath.Join(s.dataDir, "history.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []api.ArchivedSession{}, nil
+		}
+		return nil, err
+	}
+	var list []api.ArchivedSession
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// DeleteSessionMessages removes the on-disk message directory for a session,
+// clearing its persisted history.
+func (s *Store) DeleteSessionMessages(sessionID string) error {
+	if err := validateID(sessionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return os.RemoveAll(filepath.Join(s.dataDir, "messages", sessionID))
+}
+
+// MessageDirExists reports whether any persisted messages remain for a session.
+func (s *Store) MessageDirExists(sessionID string) bool {
+	if err := validateID(sessionID); err != nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	st, err := os.Stat(filepath.Join(s.dataDir, "messages", sessionID, "index.json"))
+	return err == nil && st != nil
+}
+
 // SaveMessageIndex writes the message index for a session.
 func (s *Store) SaveMessageIndex(sessionID string, entries []api.MessageIndexEntry) error {
 	if err := validateID(sessionID); err != nil {
