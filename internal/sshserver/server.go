@@ -339,20 +339,14 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 
-	// Forward signals from client to local process.
+	// Forward signals from client to local process. Started after cmd.Start() so
+	// cmd.Process is already set — reading it here before Start() would race with
+	// the concurrent write in Start().
 	sigCh := make(chan ssh.Signal, 8)
 	sess.Signals(sigCh)
-	go func() {
-		for sig := range sigCh {
-			if cmd.Process != nil {
-				if osSig := sshSignalToOSSig(sig); osSig != nil {
-					cmd.Process.Signal(osSig)
-				}
-			}
-		}
-	}()
 
 	ppty, winCh, isPty := sess.Pty()
+	var started bool
 	if isPty {
 		go func() {
 			for range winCh {
@@ -365,15 +359,49 @@ func (s *Server) handleSession(sess ssh.Session) {
 			sess.Exit(1)
 			return
 		}
+		started = true
 	} else {
-		cmd.Stdin = sess
-		cmd.Stdout = sess
-		cmd.Stderr = sess.Stderr()
-		if err := cmd.Start(); err != nil {
+		// Pipe mode (no TTY). Use StdinPipe so exec.Cmd does not spawn a stdin
+		// copy goroutine that cmd.Wait() would block on forever. We copy the SSH
+		// stream to the process stdin in our own goroutine, which unblocks only on
+		// client EOF — independent of cmd.Wait(). Without this, any non-interactive
+		// command (echo, ls, …) deadlocks: cmd.Wait() waits for the stdin copy to
+		// finish, which waits on sess.Read(), which never returns because the
+		// channel only closes after sess.Exit() below (which never runs).
+		in, err := cmd.StdinPipe()
+		if err != nil {
 			io.WriteString(sess, err.Error()+"\n")
 			sess.Exit(1)
 			return
 		}
+		cmd.Stdout = sess
+		cmd.Stderr = sess.Stderr()
+		if err := cmd.Start(); err != nil {
+			_ = in.Close()
+			io.WriteString(sess, err.Error()+"\n")
+			sess.Exit(1)
+			return
+		}
+		started = true
+		go func() {
+			_, _ = io.Copy(in, sess)
+			in.Close()
+		}()
+	}
+
+	// Forward signals from client to local process. Now that cmd.Start() has
+	// populated cmd.Process (and pty.Start calls it too), reading it here cannot
+	// race with the Start() write.
+	if started {
+		go func() {
+			for sig := range sigCh {
+				if cmd.Process != nil {
+					if osSig := sshSignalToOSSig(sig); osSig != nil {
+						cmd.Process.Signal(osSig)
+					}
+				}
+			}
+		}()
 	}
 
 	cmd.Wait()

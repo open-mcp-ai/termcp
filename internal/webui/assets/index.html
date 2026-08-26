@@ -716,6 +716,9 @@
       <svg class="sec-chevron" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>
       <span>Sessions</span>
       <span style="flex:1"></span>
+      <button type="button" class="icon-btn" style="width:28px;height:28px" id="btn-clear-dead" title="Clear dead sessions" aria-label="Clear dead sessions" onclick="event.stopPropagation()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </button>
     </div>
     <div class="section-body" id="sec-sessions-body">
       <div id="session-load-banner" class="conn-load-banner" role="status" style="display:none"></div>
@@ -2052,6 +2055,16 @@
       return;
     }
     var running = shells.filter(function(s) { return s.status === 'running'; });
+    var exited = shells.filter(function(s) { return s.status !== 'running'; });
+    // Live container whose shells have all exited: keep the exited-history tabs
+    // read-only (don't recreate them from scratch each refresh).
+    if (running.length === 0 && exited.length > 0) {
+      (exited).forEach(function(s) {
+        var sid = s.shell_id || s.id;
+        if (!existing[sid]) createChannelTab(win, sid, null, true);
+      });
+      return;
+    }
     // Add new running shells that don't have a tab yet.
     // Primary shell tab is created on explicit open (session create / restore). Sync only
     // adds additional shells so closing a tab does not recreate it on the next refresh.
@@ -2063,10 +2076,12 @@
     // is never pruned here: during teardown its exit can surface in a still-RUNNING
     // list frame before the session flips to DEAD, and pruning it here would close
     // the first shell on disconnect/kill. The DEAD lock (readOnly) keeps it; child
-    // shells added via "+" are pruned as before on genuine exit.
+    // shells added via "+" are pruned as before on genuine exit. Read-only history
+    // channels from an exited container are also kept.
     Object.keys(existing).forEach(function(sid) {
       if (sid === win._primaryShellId) return;
-      var found = running.some(function(s) { return s.id === sid; });
+      if (existing[sid] && existing[sid].readOnlyHistory) return;
+      var found = running.some(function(s) { return (s.shell_id || s.id) === sid; });
       if (!found && existing[sid]) closeChannelTab(win, sid);
     });
   }
@@ -2688,10 +2703,11 @@
   }
 
   /** Create a channel tab + xterm instance for sessionId. */
-  function createChannelTab(win, sessionId, optLabel) {
+  function createChannelTab(win, sessionId, optLabel, optReadOnlyHistory) {
     if (!win._channels) { win._channels = {}; win._channelCount = 0; win._channelSeq = 0; }
     if (win._channels[sessionId]) { switchChannelTab(win, sessionId); return; }
     var label = optLabel || ('shell-' + (win._channelSeq + 1));
+    var readOnlyHistory = !!optReadOnlyHistory;
 
     var tabsBar = win.querySelector('.shell-channel-tabs');
     var body = win.querySelector('.shell-channel-body');
@@ -2753,12 +2769,15 @@
     attachXtermViewportScrollbarGuard(term);
     attachTermBrowserChordShield(term);
 
-    // Store channel state
+    // Store channel state. A readOnly-history channel renders already-exited
+    // output from a live session container (pipe commands that finished); it is
+    // read-only (no input sent) so it never interferes with concurrent MCP I/O.
     win._channels[sessionId] = {
       term: term,
       instEl: inst,
       tabEl: tab,
-      streamDone: false,
+      readOnlyHistory: readOnlyHistory,
+      streamDone: readOnlyHistory,
       endedMarkPrinted: false,
       historyLoaded: false,
       fitRo: null
@@ -2799,9 +2818,10 @@
     bootstrapShellFullHistory(sessionId, term).finally(function () {
       var chLoaded = win._channels && win._channels[sessionId];
       if (chLoaded) chLoaded.historyLoaded = true;
-      if (win._readOnly) {
-        // DEAD/read-only channels have no live terminal_done event; render the same
-        // end marker after their persisted output is restored.
+      if (win._readOnly || (chLoaded && chLoaded.readOnlyHistory)) {
+        // DEAD/read-only channels (or a live container's exited-history channel)
+        // have no live terminal_done event; render the end marker after the
+        // persisted output is restored.
         showTerminalEndedMarker(win, chLoaded);
       } else {
         queueTerminalWatch(sessionId);
@@ -3514,6 +3534,16 @@ SHELL_WINDOW_PANELS_HTML +
     fetch(sessionAPI(sessionId, '/shells'))
       .then(function(r) { if (!r.ok) return []; return r.json().then(function(j) { return j.shells || []; }); })
       .then(function(shells) {
+        var running = shells.filter(function(s) { return s.status === 'running'; });
+        var exited = shells.filter(function(s) { return s.status !== 'running'; });
+        // Live container with only exited history shells (pipe commands that
+        // finished): show them as read-only history tabs so the web UI is not
+        // empty, while keeping the ability to open a new shell. Running parents
+        // with zero shells still render the exited history instead of a blank view.
+        if (running.length === 0 && exited.length > 0 && !readOnly) {
+          exited.forEach(function(s) { createChannelTab(win, s.shell_id || s.id, null, true); });
+          return;
+        }
         var tabs = shells.filter(function(s) { return readOnly || s.status === 'running'; });
         if (tabs.length > 0) {
           if (!win._primaryShellId) {
@@ -4264,6 +4294,39 @@ SHELL_WINDOW_PANELS_HTML +
   document.getElementById('btn-refresh-conn').onclick = function () {
     loadConnections();
     startUIWebSocket();
+  };
+  document.getElementById('btn-clear-dead').onclick = function (e) {
+    e.stopPropagation();
+    var dead = (window._lastSessionsSnapshot || []).filter(function(s) { return s && s.status !== 'running'; });
+    if (!dead.length) { showCopyToast('No dead sessions'); return; }
+    confirmDialog({
+      title: 'Clear dead sessions',
+      message: 'Permanently delete ' + dead.length + ' exited (DEAD) session' + (dead.length === 1 ? '' : 's') + '? This cannot be undone.',
+      okText: 'Clear all',
+      danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      var banner = document.getElementById('session-load-banner');
+      if (banner) setLoadBanner(banner, 'Clearing dead sessions…');
+      // Delete sequentially: Manager.Delete persists the registry on each call,
+      // so this avoids overlapping writes to sessions.json. Only retained DEAD
+      // tiles in the current snapshot are touched; history-only archives remain.
+      return dead.reduce(function(p, s) {
+        return p.then(function() {
+          return fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
+            .then(function(r) {
+              if (r.ok || r.status === 204 || r.status === 404) return;
+              return r.text().then(function(t) { throw new Error(t || ('HTTP ' + r.status)); });
+            });
+        });
+      }, Promise.resolve()).then(function() {
+        if (banner) setLoadBanner(banner, '');
+        loadForwards();
+        startUIWebSocket();
+      }).catch(function(err) {
+        if (banner) setLoadBanner(banner, 'Clear failed: ' + String(err.message || err));
+      });
+    });
   };
   // Delegated click handler for forward delete buttons (bound once, survives innerHTML refresh).
   (function() {

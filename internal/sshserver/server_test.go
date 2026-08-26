@@ -1,6 +1,7 @@
 package sshserver
 
 import (
+	"io"
 	"runtime"
 	"strings"
 	"testing"
@@ -126,6 +127,63 @@ func TestServer_PipeSession(t *testing.T) {
 	}
 	if strings.TrimRight(string(out), "\r\n") != "hello" {
 		t.Fatalf("expected hello output, got %q", string(out))
+	}
+}
+
+// TestServer_PipeSession_StdinNeverClosed guards the pipe-mode deadlock: when
+// the client opens StdinPipe and never writes/closes it (the termcp MCP/handler
+// path), the server must still finish Wait once the command exits for commands
+// that do not read stdin (echo, ls, …). Regression: unrelated to whether the
+// client provides stdin − the session must not hang forever.
+func TestServer_PipeSession_StdinNeverClosed(t *testing.T) {
+	srv := New()
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	config := mintCfg(t, srv)
+	client := dialServer(t, srv, config)
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately never write to or close stdin — replicates the termcp SSH
+	// client which keeps stdin open for the life of the session.
+	_ = stdin
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := session.Start("echo deadlock-guard"); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		b, _ := io.ReadAll(stdout)
+		if strings.TrimRight(string(b), "\r\n") != "deadlock-guard" {
+			t.Errorf("unexpected output: %q", string(b))
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not finish the pipe session: stdin-copy deadlock")
+	}
+	if err := session.Wait(); err != nil {
+		t.Errorf("Wait returned error: %v", err)
 	}
 }
 

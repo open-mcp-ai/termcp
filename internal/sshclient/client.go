@@ -42,6 +42,24 @@ func DrainClosers(closers []io.Closer) {
 	}
 }
 
+// setTCPKeepAlive enables kernel-level TCP probes so a genuinely severed link
+// eventually surfaces as an SSH transport error. Multiple unanswered probes are
+// required before the kernel drops the socket, avoiding the false positives of
+// an application-level SSH request/timeout watchdog. Internal in-memory
+// connections are silently left unchanged.
+func setTCPKeepAlive(conn net.Conn) {
+	tcp, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	_ = tcp.SetKeepAliveConfig(net.KeepAliveConfig{
+		Enable:   true,
+		Idle:     30 * time.Second,
+		Interval: 15 * time.Second,
+		Count:    4,
+	})
+}
+
 // StartWithConfig dials addr with the given SSH client config and starts a command.
 // If proxy is non-nil and enabled, the SSH connection is tunneled through a SOCKS5 proxy.
 func StartWithConfig(addr string, config *ssh.ClientConfig, proxy *Proxy, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
@@ -77,7 +95,12 @@ func DialConn(addr string, proxy *Proxy, timeout time.Duration) (net.Conn, error
 	if proxy != nil && proxy.Enabled() {
 		return dialProxy(proxy, addr, timeout)
 	}
-	return net.DialTimeout("tcp", addr, timeout)
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return nil, err
+	}
+	setTCPKeepAlive(conn)
+	return conn, nil
 }
 
 // StartWithConn creates an SSH client over an existing net.Conn (e.g. net.Pipe)

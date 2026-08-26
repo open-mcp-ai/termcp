@@ -75,6 +75,7 @@ func dialProxy(p *Proxy, targetAddr string, timeout time.Duration) (net.Conn, er
 	if err != nil {
 		return nil, fmt.Errorf("proxy dial %s: %w", proxyAddr, err)
 	}
+	setTCPKeepAlive(conn)
 	if err := socks5Handshake(conn, p, targetAddr, timeout); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("socks5: %w", err)

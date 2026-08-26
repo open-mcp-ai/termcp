@@ -373,6 +373,40 @@ func TestSession_NaturalExit(t *testing.T) {
 	}
 }
 
+// TestManager_PipeSessionLastExitMarksDead locks the pipe-mode contract: when the
+// last (root) pipe shell exits cleanly, the container flips to DEAD (retained, not
+// auto-deleted) so it disappears from the running list while keeping its output for
+// read-only viewing / manual cleanup. PTY sessions stay running after a shell exit.
+func TestManager_PipeSessionLastExitMarksDead(t *testing.T) {
+	srv := startTestServer(t)
+	mgr := NewManager(nil, nil, srv)
+
+	// A short pipe command (echo) that exits cleanly on its own.
+	s, err := mgr.Create(Config{Command: testShell(), Args: testShellEchoArgs("done"), Mode: api.ModePipe, Name: "pipe", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := s.ID
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) && mgr.Get(id) != nil && mgr.Get(id).Info().Status != api.SessionExited {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	got := mgr.Get(id)
+	if got == nil {
+		t.Fatal("pipe session should be retained (DEAD, not deleted) after last shell exits")
+	}
+	if got.Info().Status != api.SessionExited {
+		t.Fatalf("pipe session should become DEAD after last shell exits, got %q", got.Info().Status)
+	}
+	// Output must remain readable from the retained (still registered) shell.
+	shells := got.ListChildShells()
+	if len(shells) == 0 {
+		t.Fatal("expected exited shell retained in map for reading output")
+	}
+}
+
 func TestManager_CreateAndGet(t *testing.T) {
 	srv := startTestServer(t)
 

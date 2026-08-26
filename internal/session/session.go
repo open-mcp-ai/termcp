@@ -60,18 +60,20 @@ type Config struct {
 // Session is a connection container; terminal I/O is addressed by shell_id via ChildShell.
 type Session struct {
 	api.Session
-	mu            sync.RWMutex
-	stdinMu       sync.Mutex
-	terminateOnce sync.Once
-	deadOnce      sync.Once
-	exitOnce      sync.Once
-	execSession   *sshclient.ExecSession
-	buf           *buffer.Buffer
-	readerID      int
-	msgMgr        *message.Manager
-	onDead        func()
-	onChildChange func() // called when child shells are added/removed
-	enterCRLF     bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
+	mu             sync.RWMutex
+	shellStateMu   sync.Mutex // serializes child registration with close/DEAD transition
+	closing        bool       // guarded by shellStateMu; blocks new child channels
+	stdinMu        sync.Mutex
+	terminateOnce  sync.Once
+	deadOnce       sync.Once
+	exitOnce       sync.Once
+	execSession    *sshclient.ExecSession
+	buf            *buffer.Buffer
+	readerID       int
+	msgMgr         *message.Manager
+	onDead         func()
+	onChildChange  func() // called when child shells are added/removed
+	enterCRLF      bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
 	primaryShellID string // first shell id (≠ session id); used for legacy Session-level helpers
 
 	shells sync.Map // *ChildShell by ID
@@ -434,6 +436,7 @@ func (s *Session) BufferLen() int64 {
 // resources.
 func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 	s.terminateOnce.Do(func() {
+		s.beginClosing()
 		es := s.execSession
 		if es == nil {
 			// Restored (restart) placeholder with no live transport.
@@ -467,6 +470,35 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 // Idempotent (runs once). It never removes the registry entry, forgets
 // messages, or closes retained buffers; only Manager.Delete → finalize do that.
 func (s *Session) markDead() {
+	s.markDeadWithMessage("")
+}
+
+func (s *Session) markDeadWithMessage(systemMessage string) {
+	s.shellStateMu.Lock()
+	defer s.shellStateMu.Unlock()
+	// A deliberate close may race with an exit watcher that already observed
+	// the transport error. Do not turn that intentional close into a network-loss
+	// notification.
+	if systemMessage != "" && s.closing {
+		return
+	}
+	s.markDeadLocked(systemMessage)
+}
+
+// markDeadIfNoShells performs the zero-live-shell check under the same lock used
+// by CreateChildShell, so a new channel cannot appear during the DEAD transition.
+func (s *Session) markDeadIfNoShells(systemMessage string) {
+	s.shellStateMu.Lock()
+	defer s.shellStateMu.Unlock()
+	if s.liveShellCount() != 0 {
+		return
+	}
+	s.markDeadLocked(systemMessage)
+}
+
+// markDeadLocked requires shellStateMu.
+func (s *Session) markDeadLocked(systemMessage string) {
+	s.closing = true
 	s.deadOnce.Do(func() {
 		// Flush output pipe goroutines so the last bytes are appended to the
 		// message log before DEAD becomes observable.
@@ -475,6 +507,10 @@ func (s *Session) markDead() {
 		select {
 		case <-flushDone:
 		case <-time.After(500 * time.Millisecond):
+		}
+
+		if systemMessage != "" && s.msgMgr != nil {
+			_, _ = s.msgMgr.Append(s.ID, api.MsgSystem, systemMessage)
 		}
 
 		s.mu.Lock()
@@ -495,6 +531,7 @@ func (s *Session) markDead() {
 // transport. Its only caller is Manager.Delete. Runs once.
 func (s *Session) finalize() {
 	s.exitOnce.Do(func() {
+		s.beginClosing()
 		s.terminateChildren()
 		if s.buf != nil {
 			s.buf.Close()
@@ -520,15 +557,35 @@ func (s *Session) TerminateShellOnly() {
 // Disconnect closes the session transport and marks the session DEAD in place,
 // preserving the object, buffers, and history for read-only viewing.
 func (s *Session) Disconnect() {
+	s.beginClosing()
 	if s.execSession != nil {
 		s.execSession.Close()
 	}
 	s.markDead()
 }
 
+func (s *Session) beginClosing() {
+	s.shellStateMu.Lock()
+	defer s.shellStateMu.Unlock()
+	if s.closing {
+		return
+	}
+	s.closing = true
+	s.shells.Range(func(_, v any) bool {
+		cs := v.(*ChildShell)
+		cs.mu.Lock()
+		cs.deliberateClose = true
+		cs.mu.Unlock()
+		return true
+	})
+}
+
 // terminateChildren closes all child shells. Called during parent session termination.
 // Holds write lock long enough to snapshot+clear the map, preventing races with Create/Close.
 func (s *Session) terminateChildren() {
+	s.shellStateMu.Lock()
+	defer s.shellStateMu.Unlock()
+
 	var children []*ChildShell
 	s.shells.Range(func(k, v any) bool {
 		s.shells.Delete(k)
@@ -643,7 +700,7 @@ type ChildShell struct {
 	buf         *buffer.Buffer
 	done        chan struct{}
 	closeOnce   sync.Once
-	cleanupOnce sync.Once // guards removeChildShell to prevent double push from explicit close + natural exit
+	cleanupOnce sync.Once // guards explicit removal from the parent shell map
 	mu          sync.RWMutex
 	stdinMu     sync.Mutex
 	Status      api.SessionStatus
@@ -879,6 +936,23 @@ func (s *Session) removeChildShell(id string) {
 	}
 }
 
+// liveShellCount returns the number of child shells whose processes are still running.
+// Exited shells stay in the map so MCP/WebUI readers can drain retained output.
+func (s *Session) liveShellCount() int {
+	n := 0
+	s.shells.Range(func(_, v any) bool {
+		cs := v.(*ChildShell)
+		cs.mu.RLock()
+		running := cs.Status == api.SessionRunning
+		cs.mu.RUnlock()
+		if running {
+			n++
+		}
+		return true
+	})
+	return n
+}
+
 // startChildReaders starts the stdout/stderr pipe goroutines and exit watcher for a child shell.
 func (cs *ChildShell) startReaders() {
 	cs.pipeToBuffer(cs.execSession.Stdout)
@@ -897,12 +971,12 @@ func (cs *ChildShell) startReaders() {
 			p.shellHistory.Store(cs.ID, cs.Info())
 		}
 		cs.buf.Close()
-		// Remove from parent's map and notify UI.
-		cs.cleanupOnce.Do(func() {
-			if cs.parent != nil {
-				cs.parent.removeChildShell(cs.ID)
-			}
-		})
+		// Keep the exited ChildShell in the parent map until explicit close/Delete.
+		// This preserves its closed buffer so shell_output and WebUI can drain
+		// final output after a fast pipe command has already exited.
+		if cs.parent != nil && cs.parent.onChildChange != nil {
+			cs.parent.onChildChange()
+		}
 		// If the shell ended due to SSH disconnect (not deliberate close and not
 		// clean process exit), tear down the session. exitOnce ensures once.
 		cs.mu.RLock()
@@ -910,16 +984,16 @@ func (cs *ChildShell) startReaders() {
 		reparent := cs.parent
 		cs.mu.RUnlock()
 		if reparent != nil && !deliberate && cs.execSession.Aborted() {
-			// Only SSH transport loss DEADs the parent. A single shell's clean
-			// close must never cascade into siblings or the connection container;
-			// drop out if the parent already left running.
-			reparent.mu.RLock()
-			parentRunning := reparent.Status == api.SessionRunning
-			reparent.mu.RUnlock()
-			if parentRunning {
-				slog.Debug("session DEAD via transport abort", "session_id", reparent.ID, "child_shell_id", cs.ID)
-				reparent.markDead()
-			}
+			slog.Debug("session DEAD via transport abort", "session_id", reparent.ID, "child_shell_id", cs.ID)
+			reparent.markDeadWithMessage("❌ SSH connection lost — network disconnected")
+		} else if reparent != nil && !deliberate && reparent.Mode == api.ModePipe {
+			// A clean exit of the last pipe shell would otherwise leave a running
+			// container with zero shells. Flip the parent to DEAD so the container
+			// disappears from the running list; output/history stays for manual
+			// cleanup (clear-dead button). PTY sessions remain reusable after a
+			// shell exits, preserving the interactive-session contract.
+			slog.Debug("pipe shell exited cleanly; checking parent", "session_id", reparent.ID, "child_shell_id", cs.ID)
+			reparent.markDeadIfNoShells("Session ended — last shell exited")
 		}
 		slog.Debug("child shell exited", "child_shell_id", cs.ID, "exit_code", code)
 	}()
@@ -927,11 +1001,20 @@ func (cs *ChildShell) startReaders() {
 
 // CreateChildShell opens a new SSH session channel on the parent's existing SSH connection.
 func (s *Session) CreateChildShell(command string, args []string, pty bool, rows, cols int, name string) (*ChildShell, error) {
+	s.shellStateMu.Lock()
+	defer s.shellStateMu.Unlock()
+
+	s.mu.RLock()
+	running := s.Status == api.SessionRunning
+	s.mu.RUnlock()
+	if s.closing || !running {
+		return nil, fmt.Errorf("session has exited")
+	}
+
 	sshClient := s.SSHClient()
 	if sshClient == nil {
 		return nil, fmt.Errorf("sub-shell multiplexing requires an SSH connection; internal loopback sessions do not support multiple channels")
 	}
-
 	id := uuid.New().String()[:12]
 	if name == "" {
 		name = fmt.Sprintf("shell-%s", id)
@@ -1035,13 +1118,20 @@ func (s *Session) SnapshotShells() []api.Session {
 
 // ShellsForView returns shell metadata for session rendering. Running sessions
 // report live shells; DEAD/restored sessions fall back to the retained shell
-// snapshot so their tabs survive transport teardown or a restart.
+// snapshot so their tabs survive transport teardown or a restart. When no live
+// shells exist in a running session (pipe-mode command that exited naturally)
+// the retained snapshot is returned so the web UI renders exited tabs rather
+// than an empty channel list.
 func (s *Session) ShellsForView() []api.Session {
 	s.mu.RLock()
 	status := s.Status
 	s.mu.RUnlock()
 	if status == api.SessionRunning {
-		return s.ListChildShells()
+		shells := s.ListChildShells()
+		if len(shells) == 0 {
+			shells = s.SnapshotShells()
+		}
+		return shells
 	}
 	return s.SnapshotShells()
 }
