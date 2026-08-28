@@ -285,7 +285,7 @@ func (s *Server) handleListSubshells(_ context.Context, request mcpgo.CallToolRe
 // handleCloseShell closes a single shell channel without tearing down the parent session.
 // For a parent session id: closes the root shell channel only (remote) / no-op (internal);
 // the SSH connection and other child shells keep running. For a child shell id: closes
-// just that channel. Use terminate_session to fully stop a session.
+// just that channel. Use session_terminate to fully stop a session.
 func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	shellID := getString(args, "shell_id", "")
@@ -311,8 +311,8 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	sessionID := getString(args, "shell_id", "")
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 3.0)
-	if timeout < 0.1 || timeout > 60 {
-		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
+	if timeout < 0 || timeout > 60 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0 and 60, got %v", timeout)), nil
 	}
 	maxLines := int(getFloat64(args, "max_lines", 0))
 	maxBytes := int(getFloat64(args, "max_bytes", 0))
@@ -1124,240 +1124,165 @@ func (s *Server) handleGetFileURLs(_ context.Context, request mcpgo.CallToolRequ
 	}), nil
 }
 
-// handleFileChmod changes file permissions via SSH/SFTP.
-func (s *Server) handleFileChmod(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+// handleFilePerm dispatches chmod, chown, chtimes.
+func (s *Server) handleFilePerm(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-	mode := os.FileMode(getFloat64(args, "mode", 0))
+	action := getString(args, "action", "")
 
 	if sessionID == "" {
 		return mcpgo.NewToolResultError("session_id required"), nil
 	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
 	defer sftpCli.Close()
-	if err := sftpCli.ChmodFile(remotePath, mode); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+
+	switch action {
+	case "chmod":
+		remotePath := getString(args, "remote_path", "")
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("chmod requires remote_path and mode (decimal, e.g. 493 = 0755)"), nil
+		}
+		if _, ok := args["mode"]; !ok {
+			return mcpgo.NewToolResultError("chmod requires remote_path and mode (decimal, e.g. 493 = 0755)"), nil
+		}
+		mode := os.FileMode(getFloat64(args, "mode", 0))
+		if err := sftpCli.ChmodFile(remotePath, mode); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	case "chown":
+		remotePath := getString(args, "remote_path", "")
+		uid := int(getFloat64(args, "uid", -1))
+		gid := int(getFloat64(args, "gid", -1))
+		if remotePath == "" || uid < 0 || gid < 0 {
+			return mcpgo.NewToolResultError("chown requires remote_path, uid, and gid"), nil
+		}
+		if err := sftpCli.ChownFile(remotePath, uid, gid); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	case "chtimes":
+		remotePath := getString(args, "remote_path", "")
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("chtimes requires remote_path, atime, and mtime"), nil
+		}
+		if _, ok := args["atime"]; !ok {
+			return mcpgo.NewToolResultError("chtimes requires remote_path, atime, and mtime"), nil
+		}
+		if _, ok := args["mtime"]; !ok {
+			return mcpgo.NewToolResultError("chtimes requires remote_path, atime, and mtime"), nil
+		}
+		atime := time.Unix(int64(getFloat64(args, "atime", 0)), 0)
+		mtime := time.Unix(int64(getFloat64(args, "mtime", 0)), 0)
+		if err := sftpCli.ChtimesFile(remotePath, atime, mtime); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	default:
+		return mcpgo.NewToolResultError("action must be chmod, chown, or chtimes"), nil
 	}
 	return successResult(), nil
 }
 
-// handleFileChown changes file owner and group via SSH/SFTP.
-func (s *Server) handleFileChown(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+// handleFileLinkOp dispatches readlink, symlink, link.
+func (s *Server) handleFileLinkOp(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-	uid := int(getFloat64(args, "uid", -1))
-	gid := int(getFloat64(args, "gid", -1))
+	action := getString(args, "action", "")
 
 	if sessionID == "" {
 		return mcpgo.NewToolResultError("session_id required"), nil
 	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
 	defer sftpCli.Close()
-	if err := sftpCli.ChownFile(remotePath, uid, gid); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+
+	switch action {
+	case "readlink":
+		remotePath := getString(args, "remote_path", "")
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("readlink requires remote_path"), nil
+		}
+		target, err := sftpCli.ReadLink(remotePath)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{"target": target}), nil
+	case "symlink":
+		target := getString(args, "target", "")
+		linkPath := getString(args, "link_path", "")
+		if target == "" || linkPath == "" {
+			return mcpgo.NewToolResultError("symlink requires target and link_path"), nil
+		}
+		if err := sftpCli.SymlinkFile(target, linkPath); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	case "link":
+		existingPath := getString(args, "existing_path", "")
+		newPath := getString(args, "new_path", "")
+		if existingPath == "" || newPath == "" {
+			return mcpgo.NewToolResultError("link requires existing_path and new_path"), nil
+		}
+		if err := sftpCli.LinkFile(existingPath, newPath); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	default:
+		return mcpgo.NewToolResultError("action must be readlink, symlink, or link"), nil
 	}
 	return successResult(), nil
 }
 
-// handleFileChtimes changes file access and modification times via SSH/SFTP.
-func (s *Server) handleFileChtimes(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+// handleFileFsOp dispatches truncate, realpath, statvfs.
+func (s *Server) handleFileFsOp(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-	atimeSec := getFloat64(args, "atime", 0)
-	mtimeSec := getFloat64(args, "mtime", 0)
+	action := getString(args, "action", "")
 
 	if sessionID == "" {
 		return mcpgo.NewToolResultError("session_id required"), nil
 	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
-	atime := time.Unix(int64(atimeSec), 0)
-	mtime := time.Unix(int64(mtimeSec), 0)
-
 	sftpCli, bad := s.sftpClient(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
 	defer sftpCli.Close()
-	if err := sftpCli.ChtimesFile(remotePath, atime, mtime); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+
+	switch action {
+	case "truncate":
+		remotePath := getString(args, "remote_path", "")
+		size := int64(getFloat64(args, "size", 0))
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("truncate requires remote_path and size"), nil
+		}
+		if err := sftpCli.TruncateFile(remotePath, size); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	case "realpath":
+		remotePath := getString(args, "remote_path", "")
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("realpath requires remote_path"), nil
+		}
+		canonical, err := sftpCli.RealPath(remotePath)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{"canonical_path": canonical}), nil
+	case "statvfs":
+		remotePath := getString(args, "remote_path", "")
+		if remotePath == "" {
+			return mcpgo.NewToolResultError("statvfs requires remote_path"), nil
+		}
+		result, err := sftpCli.StatVFS(remotePath)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(toMap(result)), nil
+	default:
+		return mcpgo.NewToolResultError("action must be truncate, realpath, or statvfs"), nil
 	}
 	return successResult(), nil
-}
-
-// handleFileReadlink reads the target of a symbolic link via SSH/SFTP.
-func (s *Server) handleFileReadlink(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	target, err := sftpCli.ReadLink(remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(map[string]any{"target": target}), nil
-}
-
-// handleFileSymlink creates a symbolic link via SSH/SFTP.
-func (s *Server) handleFileSymlink(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	target := getString(args, "target", "")
-	linkPath := getString(args, "link_path", "")
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if target == "" {
-		return mcpgo.NewToolResultError("target required"), nil
-	}
-	if linkPath == "" {
-		return mcpgo.NewToolResultError("link_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	if err := sftpCli.SymlinkFile(target, linkPath); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return successResult(), nil
-}
-
-// handleFileLink creates a hard link via SSH/SFTP.
-func (s *Server) handleFileLink(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	existingPath := getString(args, "existing_path", "")
-	newPath := getString(args, "new_path", "")
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if existingPath == "" {
-		return mcpgo.NewToolResultError("existing_path required"), nil
-	}
-	if newPath == "" {
-		return mcpgo.NewToolResultError("new_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	if err := sftpCli.LinkFile(existingPath, newPath); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return successResult(), nil
-}
-
-// handleFileTruncate truncates a file to a specified size via SSH/SFTP.
-func (s *Server) handleFileTruncate(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-	size := int64(getFloat64(args, "size", 0))
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	if err := sftpCli.TruncateFile(remotePath, size); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return successResult(), nil
-}
-
-// handleFileRealpath resolves the canonical absolute path via SSH/SFTP.
-func (s *Server) handleFileRealpath(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	canonical, err := sftpCli.RealPath(remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(map[string]any{"canonical_path": canonical}), nil
-}
-
-// handleFileStatVFS returns filesystem statistics via SSH/SFTP.
-func (s *Server) handleFileStatVFS(_ context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := strings.TrimSpace(getString(args, "session_id", ""))
-	remotePath := getString(args, "remote_path", "")
-
-	if sessionID == "" {
-		return mcpgo.NewToolResultError("session_id required"), nil
-	}
-	if remotePath == "" {
-		return mcpgo.NewToolResultError("remote_path required"), nil
-	}
-
-	sftpCli, bad := s.sftpClient(sessionID)
-	if bad != nil {
-		return bad, nil
-	}
-	defer sftpCli.Close()
-	result, err := sftpCli.StatVFS(remotePath)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(toMap(result)), nil
 }
 
 // handleFileGetwd returns the remote working directory via SSH/SFTP.

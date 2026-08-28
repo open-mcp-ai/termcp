@@ -14,10 +14,10 @@ SSH 连接
 
 **定义**：SSH 连接的管理容器。持有 SSH Client，维护下属 Shell 和 Forward 列表，不负责 I/O。
 
-**创建**：`start_session` → 建立 SSH 连接 → 创建 Session 实例。
+**创建**：`session_start` → 建立 SSH 连接 → 创建 Session 实例。
 
 **销毁时机**：
-- 用户显式 `terminate_session` / REST `DELETE /api/sessions/{id}` / `disconnect`
+- 用户显式 `session_terminate` / REST `DELETE /api/sessions/{id}` / `disconnect`
 - SSH 连接意外断开（被动检测，见下文）
 
 **销毁行为**：级联关闭所有 Shell → 关闭所有 Forward → 关闭 SSH Client → 从 registry 移除。
@@ -31,14 +31,14 @@ SSH 连接
 **定义**：SSH 连接上的一个 terminal channel。所有 Shell 无论何时创建都是同级的，代码中不存在 "根 shell" 或 "主 shell" 的概念。
 
 **创建**：
-- `start_session`：建 Session 时同时创建第一个 Shell（由参数 command/args 决定具体行为）
-- `start_subshell`：在已有 Session 上创建新 Shell
+- `session_start`：建 Session 时同时创建第一个 Shell（由参数 command/args 决定具体行为）
+- `shell_open`：在已有 Session 上创建新 Shell
 
-**I/O**：所有输入输出通过 Shell ID 寻址。`send_input`、`read_output` 的目标都是 Shell。
+**I/O**：所有输入输出通过 Shell ID 寻址。`shell_input`、`shell_output` 的目标都是 Shell。
 
 **销毁时机**：
 - 进程自然退出（exit 命令或命令执行完毕）
-- 用户显式 `close_shell`
+- 用户显式 `shell_close`
 - 所属 Session 终止时级联关闭
 
 **销毁行为**：关闭 channel → 从 Session 的 Shell 列表移除 → 推送 UI 更新。
@@ -47,7 +47,7 @@ SSH 连接
 
 **定义**：基于 SSH 连接的端口转发 tunnel。属于 Session，不绑定特定 Shell。
 
-**创建/销毁**：通过 `local_forward` / `remote_forward` / `dynamic_forward` / `close_forward` 等 MCP 工具操作（OpenSSH 语义：-L / -R / -D）。
+**创建/销毁**：通过 `forward(action=local/remote/dynamic/close)` MCP 工具操作（OpenSSH 语义：-L / -R / -D）。
 
 **级联清理**：Session 终止（显式或 SSH 断开）时，Session 持有的所有 Forward 一并关闭。
 

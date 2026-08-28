@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -559,7 +561,7 @@ func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
 	m := parseResult(t, startResult)
 	shellID := m["shell_id"].(string)
 
-	for _, timeout := range []float64{-1, 0.001, 61, 999} {
+	for _, timeout := range []float64{-1, 61, 999} {
 		req := makeRequest(map[string]any{
 			"shell_id": shellID,
 			"timeout":  timeout,
@@ -568,6 +570,16 @@ func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
 		if !result.IsError {
 			t.Fatalf("expected error for timeout %v", timeout)
 		}
+	}
+
+	// Zero is an explicit non-blocking read and must not require a retry.
+	zeroReq := makeRequest(map[string]any{
+		"shell_id": shellID,
+		"timeout":  0.0,
+	})
+	zeroResult, _ := s.handleReadOutput(context.Background(), zeroReq)
+	if zeroResult.IsError {
+		t.Fatalf("timeout=0 should be accepted: %s", zeroResult.Content[0].(mcpgo.TextContent).Text)
 	}
 }
 
@@ -611,7 +623,7 @@ func TestHandleReadOutput_ReturnsSessionStatus(t *testing.T) {
 
 	readReq := makeRequest(map[string]any{
 		"shell_id": shellID,
-		"timeout":    1.0,
+		"timeout":  1.0,
 	})
 	result, err := s.handleReadOutput(context.Background(), readReq)
 	if err != nil {
@@ -641,5 +653,209 @@ func TestHandleReadOutput_ReturnsSessionStatus(t *testing.T) {
 		"session_id": sessionID,
 		"force":      true,
 	})
+	s.handleTerminateSession(context.Background(), termReq)
+}
+func TestHandleFileOpsDispatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SFTP mode semantics differ on Windows")
+	}
+	s := newTestServer(t)
+	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
+	startResult, err := s.handleStartSession(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("chmod", func(t *testing.T) {
+		req := makeRequest(map[string]any{
+			"session_id":  sessionID,
+			"action":      "chmod",
+			"remote_path": path,
+			"mode":        float64(0600),
+		})
+		res, err := s.handleFilePerm(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.IsError {
+			t.Fatalf("chmod error: %s", res.Content[0].(mcpgo.TextContent).Text)
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0600 {
+			t.Fatalf("expected 0600, got %o", fi.Mode().Perm())
+		}
+
+		noMode := makeRequest(map[string]any{
+			"session_id":  sessionID,
+			"action":      "chmod",
+			"remote_path": path,
+		})
+		noModeRes, _ := s.handleFilePerm(context.Background(), noMode)
+		if !noModeRes.IsError {
+			t.Fatal("expected error when mode missing")
+		}
+
+		// chmod 000 is a valid operation (strip all permissions) and must be accepted.
+		zero := makeRequest(map[string]any{
+			"session_id":  sessionID,
+			"action":      "chmod",
+			"remote_path": path,
+			"mode":        float64(0),
+		})
+		zeroRes, _ := s.handleFilePerm(context.Background(), zero)
+		if zeroRes.IsError {
+			t.Fatalf("chmod 000 should be accepted: %s", zeroRes.Content[0].(mcpgo.TextContent).Text)
+		}
+		fi, err = os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0 {
+			t.Fatalf("expected perm 0000, got %o", fi.Mode().Perm())
+		}
+		// restore perms for later subtests
+		rm := makeRequest(map[string]any{
+			"session_id":  sessionID,
+			"action":      "chmod",
+			"remote_path": path,
+			"mode":        float64(0644),
+		})
+		rmRes, _ := s.handleFilePerm(context.Background(), rm)
+		if rmRes.IsError {
+			t.Fatalf("restore chmod failed: %s", rmRes.Content[0].(mcpgo.TextContent).Text)
+		}
+	})
+
+	t.Run("realpath", func(t *testing.T) {
+		req := makeRequest(map[string]any{
+			"session_id":  sessionID,
+			"action":      "realpath",
+			"remote_path": dir,
+		})
+		res, err := s.handleFileFsOp(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.IsError {
+			t.Fatalf("realpath error: %s", res.Content[0].(mcpgo.TextContent).Text)
+		}
+		m := parseResult(t, res)
+		gotPath, ok := m["canonical_path"].(string)
+		if !ok || gotPath == "" {
+			t.Fatalf("expected non-empty canonical_path, got %v", m["canonical_path"])
+		}
+		if !strings.HasSuffix(gotPath, filepath.Base(dir)) {
+			t.Fatalf("canonical_path %q should end with %q", gotPath, filepath.Base(dir))
+		}
+	})
+
+	t.Run("unknown action rejected", func(t *testing.T) {
+		calls := map[string]func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error){
+			"file_perm": s.handleFilePerm,
+			"file_link": s.handleFileLinkOp,
+			"file_fs":   s.handleFileFsOp,
+		}
+		for name, h := range calls {
+			req := makeRequest(map[string]any{
+				"session_id":  sessionID,
+				"action":      "nope",
+				"remote_path": path,
+			})
+			res, _ := h(context.Background(), req)
+			if !res.IsError {
+				t.Fatalf("%s: expected error", name)
+			}
+		}
+	})
+
+	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
+	s.handleTerminateSession(context.Background(), termReq)
+}
+func TestGroupDispatch(t *testing.T) {
+	s := newTestServer(t)
+
+	// unknown actions rejected on every unified tool
+	dispatchers := map[string]func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error){
+		"message":    s.handleMessageOps,
+		"history":    s.handleHistoryOps,
+		"forward":    s.handleForwardOps,
+		"ssh_config": s.handleSSHConfigOps,
+	}
+	for name, h := range dispatchers {
+		req := makeRequest(map[string]any{"action": "bogus"})
+		res, _ := h(context.Background(), req)
+		if !res.IsError {
+			t.Fatalf("%s: expected error for unknown action", name)
+		}
+	}
+
+	// ssh_config write actions gated behind RegisterSSHConfigWriteTools
+	req := makeRequest(map[string]any{"action": "create"})
+	res, _ := s.handleSSHConfigOps(context.Background(), req)
+	if !res.IsError {
+		t.Fatal("expected create to be rejected before RegisterSSHConfigWriteTools")
+	}
+	s.RegisterSSHConfigWriteTools()
+	req = makeRequest(map[string]any{"action": "list"})
+	res, err := s.handleSSHConfigOps(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("list should work after upgrade: %s", res.Content[0].(mcpgo.TextContent).Text)
+	}
+
+	// forward(action=list) on empty registry
+	fwdReq := makeRequest(map[string]any{"action": "list"})
+	fwdRes, err := s.handleForwardOps(context.Background(), fwdReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm := parseResult(t, fwdRes)
+	if _, ok := fm["forwards"].([]any); !ok {
+		t.Fatalf("expected forwards array, got %v", fm["forwards"])
+	}
+
+	// history(action=list) works without args
+	hisReq := makeRequest(map[string]any{"action": "list"})
+	hisRes, err := s.handleHistoryOps(context.Background(), hisReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hisRes.IsError {
+		t.Fatalf("history list error: %s", hisRes.Content[0].(mcpgo.TextContent).Text)
+	}
+
+	// message(action=list) needs a session (per-session index)
+	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
+	startRes, err := s.handleStartSession(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := parseResult(t, startRes)
+	sid := sm["session_id"].(string)
+	msgReq := makeRequest(map[string]any{"action": "list", "session_id": sid})
+	msgRes, err := s.handleMessageOps(context.Background(), msgReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msgRes.IsError {
+		t.Fatalf("message list error: %s", msgRes.Content[0].(mcpgo.TextContent).Text)
+	}
+	mm := parseResult(t, msgRes)
+	if _, ok := mm["messages"].([]any); !ok {
+		t.Fatalf("expected messages array, got %v", mm["messages"])
+	}
+	termReq := makeRequest(map[string]any{"session_id": sid, "force": true})
 	s.handleTerminateSession(context.Background(), termReq)
 }

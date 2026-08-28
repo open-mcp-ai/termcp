@@ -12,13 +12,13 @@
     ┌──────────────────────────┼──────────────────────────┐
     │               internal/mcp/ (server.go)               │
     │                                                       │
-    │  工具: start_session / start_subshell / close_shell, │
-    │  send_input / press_key / read_output, │
-    │  list_sessions / get_session_info / terminate_session, │
-    │  resize_pty / register_reader / unregister_reader,    │
-    │  local_forward / remote_forward / dynamic_forward / list_forwards / close_forward, │
-    │  file_read / file_write / file_stat / file_delete / file_rename / file_mkdir / get_file_urls, │
-    │  detect_shell / list_ssh_configs / list_messages / get_message │
+    │  工具: session_start / shell_open / shell_close, │
+    │  shell_input / shell_key / shell_output, │
+    │  session_list / session_info / session_terminate, │
+    │  shell_resize / shell_reader_register / shell_reader_unregister, │
+    │  forward(action=local/remote/dynamic/list/close), │
+    │  file_read / file_write / file_stat / file_delete / file_rename / file_mkdir / file_urls, │
+    │  shell_detect / ssh_config(action=list) / message(action=list/get) / history(action=...) │
     │                                                       │
     │  logging.go: 每个 handler 包装结构化日志 (耗时/错误)    │
     └──────┬───────────────────────────────┬────────────────┘
@@ -73,12 +73,12 @@
              └─────────────────┘
 ```
 
-## 二、进程启动流程（start_session）
+## 二、进程启动流程（session_start）
 
 ```
 AI Agent                    MCP Server              Session.Manager        sshclient              sshserver              OS
   │                            │                         │                     │                      │                     │
-  │  start_session(            │                         │                     │                      │                     │
+  │  session_start(            │                         │                     │                      │                     │
   │    command="bash",         │                         │                     │                      │                     │
   │    mode="pty",             │                         │                     │                      │                     │
   │    rows=24, cols=80)       │                         │                     │                      │                     │
@@ -136,21 +136,21 @@ AI Agent                    MCP Server              Session.Manager        sshcl
   │     (双 ID：连接 vs 终端)   │                         │                     │                      │                     │
 ```
 
-## 三、输入流向（send_input + press_key）
+## 三、输入流向（shell_input + shell_key）
 
 ```
 AI Agent                    ChildShell                 sshclient              sshserver              OS/进程
   │                            │                          │                      │                     │
-  │  send_input(shell_id,text) │                          │                      │                     │
+  │  shell_input(shell_id,text) │                          │                      │                     │
   │ ─────────────────────────> │  SendTerminalBytes       │                      │                     │
-  │  press_key(shell_id,enter) │  PressKey → \r / \n      │                      │                     │
+  │  shell_key(shell_id,enter) │  PressKey → \r / \n      │                      │                     │
   │ ─────────────────────────> │ ── Stdin.Write ─────────>│ ───── SSH data ────>│ ───── stdin ───────>│
   │  ← {"success":true}        │                          │                      │                     │
 ```
 
 **关键设计**：shell 级 stdin 串行写入，防止并发 Agent 交替写入导致输入错乱。I/O 一律按 `shell_id`，不再用 session id 当默认 shell。
 
-## 四、输出流向（read_output）
+## 四、输出流向（shell_output）
 
 ```
 进程 stdout/stderr                                                               AI Agent
@@ -165,7 +165,7 @@ AI Agent                    ChildShell                 sshclient              ss
                                      │  └────┬────┘────┬────┘─────────┘              │
                                      │       │         │                              │
                                      ▼       ▼         ▼                              │
-                                    read_output 被调用时:                              │
+                                    shell_output 被调用时:                              │
                                      │                                                 │
                                      │  buf.Read(ctx, readerID, timeout)               │
                                      │  ┌─ drain: 拷贝 master[readPos:] 并推进 readPos   │
@@ -195,17 +195,17 @@ AI Agent                    ChildShell                 sshclient              ss
 
 | 特性 | 实现 |
 |------|------|
-| 多读者 | 每个 `register_reader` 独立 readPos；共享一条 append-only master |
+| 多读者 | 每个 `shell_reader_register` 独立 readPos；共享一条 append-only master |
 | 内存 | 全员已读过的前缀可整体丢弃；无固定容量环、不按读者覆盖旧数据 |
 | 阻塞等待 | `sync.Cond.Wait()` + 超时 goroutine，支持 context 取消 |
 | 输出清洗 | 两次处理：Strip(去ANSI) → Compact(压缩噪音) |
 
-## 五、信号/终止流向（terminate_session）
+## 五、信号/终止流向（session_terminate）
 
 ```
 AI Agent                Session                    sshclient              sshserver              OS
   │                        │                          │                      │                     │
-  │  terminate_session(   │                          │                      │                     │
+  │  session_terminate(   │                          │                      │                     │
   │    session_id,        │                          │                      │                     │
   │    force=false,       │                          │                      │                     │
   │    grace_period=5)    │                          │                      │                     │
@@ -246,12 +246,12 @@ AI Agent                Session                    sshclient              sshser
 | `exitOnce` | 保证 Status/ExitCode 只写一次，退出 goroutine 是单一权威 |
 | 两阶段终止 | SIGTERM（优雅）→ Close（强制）→ 2s hard timeout |
 
-## 六、PTY 调整大小流向（resize_pty）
+## 六、PTY 调整大小流向（shell_resize）
 
 ```
 AI Agent                Session                    sshclient              sshserver              OS
   │                        │                          │                      │                     │
-  │  resize_pty(           │                          │                      │                     │
+  │  shell_resize(           │                          │                      │                     │
   │    session_id,         │                          │                      │                     │
   │    rows=40, cols=120)  │                          │                      │                     │
   │ ──────────────────────>│                          │                      │                     │
@@ -271,28 +271,28 @@ AI Agent                Session                    sshclient              sshser
 ```
 Agent A (reader 0)           Session              Agent B (新加入)
   │                            │                     │
-  │  start_session() ────────>│                     │
+  │  session_start() ────────>│                     │
   │  ← reader_id:0 (默认)     │                     │
   │                            │                     │
-  │  read_output(             │                     │
+  │  shell_output(             │                     │
   │    reader_id=0) ─────────>│                     │
   │                            │ buf.Read(ctx,0,...) │
   │  ← output                  │                     │
   │                            │                     │
-  │                            │  register_reader() ─┤
+  │                            │  shell_reader_register() ─┤
   │                            │ ─────────────────>  │
   │                            │  ← reader_id:3      │
   │                            │                     │
-  │                            │  read_output(       │
+  │                            │  shell_output(       │
   │                            │    reader_id=3) ───>│
   │                            │ buf.Read(ctx,3,...) │
   │                            │ ← output (从头开始)  │
   │                            │                     │
-  │  read_output(reader_id=0)──┤                     │
+  │  shell_output(reader_id=0)──┤                     │
   │  ← 新输出                  │                     │
 ```
 
-**关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标起点 = 当时的 master 末尾（**无历史 backlog**），只能看到此后产生的新输出；历史不再因单读者环形容量被截断。`start_subshell` 可在同一 SSH 连接上为 Agent B 开独立 shell 通道，彻底避免共用 reader 的游标协调问题。
+**关键**：两个 Agent 各自有独立 readPos，互不干扰。Agent B 注册时游标起点 = 当时的 master 末尾（**无历史 backlog**），只能看到此后产生的新输出；历史不再因单读者环形容量被截断。`shell_open` 可在同一 SSH 连接上为 Agent B 开独立 shell 通道，彻底避免共用 reader 的游标协调问题。
 
 
 ```
@@ -316,14 +316,14 @@ message.Manager.Append(sessionID, type, content)
 ## 十、会话生命周期状态机
 
 ```
-                  start_session()
+                  session_start()
                        │
                        ▼
                ┌──────────────┐
                │   running    │
                └──┬───────┬───┘
                   │       │
-    进程自行退出  │       │  terminate_session()
+    进程自行退出  │       │  session_terminate()
     (startReaders │       │
      goroutine    │       │
      检测退出)    │       │

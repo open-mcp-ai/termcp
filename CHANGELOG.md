@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **低频工具合并为 action 枚举**：`local_forward` / `remote_forward` / `dynamic_forward` / `list_forwards` / `close_forward` → `forward(action=...)`；`message_list` / `message_get` → `message(action=...)`；7 个 `history_*` 工具 → `history(action=...)`；5 个 `ssh_config_*` 工具 → `ssh_config(action=...)`（写操作通过 `--mcp-manage-ssh-configs` 开关）。
+- **删除 9 个低频文件工具**：`file_chmod` / `file_chown` / `file_chtimes` / `file_readlink` / `file_symlink` / `file_link` / `file_truncate` / `file_realpath` / `file_statvfs` → `file_perm` / `file_link` / `file_fs`（各带 `action` 枚举）。
+- **工具总数 44→29**，`tools/list` 从 32,672 B 降至 13,585 B（约 −58%）。
+
+### 改进
+
+- **`ReadOutput` timeout 修复**：接受 `timeout=0`（非阻塞轮询），下限从 0.1 改为 0。
+- **`ssh_config` 写操作双保险**：schema 层面 `action` enum 默认仅 `list`；dispatcher 层面即使客户端绕过 schema 也会拒绝。
+- **统一 dispatch 架构**：新增 `group_handlers.go`，4 个 action dispatcher 复用现有 handler。
+- **指令精简**：12 条 → 7 条（3,054 B → 1,467 B）。
+
+---
+
 ## v0.1.12 — 2026-08-17
 
 ### Breaking
