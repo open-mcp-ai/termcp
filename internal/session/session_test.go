@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/buffer"
+	"github.com/open-mcp-ai/termcp/internal/message"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
+	"github.com/open-mcp-ai/termcp/internal/storage"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
@@ -706,6 +708,142 @@ func TestManager_CloseInternalChildShellKeepsParentSession(t *testing.T) {
 	}
 	if s.IsBufferClosed() {
 		t.Fatal("expected parent output buffer to remain open after closing child shell")
+	}
+
+	// Closed shell must vanish from the retained snapshot (the view list is
+	// the live map for a running session, already asserted above).
+	for _, sh := range s.SnapshotShells() {
+		if sh.ID == child.ID {
+			t.Fatal("closed child shell must not appear in SnapshotShells")
+		}
+	}
+}
+
+// Manual shell close must survive nothing: not the live map, not the retained
+// snapshot, and not the persisted sessions.json. After a restart the closed
+// shell must not reappear as a DEAD/"end" tab (the reported bug).
+func TestManager_CloseChildShellNotResurrectedAfterRestart(t *testing.T) {
+	srv := startTestServer(t)
+	store := storage.New(t.TempDir())
+	m := NewManager(message.NewManager(store), store, srv)
+
+	s, err := m.Create(testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "parent"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Delete(s.ID)
+
+	child, err := s.CreateChildShell(testShell(), testInteractiveShellArgs(), true, 24, 80, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	found, err := m.CloseChildShell(child.ID)
+	if err != nil || !found {
+		t.Fatalf("close child shell: found=%v err=%v", found, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Session stays running (PTY container is reusable); shell is gone locally.
+	if got := m.Get(s.ID).Info().Status; got != api.SessionRunning {
+		t.Fatalf("pty session must stay running after closing a child shell, got %q", got)
+	}
+	if s.GetChildShell(child.ID) != nil {
+		t.Fatal("closed child shell still in live map")
+	}
+	for _, sh := range s.SnapshotShells() {
+		if sh.ID == child.ID {
+			t.Fatal("closed child shell retained in SnapshotShells — delete required")
+		}
+	}
+	// The persisted snapshot must not contain the closed shell either.
+	loaded, err := store.LoadSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, meta := range loaded {
+		for _, sh := range meta.Shells {
+			if sh.ID == child.ID {
+				t.Fatal("closed child shell persisted in sessions.json — would resurrect on restart")
+			}
+		}
+	}
+
+	// "Restart": a fresh manager over the same store restores the session as a
+	// DEAD view; the closed shell must not come back as a tab.
+	m2 := NewManager(message.NewManager(store), store, srv)
+	if err := m2.RestoreDead(); err != nil {
+		t.Fatal(err)
+	}
+	restored := m2.Get(s.ID)
+	if restored == nil {
+		t.Fatal("expected restored session in registry")
+	}
+	for _, sh := range restored.ShellsForView() {
+		if sh.ID == child.ID {
+			t.Fatal("restored session resurrects a closed shell as a DEAD tab")
+		}
+	}
+}
+
+// Closing the last shell of a pipe container finishes it (DEAD) — the same
+// contract as a clean last-shell exit. PTY containers stay running instead.
+func TestManager_CloseLastPipeShellMarksDead(t *testing.T) {
+	srv := startTestServer(t)
+	m := NewManager(nil, nil, srv)
+
+	command, args := testSleepCommand("60")
+	s, err := m.Create(testConfig(command, args, api.ModePipe, "pipe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Delete(s.ID)
+
+	// Close the only (primary) shell directly. The web/MCP guards that no-op
+	// internal-primary closes are a UI layer; the session contract is what's
+	// under test.
+	if err := s.CloseChildShell(s.PrimaryShellID()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		info := m.Get(s.ID).Info()
+		if info.Status == api.SessionExited {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := m.Get(s.ID).Info().Status; got != api.SessionExited {
+		t.Fatalf("pipe session must flip DEAD after its last shell is closed, got %q", got)
+	}
+	// The shell is closed (deleted), so the DEAD view has no retained tabs for it.
+	if len(s.SnapshotShells()) != 0 {
+		t.Fatal("snapshot should be empty: the closed shell is deleted, not retained")
+	}
+}
+
+// Closing the last shell of a PTY container must NOT flip it DEAD; PTY
+// containers remain reusable and stay running with an empty shell list.
+func TestManager_CloseLastPTYShellStaysRunning(t *testing.T) {
+	srv := startTestServer(t)
+	m := NewManager(nil, nil, srv)
+
+	s, err := m.Create(testConfig(testShell(), testInteractiveShellArgs(), api.ModePTY, "pty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Delete(s.ID)
+
+	if err := s.CloseChildShell(s.PrimaryShellID()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if got := m.Get(s.ID).Info().Status; got != api.SessionRunning {
+		t.Fatalf("pty session must stay running after its last shell is closed, got %q", got)
+	}
+	if len(s.ShellsForView()) != 0 {
+		t.Fatal("pty session with zero shells must report an empty shell list")
 	}
 }
 

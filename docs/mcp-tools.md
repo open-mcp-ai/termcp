@@ -86,7 +86,7 @@ ssh_config(action=list)
 
 ### shell_close
 
-按 `shell_id` 关闭一个 shell 通道，不拆会话连接。internal 主 shell 关闭为 no-op（进程可存活于 tab 之外）。彻底停止会话用 `session_terminate`。
+按 `shell_id` **删除**一个 shell 通道（手动关闭 = 删除，不是 DEAD；不会留下死态 tab）。不拆会话连接，不影响同会话其它 shell。internal 主 shell 关闭为 no-op（进程可存活于 tab 之外）。pipe 会话的最后一个 shell 被关闭时，容器转为 `exited`（DEAD）；PTY 容器保持 `running` 可再新建 shell。彻底停止会话用 `session_terminate`。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|

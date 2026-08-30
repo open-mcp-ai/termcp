@@ -222,6 +222,9 @@ Shell 是 Session 下的子资源，ID 全局唯一。
 
 列出 Session 的所有 Shell。
 
+- `running` Session 只列出**现存**的 channel：活跃 shell + 自然退出但保留的 shell（status `exited`，供读取末尾输出）。**手动关闭的 shell 已删除，不会出现在列表中**，也不会以死态 tab 形式复活。
+- `exited`（DEAD）Session 返回保留的 shell 快照（仅自然退出/异常断线的 shell）。
+
 ```
 Response 200:
 {
@@ -246,7 +249,9 @@ Response 200:
 
 ### `DELETE /api/shells/{id}`
 
-关闭指定 Shell channel（参数为 **shell_id**）。不中断 SSH 连接，不影响同 Session 的其他 Shell。internal 主 shell 关闭为 no-op。
+**删除**指定 Shell channel（参数为 **shell_id**）。手动关闭是删除而非 DEAD：shell 从活跃列表、保留快照和 sessions.json 中一并移除，不会留下 `end`/死态 tab。不中断 SSH 连接，不影响同 Session 的其他 Shell。internal 主 shell 关闭为 no-op（进程可存活于 tab 之外）。
+
+Pipe 会话的最后一个 shell 被关闭时，容器转为 `exited`（DEAD，保留只读）；PTY 容器保持 `running`，可再新建 shell。
 
 已不存在的 shell 也返回 204（幂等）。
 

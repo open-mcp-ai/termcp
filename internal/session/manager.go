@@ -93,14 +93,19 @@ func (m *Manager) Create(cfg Config) (*Session, error) {
 	m.sessions.Store(s.ID, s)
 
 	sid := s.ID
-	s.onDead = func() {
+	// Exit watchers started by New() may already be reading these callbacks;
+	// atomic stores make the assignment race-free (a watcher firing in the
+	// assignment window sees nil, same observable behavior as before).
+	onDead := func() {
 		// DEAD keeps the object in the registry. Nothing is removed, forgotten,
 		// or purged here — only the new state is persisted and the UI notified.
 		slog.Debug("session marked DEAD", "session_id", sid)
 		m.persist()
 		m.notifyListChange()
 	}
-	s.onChildChange = m.notifyListChange
+	s.onDead.Store(&onDead)
+	onChildChange := m.notifyListChange
+	s.onChildChange.Store(&onChildChange)
 
 	m.persist()
 	m.notifyListChange()
@@ -181,7 +186,13 @@ func (m *Manager) CloseChildShell(id string) (bool, error) {
 	if parent == nil {
 		return false, nil
 	}
-	return true, parent.CloseChildShell(id)
+	err := parent.CloseChildShell(id)
+	// Persist the updated per-shell snapshot right away so a restart cannot
+	// resurrect the closed shell from sessions.json; notify the UI so closed
+	// shells disappear from tabs immediately.
+	m.persist()
+	m.notifyListChange()
+	return true, err
 }
 
 // ListAll returns metadata for all sessions (running and DEAD).
@@ -374,8 +385,10 @@ func (m *Manager) RestoreDead() error {
 			meta.Status = api.SessionExited
 		}
 		s := &Session{Session: meta}
-		s.onDead = m.notifyListChange
-		s.onChildChange = m.notifyListChange
+		onDead := m.notifyListChange
+		onChildChange := m.notifyListChange
+		s.onDead.Store(&onDead)
+		s.onChildChange.Store(&onChildChange)
 		for _, sh := range meta.Shells {
 			s.shellHistory.Store(sh.ID, sh)
 		}

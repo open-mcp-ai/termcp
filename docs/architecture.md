@@ -315,30 +315,45 @@ message.Manager.Append(sessionID, type, content)
 
 ## 十、会话生命周期状态机
 
+Session 的 `status` 描述的是连接容器，而 Shell 有自己独立的 `status`。当前状态的含义如下：
+
+- `running`：Session 未关闭，SSH transport 可用；这是 Session 的正常在线状态。Shell 可以是 `running`，也可以是自然退出后仍保留在 channel 列表中的 `exited`。
+- `exited`（代码/界面常称 DEAD）：Session 已结束（显式 terminate、SSH transport 异常断线、server shutdown，或 pipe 模式最后一个 shell 自然退出/被关闭）。Session 仍保留在 registry，缓冲区、消息和自然退出 shell 快照用于只读查看，直到显式 `DELETE`。
+- `error`：保留给启动失败等错误；当前启动失败直接返回错误，不会创建 Session。
+- `archived`：只用于 `history.json` 中的历史记录，不是当前 registry 中 Session 的在线状态。
+
 ```
-                  session_start()
-                       │
-                       ▼
-               ┌──────────────┐
-               │   running    │
-               └──┬───────┬───┘
-                  │       │
-    进程自行退出  │       │  session_terminate()
-    (startReaders │       │
-     goroutine    │       │
-     检测退出)    │       │
-                  │       │
-                  ▼       ▼
-              ┌──────────────┐
-              │   exited     │──── 自动从注册表移除 ────> [gone]
-              └──────────────┘
-                  │
-         启动失败时
-                  │
-                  ▼
-              ┌──────────────┐
-              │    error     │
-              └──────────────┘
+                              session_start()
+                                   │
+                                   ▼
+                           ┌──────────────┐
+                           │   running    │
+                           │  (在线容器)  │
+                           └──┬─────┬─────┘
+                              │     │
+           Session terminate/ │     │  传输异常断线
+           disconnect/shutdown│     │  或 pipe 最后 shell 结束
+                              │     │
+                              └──┬──┘
+                                 ▼
+                           ┌──────────────┐
+                           │   exited     │
+                           │ DEAD / 只读  │
+                           └──────┬───────┘
+                                  │ DELETE
+                                  ▼
+                               [gone]
+
+      running ── shell 自然退出 ──> running（PTY；shell 留在列表供 drain）
+      running ── shell 手动关闭 ──> running（PTY；shell 直接删除）
+      running ── 最后 pipe shell 手动关闭 ──> exited（shell 直接删除）
 ```
 
-**exitOnce 保证**：无论是进程自然退出还是 terminate 触发，Status/ExitCode 只设置一次，不会竞态覆盖。
+**关键不变量：**
+
+1. Session 未关闭时，`GET /api/sessions` 显示 `status: "running"`；不要因为某个 shell 退出或手动关闭就把仍可用的 PTY Session 标成 DEAD。
+2. 手动关闭 Shell 是删除操作：从 live map、shell history snapshot 和持久化 `sessions.json` 中移除；它不会产生 `exited` shell，也不会被 UI 渲染成 `end` tab。
+3. 只有自然退出或 transport 异常断线的 shell，才会保留 `exited` 元数据供 DEAD/只读视图使用。
+4. Session 转为 `exited` 后不能创建新 shell；显式 `DELETE` 才释放对象、buffer、transport 并从 registry 移除。
+
+**exitOnce / closeOnce 保证**：无论是进程自然退出还是 terminate/手动关闭触发，状态转换和 Done channel 都只执行一次；手动关闭与自然退出并发时，关闭标记优先，避免 shell 被重新写回历史快照。

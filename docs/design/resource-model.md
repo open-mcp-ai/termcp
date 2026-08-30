@@ -23,8 +23,8 @@ SSH 连接
 **销毁行为**：级联关闭所有 Shell → 关闭所有 Forward → 关闭 SSH Client → 从 registry 移除。
 
 **状态**：
-- `running`：SSH 连接存活
-- `exited`：SSH 连接已断开，所有资源已释放
+- `running`：Session 未关闭，SSH 连接存活（不要求存在 `running` 的 Shell，PTY 容器可在所有 Shell 退出后继续复用）
+- `exited`：Session 已结束；保留在 registry 中供只读查看（自然退出/异常断线）或归档（显式 terminate），显式 `DELETE` 后移除
 
 ## Shell
 
@@ -37,11 +37,14 @@ SSH 连接
 **I/O**：所有输入输出通过 Shell ID 寻址。`shell_input`、`shell_output` 的目标都是 Shell。
 
 **销毁时机**：
-- 进程自然退出（exit 命令或命令执行完毕）
-- 用户显式 `shell_close`
+- 用户显式 `shell_close`（手动关闭 = 删除，不是 DEAD）
 - 所属 Session 终止时级联关闭
 
-**销毁行为**：关闭 channel → 从 Session 的 Shell 列表移除 → 推送 UI 更新。
+**销毁行为**：关闭 channel → 从 Session 的 Shell 列表和保留快照中移除 → 推送 UI 更新。手动关闭的 shell 不会以 `end`/死态 tab 复活；只有自然退出/异常断线的 shell 才保留 `exited` 元数据供只读视图使用。
+
+**退出（自然）与关闭（手动）的区别**：
+- 自然退出：shell 状态置为 `exited`，保留在 channel 列表中供读取末尾输出；DEAD/只读视图会展示其快照 tab。
+- 手动关闭：直接从 Session 中删除，不留任何状态；pipe 容器的最后一个 shell 被关闭时，容器转为 `exited`（DEAD）；PTY 容器保持 `running` 可继续新建 shell。
 
 ## Forward
 
