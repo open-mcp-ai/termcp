@@ -10,6 +10,9 @@
 
 ### 改进
 
+- **SSH 连接失败可见性**：会话创建失败（如 `ssh dial` 超时/拒绝）现在在 termcp 终端打出 `[ERROR] session create failed`（含目标地址、超时、模式，不含凭据）；MCP 工具错误结果从 Debug 升级为 `[WARN]` 并附带错误预览；Web UI "测试连接"失败同步打 `[WARN]`。连接类错误（超时/拒绝/不可达/重置）自动追加 `Hint:` 诊断提示，MCP 工具结果与 Web UI 响应同样携带。
+- **拨号错误上下文**：直连失败错误信息包含目标地址与拨号超时，如 `ssh dial: connect 192.168.0.145:22 (timeout 30s): dial tcp ...`，不再只有裸的 `i/o timeout` / `connectex ...`。
+
 - **`ReadOutput` timeout 修复**：接受 `timeout=0`（非阻塞轮询），下限从 0.1 改为 0。
 - **`ssh_config` 写操作双保险**：schema 层面 `action` enum 默认仅 `list`；dispatcher 层面即使客户端绕过 schema 也会拒绝。
 - **统一 dispatch 架构**：新增 `group_handlers.go`，4 个 action dispatcher 复用现有 handler。

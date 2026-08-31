@@ -97,7 +97,9 @@ func DialConn(addr string, proxy *Proxy, timeout time.Duration) (net.Conn, error
 	}
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
-		return nil, err
+		// Annotate with target and timeout so a bare "i/o timeout" / "connectex ..."
+		// failure tells the user how long it waited and to where.
+		return nil, fmt.Errorf("connect %s (timeout %s): %w", addr, timeout, err)
 	}
 	setTCPKeepAlive(conn)
 	return conn, nil

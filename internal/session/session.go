@@ -106,7 +106,7 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 	var execSession *sshclient.ExecSession
 	var sshEndpointPublic string // "internal" | "remote" for MCP / JSON (no host or credentials)
 
-	if cfg.Remote != nil && strings.TrimSpace(cfg.Remote.Host) != "" {
+	if isRemote(cfg) {
 		r := cfg.Remote
 		port := r.Port
 		if port == 0 {
@@ -219,6 +219,13 @@ func New(internal *sshserver.Server, cfg Config, msgMgr *message.Manager) (*Sess
 	slog.Debug("session started", "session_id", sessionID, "shell_id", shellID, "command", cfg.Command, "ssh_endpoint", sshEndpointPublic)
 
 	return s, nil
+}
+
+// isRemote reports whether cfg selects a user-supplied SSH server instead of
+// the built-in internal one. Single source of truth used by New and the
+// create-failure logger in Manager.Create.
+func isRemote(cfg Config) bool {
+	return cfg.Remote != nil && strings.TrimSpace(cfg.Remote.Host) != ""
 }
 
 // remoteDialAddr returns host:port for a remote, defaulting port 22.

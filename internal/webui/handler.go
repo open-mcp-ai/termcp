@@ -22,6 +22,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/screenshot"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
+	"github.com/open-mcp-ai/termcp/internal/sshclient"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
@@ -65,9 +66,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/connection-templates", h.handleConnectionTemplates)
 	mux.HandleFunc("GET /api/connections", h.handleListConnections)
 	mux.HandleFunc("GET /api/connections/{name}", h.handleGetConnection)
-		mux.HandleFunc("PUT /api/connections/{name}", h.handlePutConnection)
-		mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
-		mux.HandleFunc("POST /api/connections/test", h.handleTestConnection)
+	mux.HandleFunc("PUT /api/connections/{name}", h.handlePutConnection)
+	mux.HandleFunc("DELETE /api/connections/{name}", h.handleDeleteConnection)
+	mux.HandleFunc("POST /api/connections/test", h.handleTestConnection)
 
 	// Sessions
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
@@ -351,7 +352,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Remote:  remote,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, sshclient.DescribeDialError(err), http.StatusBadRequest)
 		return
 	}
 	time.Sleep(100 * time.Millisecond)

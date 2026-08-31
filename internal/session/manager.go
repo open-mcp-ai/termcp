@@ -88,6 +88,23 @@ func (m *Manager) NotifyChange() {
 func (m *Manager) Create(cfg Config) (*Session, error) {
 	s, err := New(m.internalSSH, cfg, m.msgMgr)
 	if err != nil {
+		// Failure is invisible downstream (MCP tool error results are debug-levelled;
+		// the web UI handler only replies over HTTP), so log it for the terminal.
+		// Never log credentials or command text; the error itself already carries
+		// the failing host:port for remote dials.
+		attrs := []any{"err", err}
+		if cfg.Mode != "" {
+			attrs = append(attrs, "mode", cfg.Mode)
+		}
+		if cfg.Name != "" {
+			attrs = append(attrs, "name", cfg.Name)
+		}
+		if isRemote(cfg) {
+			attrs = append(attrs, "remote_addr", remoteDialAddr(cfg.Remote), "dial_timeout_s", cfg.Remote.DialTimeoutSeconds)
+		} else {
+			attrs = append(attrs, "endpoint", "internal")
+		}
+		slog.Error("session create failed", attrs...)
 		return nil, err
 	}
 	m.sessions.Store(s.ID, s)

@@ -146,7 +146,7 @@ func TestWithLogging_LogsErrorOnGoError(t *testing.T) {
 	}
 }
 
-func TestWithLogging_LogsDebugOnIsErrorResult(t *testing.T) {
+func TestWithLogging_LogsWarnOnIsErrorResult(t *testing.T) {
 	cap := withCapturedLogger(t)
 
 	h := func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -163,8 +163,8 @@ func TestWithLogging_LogsDebugOnIsErrorResult(t *testing.T) {
 		t.Fatalf("expected at least 2 records, got %d", len(records))
 	}
 	exit := records[len(records)-1]
-	if exit.Level != slog.LevelDebug {
-		t.Fatalf("exit record: expected Debug level on IsError result, got %v", exit.Level)
+	if exit.Level != slog.LevelWarn {
+		t.Fatalf("exit record: expected Warn level on IsError result (visible at default log level), got %v", exit.Level)
 	}
 	v, ok := attrValue(exit, "is_error")
 	if !ok {
@@ -172,6 +172,9 @@ func TestWithLogging_LogsDebugOnIsErrorResult(t *testing.T) {
 	}
 	if !v.Bool() {
 		t.Fatalf("exit record: expected is_error=true, got %v", v)
+	}
+	if ev, eok := attrValue(exit, "error"); !eok || ev.String() != "invalid arg" {
+		t.Fatalf("exit record: expected error='invalid arg' on IsError result, got %q (found=%v)", ev, eok)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/shell"
+	"github.com/open-mcp-ai/termcp/internal/sshclient"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/pkg/api"
 )
@@ -203,7 +204,7 @@ func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolReq
 		Remote:  remote,
 	})
 	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+		return mcpgo.NewToolResultError(sshclient.DescribeDialError(err)), nil
 	}
 
 	time.Sleep(100 * time.Millisecond)

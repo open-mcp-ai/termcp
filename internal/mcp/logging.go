@@ -30,7 +30,15 @@ func withLogging(name string, h toolHandler) toolHandler {
 			slog.ErrorContext(ctx, "tool call end", exitAttrs...)
 		} else {
 			if result != nil && result.IsError {
+				// Tool-level failure (returned as an IsError result, err == nil):
+				// log at Warn so it is visible at the default log level instead of
+				// vanishing into debug-only output.
 				exitAttrs = append(exitAttrs, "is_error", true)
+				if preview := extractOutputPreview(result); preview != "" {
+					exitAttrs = append(exitAttrs, "error", truncate(preview, 300))
+				}
+				slog.WarnContext(ctx, "tool call end", exitAttrs...)
+				return result, err
 			}
 			if result != nil {
 				if preview := extractOutputPreview(result); preview != "" {
