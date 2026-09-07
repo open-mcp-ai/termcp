@@ -13,6 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/open-mcp-ai/termcp/internal/ansi"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/shell"
@@ -307,34 +308,118 @@ func (s *Server) handleCloseShell(_ context.Context, request mcpgo.CallToolReque
 	return successResult(), nil
 }
 
+// handleReadOutput is the ONE unified output reader. It serves live shells
+// (in-memory buffer), exited-but-retained shells, and archived/restored-DEAD
+// sessions (persisted message log) with identical byte-stream cursor semantics.
+// Three read modes:
+//   - tail_lines > 0, or an archived id with no offset: read the tail of the
+//     stream (token-safe default; never a full dump);
+//   - offset >= 0: stateless positional read of [offset, offset+max_bytes);
+//   - otherwise: live streaming cursor on reader_id (new bytes since last read).
+//
+// Every response carries start_offset/end_offset/total_bytes/has_more so the
+// caller can page the stream without server-side state.
 func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
-	sessionID := getString(args, "shell_id", "")
+	id := getString(args, "shell_id", "")
+	if id == "" {
+		return mcpgo.NewToolResultError("shell_id is required"), nil
+	}
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 3.0)
 	if timeout < 0 || timeout > 60 {
 		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0 and 60, got %v", timeout)), nil
 	}
 	maxLines := int(getFloat64(args, "max_lines", 0))
-	maxBytes := int(getFloat64(args, "max_bytes", 0))
+	maxBytes := int(getFloat64(args, "max_bytes", 8192))
 	readerID := int(getFloat64(args, "reader_id", 0))
+	offset := int64(getFloat64(args, "offset", -1))
+	tailLines := int(getFloat64(args, "tail_lines", 0))
+	if tailLines < 0 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("tail_lines must be >= 0, got %d", tailLines)), nil
+	}
+	if offset < -1 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("offset must be >= -1, got %d", offset)), nil
+	}
 
-	shell, bad := s.requireShell(sessionID)
+	src, bad := s.resolveOutputSource(id)
 	if bad != nil {
 		return bad, nil
 	}
-	output, err := shell.ReadTerminalStream(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines, maxBytes)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+	if readerID > 0 && src.live == nil {
+		return mcpgo.NewToolResultError("reader_id requires a live shell; archived sessions are read with offset/tail_lines"), nil
 	}
-	info := shell.Info()
+	clean := func(raw []byte) string {
+		if !stripAnsi {
+			return string(raw)
+		}
+		return ansi.Compact(ansi.Strip(string(raw)))
+	}
+
+	var output string
+	var start, end, total int64
+	var hasMore bool
+
+	switch {
+	case tailLines > 0 || (src.live == nil && offset < 0):
+		raw, st, tot, err := src.scanTailWindow(tailLines, maxBytes)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		output, start, end, total, hasMore = clean(raw), st, tot, tot, false
+	case offset >= 0:
+		tot, err := src.Len()
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		total = tot
+		max := maxBytes
+		if max <= 0 {
+			max = int(total - offset)
+			if max < 0 {
+				max = 0
+			}
+		}
+		raw, _, err := src.ByteRange(offset, max)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		raw = truncateAtLines(raw, maxLines, offset+int64(len(raw)) >= total)
+		start, end = offset, offset+int64(len(raw))
+		hasMore = end < total
+		output = clean(raw)
+	default:
+		// Live streaming cursor path (unchanged semantics).
+		pre := src.live.ReaderCursor(readerID)
+		if pre < 0 {
+			return mcpgo.NewToolResultError(fmt.Sprintf("reader_id %d is not registered on this shell", readerID)), nil
+		}
+		out, err := src.live.ReadTerminalStream(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines, maxBytes)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		output = out
+		end = src.live.ReaderCursor(readerID)
+		total = src.live.BufferLen()
+		start = pre
+		hasMore = end < total
+	}
+
 	result := map[string]any{
-		"output":                 output,
-		"has_more":               shell.HasMoreOutput(readerID),
-		"lines_returned":         strings.Count(output, "\n"),
-		"bytes_returned":         len(output),
-		"session_status":         string(info.Status),
-		"session_uptime_seconds": int(time.Since(info.CreatedAt).Seconds()),
+		"output":         output,
+		"has_more":       hasMore,
+		"lines_returned": strings.Count(output, "\n"),
+		"bytes_returned": len(output),
+		"start_offset":   start,
+		"end_offset":     end,
+		"total_bytes":    total,
+		"source":         src.source(),
+		"session_id":     src.sessID,
+		"shell_id":       src.shellID,
+		"session_status": string(src.status),
+	}
+	if src.live != nil {
+		result["session_uptime_seconds"] = int(time.Since(src.created).Seconds())
 	}
 	return jsonResult(result), nil
 }
@@ -429,28 +514,6 @@ func (s *Server) handleListHistory(ctx context.Context, request mcpgo.CallToolRe
 		return jsonResult(map[string]any{"sessions": []any{}}), nil
 	}
 	return jsonResult(map[string]any{"sessions": s.historyMgr.List()}), nil
-}
-
-func (s *Server) handleGetTranscript(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	args := request.GetArguments()
-	sessionID := getString(args, "session_id", "")
-	format := strings.TrimSpace(getString(args, "format", "markdown"))
-	switch format {
-	case "text", "markdown", "html":
-	default:
-		return mcpgo.NewToolResultError("format must be text, markdown, or html"), nil
-	}
-	if s.historyMgr == nil {
-		return mcpgo.NewToolResultError("history not configured"), nil
-	}
-	if _, ok := s.historyMgr.Get(sessionID); !ok {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found in history", sessionID)), nil
-	}
-	text, err := s.historyMgr.Transcript(sessionID, format)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(map[string]any{"session_id": sessionID, "format": format, "transcript": text}), nil
 }
 
 func (s *Server) handleSearchMessages(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

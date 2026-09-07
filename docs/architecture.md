@@ -199,6 +199,7 @@ AI Agent                    ChildShell                 sshclient              ss
 | 内存 | 全员已读过的前缀可整体丢弃；无固定容量环、不按读者覆盖旧数据 |
 | 阻塞等待 | `sync.Cond.Wait()` + 超时 goroutine，支持 context 取消 |
 | 输出清洗 | 两次处理：Strip(去ANSI) → Compact(压缩噪音) |
+| 统一游标 | `shell_output` 是唯一输出读取入口：活/死/归档会话一律按字节流读取。活会话走 reader 增量游标；`offset` 无状态定位 & `tail_lines` 末尾截取对两种流同样生效；归档流由磁盘 MsgOutput 按序重建，与内存字节流同构（同 start_offset/end_offset/total_bytes/has_more 协议） |
 
 ## 五、信号/终止流向（session_terminate）
 

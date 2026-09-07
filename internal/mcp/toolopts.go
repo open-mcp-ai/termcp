@@ -18,7 +18,7 @@ var compactToolDescriptions = map[string]string{
 	"shell_close":             "Close one shell channel; use session_terminate for the whole session.",
 	"shell_input":             "Write text to shell stdin without executing; use shell_key(enter) to run it.",
 	"shell_key":               "Send a named key to a shell.",
-	"shell_output":            "Read new shell output for a reader; supports waiting and pagination.",
+	"shell_output":            "Read output of a live or archived shell; unified byte-stream cursor (offset/tail_lines/reader_id).",
 	"session_list":            "List live sessions.",
 	"session_info":            "Get detailed information for a session.",
 	"session_terminate":       "Terminate and archive a session; closes its shells and forwards.",
@@ -39,7 +39,7 @@ var compactToolDescriptions = map[string]string{
 	"file_fs":                 "Path/filesystem ops: truncate, realpath, or statvfs.",
 	"file_getwd":              "Get the SFTP working directory for a session.",
 	"message":                 "Stored session messages: list the index or fetch payloads.",
-	"history":                 "Archived sessions: list, transcript, search, rename, meta, purge, screenshot.",
+	"history":                 "Archived sessions: list, search, rename, meta, purge, screenshot. Read output via shell_output.",
 	"ssh_config":              "SSH profiles: action=list names, or (if enabled) create/edit/copy/delete.",
 }
 

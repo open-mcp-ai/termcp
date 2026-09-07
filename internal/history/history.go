@@ -156,6 +156,76 @@ func (m *Manager) Messages(id string) ([]api.Message, error) {
 	return out, nil
 }
 
+// OutputByteRange returns raw output bytes [start, start+max) of the persisted
+// output stream for one shell (shellID != "") or the whole merged session
+// stream (shellID == ""), plus the total persisted length.
+// It loads only the index to calculate offsets, and only touches individual
+// message files that actually overlap [start, start+max) — avoiding loading
+// the entire session transcript into memory.
+func (m *Manager) OutputByteRange(sessionID, shellID string, start int64, max int) ([]byte, int64, error) {
+	if m.store == nil {
+		return nil, 0, nil
+	}
+	entries, err := m.store.LoadMessageIndex(sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	var total int64
+	for i := range entries {
+		e := &entries[i]
+		if e.Type != api.MsgOutput || (shellID != "" && e.ShellID != shellID) {
+			continue
+		}
+		total += int64(e.ByteSize)
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start >= total || max <= 0 {
+		return nil, total, nil
+	}
+	end := start + int64(max)
+	if end > total {
+		end = total
+	}
+	out := make([]byte, 0, end-start)
+	var pos int64
+	for i := range entries {
+		e := &entries[i]
+		if e.Type != api.MsgOutput || (shellID != "" && e.ShellID != shellID) {
+			continue
+		}
+		n := int64(e.ByteSize)
+		lo, hi := pos, pos+n
+		pos = hi
+		if hi <= start || lo >= end {
+			continue
+		}
+		msg, err := m.store.LoadMessage(sessionID, e.ID)
+		if err != nil || msg == nil {
+			continue
+		}
+		content := msg.Content
+		s := lo
+		if s < start {
+			s = start
+		}
+		ePos := hi
+		if ePos > end {
+			ePos = end
+		}
+		relStart := s - lo
+		relEnd := ePos - lo
+		if relStart < int64(len(content)) {
+			if relEnd > int64(len(content)) {
+				relEnd = int64(len(content))
+			}
+			out = append(out, content[relStart:relEnd]...)
+		}
+	}
+	return out, total, nil
+}
+
 func promptFor(msg api.Message, prev *api.Message) string {
 	if msg.Type == api.MsgInput {
 		s := ansi.Strip(msg.Content)

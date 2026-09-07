@@ -32,10 +32,70 @@ func seedMessages(t *testing.T, store *storage.Store, sid string, msgs []api.Mes
 		if err := store.SaveMessage(sid, m); err != nil {
 			t.Fatal(err)
 		}
-		entries = append(entries, api.MessageIndexEntry{ID: m.ID, Type: m.Type, CreatedAt: m.CreatedAt, ByteSize: len(m.Content)})
+		entries = append(entries, api.MessageIndexEntry{ID: m.ID, ShellID: m.ShellID, Type: m.Type, CreatedAt: m.CreatedAt, ByteSize: len(m.Content)})
 	}
 	if err := store.SaveMessageIndex(sid, entries); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManager_OutputByteRange(t *testing.T) {
+	m, store := newTestManager(t)
+	_ = m.Add(sampleSession("s1", "build"))
+	seedMessages(t, store, "s1", []api.Message{
+		{ID: "i1", SessionID: "s1", Type: api.MsgInput, Content: "run build\n"},
+		{ID: "o1", SessionID: "s1", Type: api.MsgOutput, Content: "alpha\n"},
+		{ID: "o2", SessionID: "s1", Type: api.MsgOutput, Content: "beta\ngamma\n", CreatedAt: time.Now().UTC().Add(time.Second)},
+		{ID: "o3", SessionID: "s1", ShellID: "shell-2", Type: api.MsgOutput, Content: "delta\n", CreatedAt: time.Now().UTC().Add(2 * time.Second)},
+	})
+
+	// Merged stream: only MsgOutput, in append order.
+	data, total, err := m.OutputByteRange("s1", "", 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "alpha\nbeta\ngamma\ndelta\n"
+	if string(data) != want || total != int64(len(want)) {
+		t.Fatalf("merged stream: got %q total=%d, want %q total=%d", data, total, want, len(want))
+	}
+
+	// Per-shell filter.
+	data, total, err = m.OutputByteRange("s1", "shell-2", 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "delta\n" || total != 6 {
+		t.Fatalf("shell-2 stream: got %q total=%d", data, total)
+	}
+
+	// Byte window [6, 11) slices exactly "beta\n".
+	data, total, err = m.OutputByteRange("s1", "", 6, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "beta\n" || total != int64(len(want)) {
+		t.Fatalf("window: got %q total=%d", data, total)
+	}
+
+	// A window spanning message boundaries reassembles seamlessly.
+	data, _, err = m.OutputByteRange("s1", "", 4, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a\nbeta\ngam" {
+		t.Fatalf("spanning window: got %q", data)
+	}
+
+	// Out-of-range start yields empty data but the true total.
+	data, total, err = m.OutputByteRange("s1", "", 999, 10)
+	if err != nil || data != nil || total != int64(len(want)) {
+		t.Fatalf("out-of-range: data=%q total=%d err=%v", data, total, err)
+	}
+
+	// Unknown session: empty.
+	data, total, err = m.OutputByteRange("ghost", "", 0, 0)
+	if err != nil || data != nil || total != 0 {
+		t.Fatalf("ghost: data=%q total=%d err=%v", data, total, err)
 	}
 }
 

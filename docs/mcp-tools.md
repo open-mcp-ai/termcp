@@ -117,20 +117,32 @@ ssh_config(action=list)
 
 ### shell_output
 
-读取指定 reader 上次读取后的新输出。每个 reader 持有独立游标。
+**统一输出读取工具**：活会话（内存缓冲）、已退出会话（保留缓冲）、归档会话（磁盘消息流）全部用同一套字节流游标语义读取。
 
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
-| `shell_id` | string | **是** | — | |
-| `strip_ansi` | boolean | 否 | `true` | 是否剥离 ANSI 转义码 |
-| `timeout` | number | 否 | `3` | 阻塞等待秒数（0–60）；0 = 非阻塞；多 shell 轮询建议 ≤3 |
-| `max_lines` | number | 否 | `0` | 按换行分页：最多返回 N 行；未返回字节保留在 reader 游标，`has_more` 为 true；0 = 无限制 |
-| `max_bytes` | number | 否 | `8192` | 单次返回最大字节数；0 = 无限制。配合 `has_more` 分页 |
-| `reader_id` | number | 否 | `0` | reader id（0 = 默认） |
+| `shell_id` | string | **是** | — | shell_id 或 session_id 均可；归档会话也可用 shell_id 定位单个 shell 的输出流 |
+| `strip_ansi` | boolean | 否 | `true` | 是否剥离 ANSI 转义码并压缩终端噪音 |
+| `timeout` | number | 否 | `3` | 仅活会话：阻塞等待秒数（0–60）；0 = 非阻塞；多 shell 轮询建议 ≤3 |
+| `offset` | number | 否 | `-1` | 无状态字节游标：从该原始字节位置向后读；-1 = 默认模式（见下） |
+| `tail_lines` | number | 否 | `0` | 只返回流末尾最后 N 行（优先于 offset）；0 = 关闭 |
+| `max_lines` | number | 否 | `0` | 最多返回 N 个完整行（窗口内裁切）；0 = 无限制 |
+| `max_bytes` | number | 否 | `8192` | 单次返回最大原始字节数；0 = 无限制 |
+| `reader_id` | number | 否 | `0` | 仅活会话流式游标；归档会话不支持 |
 
-**返回**：`{ output, has_more, lines_returned, bytes_returned, session_status, session_uptime_seconds }`
+**读取模式（三选一）**：
 
-`max_lines` / `max_bytes` 都在 buffer 层限制游标推进：未返回的数据可继续读，不会被静默丢弃。
+1. **流式游标（默认，活会话）**：返回 reader 上次读取后的新输出，游标前移、不重复。`shell_input → shell_key(enter) → shell_output` 轮询循环的原有语义，完全兼容。
+2. **`offset >= 0`（无状态绝对定位）**：读字节区间 `[offset, offset+max_bytes)`。任意时刻从头/任意位置翻页；每次调用显式传 `offset`（用返回的 `end_offset` 续读），服务器不保存状态，活会话与归档会话一视同仁。
+3. **`tail_lines > 0`（末尾截取）**：反向取流末尾最后 N 行——只读最近输出，绝不拖入整段历史（token 友好）。无 `offset`/`tail_lines` 且目标是归档/死亡会话时，默认也取末尾最近一块（≤8 KiB），不会全量导出。
+
+**返回**：`{ output, has_more, lines_returned, bytes_returned, start_offset, end_offset, total_bytes, source, session_id, shell_id, session_status, session_uptime_seconds? }`
+
+- `start_offset` / `end_offset`：本次返回的原始字节区间；`total_bytes`：流总长；`has_more = end_offset < total_bytes`。
+- `source`：`"live"`（内存缓冲）或 `"persisted"`（磁盘消息流）。
+- 活会话流式读（模式 1）时 `start_offset`/`end_offset` 反映 reader 游标位置。
+
+> 例：只读归档会话最后 10 行 → `shell_output(shell_id=归档session_id, tail_lines=10)`；从头翻页 → `shell_output(shell_id, offset=0, max_bytes=8000)` 后用 `end_offset` 续读。
 
 ### session_list
 
@@ -315,5 +327,6 @@ SSH 连接 profile 管理。默认只暴露 `action=list`；write actions 需启
 | `file_truncate` / `file_realpath` / `file_statvfs` | `file_fs(action=truncate\|realpath\|statvfs)` |
 | `local_forward` / `remote_forward` / `dynamic_forward` / `list_forwards` / `close_forward` | `forward(action=local\|remote\|dynamic\|list\|close)` |
 | `message_list` / `message_get` | `message(action=list\|get)` |
-| `history_list` / `history_get_transcript` / `history_search_messages` / `history_rename_session` / `history_update_session_meta` / `history_purge` / `history_screenshot` | `history(action=...)` |
+| `history_list` / `history_search_messages` / `history_rename_session` / `history_update_session_meta` / `history_purge` / `history_screenshot` | `history(action=list\|search_messages\|rename_session\|update_session_meta\|purge\|screenshot)`；归档输出读取改由 `shell_output` 承担（`tail_lines`/`offset`） |
+| `history(action=get_transcript)` | 删除；归档/死亡会话输出改用 `shell_output(shell_id=归档session_id或shell_id, tail_lines=N / offset)`，与活会话同一套游标语义 |
 | `ssh_config_list` / `ssh_config_create` / `ssh_config_edit` / `ssh_config_copy` / `ssh_config_delete` | `ssh_config(action=list\|create\|edit\|copy\|delete)` |

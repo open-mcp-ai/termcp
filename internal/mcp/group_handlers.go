@@ -24,8 +24,6 @@ func (s *Server) handleHistoryOps(ctx context.Context, request mcpgo.CallToolReq
 	switch getString(request.GetArguments(), "action", "") {
 	case "list":
 		return s.handleListHistory(ctx, request)
-	case "get_transcript":
-		return s.handleGetTranscript(ctx, request)
 	case "search_messages":
 		return s.handleSearchMessages(ctx, request)
 	case "rename_session":
@@ -37,7 +35,7 @@ func (s *Server) handleHistoryOps(ctx context.Context, request mcpgo.CallToolReq
 	case "screenshot":
 		return s.handleScreenshot(ctx, request)
 	default:
-		return mcpgo.NewToolResultError("action must be list, get_transcript, search_messages, rename_session, update_session_meta, purge, or screenshot"), nil
+		return mcpgo.NewToolResultError("action must be list, search_messages, rename_session, update_session_meta, purge, or screenshot"), nil
 	}
 }
 

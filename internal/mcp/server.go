@@ -24,7 +24,7 @@ const mcpServerInstructions = `termcp agent rules (follow until the task is done
 1) IDs: session_id = connection container (forwards, files, terminate, shell_open); shell_id = terminal channel (input/key/output/resize/close, readers). Never invent them; take from session_start / shell_open / list tools.
 2) Run: shell_input(shell_id,text), shell_key(shell_id,key="enter"), shell_output(shell_id,timeout≤3). Prefer shell_key for special keys. Output is visible only via shell_output; poll long commands with timeout≤3, round-robin shells.
 3) After discovery, act with concrete calls, not prose. Verify success via output or an explicit success field.
-4) Lifecycle: session_terminate closes shells+forwards and archives; history(action=get_transcript/screenshot) reads history; history(action=purge) deletes it. force=true = immediate kill. shell_close closes one channel.
+4) Lifecycle: session_terminate closes shells+forwards and archives; archived output is read with shell_output (same cursor semantics as live, use tail_lines/offset); history(action=screenshot) renders archived output as PNG; history(action=purge) deletes it. force=true = immediate kill. shell_close closes one channel.
 5) Password/sudo/passphrase/MFA prompt: stop and ask the user to type it in the termcp Web UI. Never guess, paste, or echo secrets.
 6) Other keys use JSON \u001b escapes in shell_input. Repeating traceback → session_terminate, retry with PYTHON_BASIC_REPL=1. Silent hang → session_info.
 7) forward(action=local/remote/dynamic) = ssh -L/-R/-D, all take session_id. ssh_config(action=list) only returns names; never expose credentials.`
@@ -108,12 +108,14 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_key", s.handlePressKey))
 
 	mcpServer.AddTool(newTool("shell_output",
-		mcpgo.WithDescription("Return newly produced stdout/stderr since the last read on reader_id. timeout=0 is non-blocking; when polling multiple shells prefer timeout ≤ 3. Returns {output, has_more, lines_returned, bytes_returned, session_status, session_uptime_seconds}."),
+		mcpgo.WithDescription("Unified output reader for live AND archived/dead shells with one byte-stream cursor model. shell_id may be a shell_id or session_id. Default: live = new output since the last read on reader_id (blocking up to timeout); archived = recent tail. tail_lines=N returns the last N lines; offset>=0 reads raw bytes from that position (stateless paging with has_more). Returns {output, has_more, lines_returned, bytes_returned, start_offset, end_offset, total_bytes, source, session_id, shell_id, session_status, session_uptime_seconds?}."),
 		mcpgo.WithString("shell_id", mcpgo.Required()),
-		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes for plain-text logs"), mcpgo.DefaultBool(true)),
-		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output, in seconds (0–60); 0 = non-blocking; prefer ≤3 for multi-shell polling"), mcpgo.DefaultNumber(3)),
-		mcpgo.WithNumber("max_lines", mcpgo.Description("Return at most N newline-terminated lines; remaining bytes stay unread so has_more stays true; 0 = no line limit"), mcpgo.DefaultNumber(0)),
-		mcpgo.WithNumber("max_bytes", mcpgo.Description("Max bytes to return per call; 0 = no limit. Use with has_more to paginate large output."), mcpgo.DefaultNumber(8192)),
+		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes and compress terminal noise"), mcpgo.DefaultBool(true)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output on LIVE shells, in seconds (0–60); 0 = non-blocking; ignored for archived reads"), mcpgo.DefaultNumber(3)),
+		mcpgo.WithNumber("max_lines", mcpgo.Description("Return at most N newline-terminated lines (from the read window); 0 = no line limit"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("max_bytes", mcpgo.Description("Max raw bytes per call (from offset or tail); 0 = no limit. Use with start_offset/end_offset/has_more to paginate"), mcpgo.DefaultNumber(8192)),
+		mcpgo.WithNumber("offset", mcpgo.Description("Raw byte position to start reading; -1 = reader cursor (live, default) / tail (archived)"), mcpgo.DefaultNumber(-1)),
+		mcpgo.WithNumber("tail_lines", mcpgo.Description("Return only the last N lines of the stream (overrides offset); 0 = off"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("reader_id", mcpgo.DefaultNumber(0)),
 	), withLogging("shell_output", s.handleReadOutput))
 
@@ -126,7 +128,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("session_info", s.handleGetSessionInfo))
 
 	mcpServer.AddTool(newTool("session_terminate",
-		mcpgo.WithDescription("Stop and archive a session: terminate all shells, close SSH, cascade forwards, drop registry entry. History is RETAINED as an archived session, readable via history(action=get_transcript/screenshot); history(action=purge) deletes it permanently. force=true = immediate kill; force=false waits grace_period after SIGTERM. To close one shell only, use shell_close."),
+		mcpgo.WithDescription("Stop and archive a session: terminate all shells, close SSH, cascade forwards, drop registry entry. Output stays readable via shell_output (same cursor semantics as live; tail_lines/offset); history(action=purge) deletes it permanently. force=true = immediate kill; force=false waits grace_period after SIGTERM. To close one shell only, use shell_close."),
 		mcpgo.WithString("session_id", mcpgo.Required()),
 		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
 		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
@@ -161,10 +163,9 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("shell_reader_register", s.handleRegisterReader))
 
 	mcpServer.AddTool(newTool("history",
-		mcpgo.WithDescription("Archived sessions: action(list) all; get_transcript (format=text|markdown|html); search_messages (query); rename_session; update_session_meta (notes/tags); purge (delete permanently); screenshot (PNG URL, start/lines/cols/theme)."),
-		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("list", "get_transcript", "search_messages", "rename_session", "update_session_meta", "purge", "screenshot")),
+		mcpgo.WithDescription("Archived sessions: action(list) all; search_messages (query); rename_session; update_session_meta (notes/tags); purge (delete permanently); screenshot (PNG URL, start/lines/cols/theme). Output reading is shell_output's job (it works on archived shells)."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("list", "search_messages", "rename_session", "update_session_meta", "purge", "screenshot")),
 		mcpgo.WithString("session_id", mcpgo.Description("Archived session id; required except list/search_messages")),
-		mcpgo.WithString("format", mcpgo.Description("get_transcript: text/markdown/html"), mcpgo.DefaultString("markdown")),
 		mcpgo.WithString("query", mcpgo.Description("search_messages: case-insensitive substring")),
 		mcpgo.WithNumber("limit", mcpgo.Description("search_messages: max snippets"), mcpgo.DefaultNumber(50)),
 		mcpgo.WithString("name", mcpgo.Description("rename_session: new display name")),

@@ -256,6 +256,17 @@ func (b *Buffer) HasMore(readerID int) bool {
 	return rs.readPos < int64(len(b.master))
 }
 
+// Cursor returns the reader's current raw stream position, or -1 if the reader
+// is unknown. Lets callers report uniform start/end offsets for streaming reads.
+func (b *Buffer) Cursor(readerID int) int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if rs, ok := b.readers[readerID]; ok {
+		return rs.readPos
+	}
+	return -1
+}
+
 // Len returns the current retained master size in bytes.
 func (b *Buffer) Len() int64 {
 	b.mu.Lock()

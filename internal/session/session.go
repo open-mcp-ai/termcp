@@ -682,6 +682,14 @@ func (s *Session) HasMoreOutput(readerID int) bool {
 	return s.buf.HasMore(readerID)
 }
 
+// ReaderCursor returns the reader's current byte position in the retained buffer.
+func (s *Session) ReaderCursor(readerID int) int64 {
+	if s.buf == nil {
+		return -1
+	}
+	return s.buf.Cursor(readerID)
+}
+
 func (s *Session) IsBufferClosed() bool {
 	return s.buf.IsClosed()
 }
@@ -697,6 +705,7 @@ type TerminalShell interface {
 	UnregisterReader(id int)
 	ReadTerminalStream(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int, maxBytes int) (string, error)
 	HasMoreOutput(readerID int) bool
+	ReaderCursor(readerID int) int64
 	IsBufferClosed() bool
 	OutputByteRange(start int64, max int) ([]byte, int64, error)
 	BufferLen() int64
@@ -855,6 +864,14 @@ func (cs *ChildShell) ReadTerminalStream(ctx context.Context, readerID int, time
 // HasMoreOutput returns whether the given reader has unread data.
 func (cs *ChildShell) HasMoreOutput(readerID int) bool {
 	return cs.buf.HasMore(readerID)
+}
+
+// ReaderCursor returns the reader's current byte position in the retained buffer.
+func (cs *ChildShell) ReaderCursor(readerID int) int64 {
+	if cs.buf == nil {
+		return -1
+	}
+	return cs.buf.Cursor(readerID)
 }
 
 func (cs *ChildShell) IsBufferClosed() bool {

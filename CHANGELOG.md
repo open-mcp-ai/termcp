@@ -4,12 +4,15 @@
 
 ### Breaking
 
+- **`shell_output` 统一游标读取**：唯一输出读取入口，活会话（内存缓冲）、已退出会话（保留缓冲）、归档/重启恢复会话（磁盘消息流）全部同一套字节流游标语义。新增 `offset`（无状态字节定位，配合 `start_offset`/`end_offset`/`total_bytes`/`has_more` 翻页）与 `tail_lines`（只取末尾 N 行，token 友好）；返回体新增 `source`/`session_id`/`shell_id` 等游标元数据。
+- **删除 `history(action=get_transcript)`**：归档输出读取并入 `shell_output`（`shell_id=归档session_id或shell_id`），不再提供全量转录导出，避免一次性把整个会话拖入 LLM 上下文。WebUI 的 `GET /api/history/{id}/transcript` 导出保留。
 - **低频工具合并为 action 枚举**：`local_forward` / `remote_forward` / `dynamic_forward` / `list_forwards` / `close_forward` → `forward(action=...)`；`message_list` / `message_get` → `message(action=...)`；7 个 `history_*` 工具 → `history(action=...)`；5 个 `ssh_config_*` 工具 → `ssh_config(action=...)`（写操作通过 `--mcp-manage-ssh-configs` 开关）。
 - **删除 9 个低频文件工具**：`file_chmod` / `file_chown` / `file_chtimes` / `file_readlink` / `file_symlink` / `file_link` / `file_truncate` / `file_realpath` / `file_statvfs` → `file_perm` / `file_link` / `file_fs`（各带 `action` 枚举）。
-- **工具总数 44→29**，`tools/list` 从 32,672 B 降至 13,585 B（约 −58%）。
+- **工具总数 保持 29**：`history(action=get_transcript)` 移除，`shell_output` 新增 `offset`/`tail_lines` 两参数，`tools/list` 13,585 B → 13,803 B（+1.6%）。
 
 ### 改进
 
+- **归档默认读取不再全量倾倒**：无 `offset`/`tail_lines` 的归档读取默认返回末尾最近一块（≤8 KiB，行对齐），配合 `has_more`/`end_offset` 翻页；`max_bytes` 缺省 8192 与 schema 一致（显式 `0` 仍表示不限）。
 - **SSH 连接失败可见性**：会话创建失败（如 `ssh dial` 超时/拒绝）现在在 termcp 终端打出 `[ERROR] session create failed`（含目标地址、超时、模式，不含凭据）；MCP 工具错误结果从 Debug 升级为 `[WARN]` 并附带错误预览；Web UI "测试连接"失败同步打 `[WARN]`。连接类错误（超时/拒绝/不可达/重置）自动追加 `Hint:` 诊断提示，MCP 工具结果与 Web UI 响应同样携带。
 - **拨号错误上下文**：直连失败错误信息包含目标地址与拨号超时，如 `ssh dial: connect 192.168.0.145:22 (timeout 30s): dial tcp ...`，不再只有裸的 `i/o timeout` / `connectex ...`。
 
