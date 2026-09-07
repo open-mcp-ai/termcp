@@ -18,14 +18,17 @@ import (
 // mcpServerInstructions is returned in initialize (MCP "instructions") so clients may
 // inject it into the model context. Keep it terse because clients may include it
 // in every model turn.
-const mcpServerInstructions = `termcp agent rules (follow until the task is done or a hard tool error):
+const mcpServerInstructions = `termcp agent rules:
 
 0) Tools: session_*/shell_* are standalone; forward/message/history/ssh_config and file_perm/file_link/file_fs take an "action" parameter (enum in each schema).
 1) IDs: session_id = connection container (forwards, files, terminate, shell_open); shell_id = terminal channel (input/key/output/resize/close, readers). Never invent them; take from session_start / shell_open / list tools.
-2) Run: shell_input(shell_id,text), shell_key(shell_id,key="enter"), shell_output(shell_id,timeout≤3). Prefer shell_key for special keys. Output is visible only via shell_output; poll long commands with timeout≤3, round-robin shells.
+2) Mode selection:
+   - Interactive shell (omit command/args, DEFAULT): For multi-step tasks, stateful work (cd/env), and CLI sessions. Drive: loop shell_input(shell_id,text) + shell_key(shell_id,key="enter") + shell_output(shell_id,timeout≤3) until prompt. shell_output returns ONLY new bytes: empty read ≠ done, keep polling (echo precedes output).
+   - Dedicated command (set command/args): ONLY for: (a) interactive REPL/TUI (python, psql, htop); (b) long-running daemon/server (npm start, server binary); (c) isolated atomic script needing process exit code.
+   - Anti-pattern: Never split sequential steps into multiple session_start(bash -c) calls (loses cwd/env, wastes SSH handshakes, fragments history).
 3) After discovery, act with concrete calls, not prose. Verify success via output or an explicit success field.
 4) Lifecycle: session_terminate closes shells+forwards and archives; archived output is read with shell_output (same cursor semantics as live, use tail_lines/offset); history(action=screenshot) renders archived output as PNG; history(action=purge) deletes it. force=true = immediate kill. shell_close closes one channel.
-5) Password/sudo/passphrase/MFA prompt: stop and ask the user to type it in the termcp Web UI. Never guess, paste, or echo secrets.
+5) Password/sudo/passphrase/MFA prompt: stop and ask user to type it in termcp Web UI. Never guess, paste, or echo secrets.
 6) Other keys use JSON \u001b escapes in shell_input. Repeating traceback → session_terminate, retry with PYTHON_BASIC_REPL=1. Silent hang → session_info.
 7) forward(action=local/remote/dynamic) = ssh -L/-R/-D, all take session_id. ssh_config(action=list) only returns names; never expose credentials.`
 
@@ -64,7 +67,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpserver.WithInstructions(mcpServerInstructions),
 	)
 	mcpServer.AddTool(newTool("session_start",
-		mcpgo.WithDescription("Start a session (connection container) plus its primary shell. ssh_config \"internal\" (default) = termcp host loopback; otherwise a remote profile name. Empty command/args = login shell / profile defaults. Returns session_id and shell_id."),
+		mcpgo.WithDescription("Start a session (connection container) plus its primary shell. ssh_config \"internal\" (default) = termcp host loopback; otherwise a remote profile name. Empty command/args = login shell / profile defaults. WARNING: command/args = single run-and-exit program; for multi-step or stateful work omit them and drive an interactive shell instead. Returns session_id and shell_id."),
 		mcpgo.WithString("command", mcpgo.Description("Executable line; empty with no args = login shell / profile default_shell")),
 		mcpgo.WithArray("args", mcpgo.Description("Argv after command"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("\"pty\" (default, interactive TUI) or \"pipe\" (no TTY, line-oriented)"), mcpgo.DefaultString("pty")),

@@ -12,6 +12,7 @@
 
 ### 改进
 
+- **引导 Agent 偏好长连接交互会话**：精简 instructions 第 2 条明确指出推荐单个交互会话（保持 cwd/env/审计历史），澄清 `shell_output` 返回的是新增字节（读空 ≠ 没输出，需继续轮询），警告 `session_start` 的 `command/args` 是 run-and-exit 单次程序，不应用于多次分拆 `bash -c`。
 - **归档默认读取不再全量倾倒**：无 `offset`/`tail_lines` 的归档读取默认返回末尾最近一块（≤8 KiB，行对齐），配合 `has_more`/`end_offset` 翻页；`max_bytes` 缺省 8192 与 schema 一致（显式 `0` 仍表示不限）。
 - **SSH 连接失败可见性**：会话创建失败（如 `ssh dial` 超时/拒绝）现在在 termcp 终端打出 `[ERROR] session create failed`（含目标地址、超时、模式，不含凭据）；MCP 工具错误结果从 Debug 升级为 `[WARN]` 并附带错误预览；Web UI "测试连接"失败同步打 `[WARN]`。连接类错误（超时/拒绝/不可达/重置）自动追加 `Hint:` 诊断提示，MCP 工具结果与 Web UI 响应同样携带。
 - **拨号错误上下文**：直连失败错误信息包含目标地址与拨号超时，如 `ssh dial: connect 192.168.0.145:22 (timeout 30s): dial tcp ...`，不再只有裸的 `i/o timeout` / `connectex ...`。

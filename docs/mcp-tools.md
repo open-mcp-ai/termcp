@@ -47,9 +47,17 @@ ssh_config(action=list)
 
 启动会话（连接容器）并创建一个主 shell 通道。
 
+> **会话模式选择**：
+> - **交互 shell（默认，省略 `command`/`args`）**：用于多步骤任务、带状态的操作（`cd`/环境变量/依赖后续步骤）以及通用 CLI 会话。在同一个会话中持续输入执行，保持工作目录与环境一致，形成连续的审计历史。
+> - **专用单次程序（显式传入 `command`/`args`）**：**仅限**以下三种情况使用：
+>   1. 交互式专用 REPL 或 TUI 工具（如 `python -i`、`mysql`、`htop`）；
+>   2. 长期后台服务或守护进程（如 `npm run dev`、后端服务二进制）；
+>   3. 需要进程原生退出码（ExitCode）的独立原子脚本。
+> - **反模式**：切勿将多步骤任务拆解为多次 `session_start(command="bash", args=["-c", ...])` 执行。每一步都会丢失环境状态、产生多余 SSH 握手开销并割裂审计历史。
+
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
-| `command` | string | 否 | — | 要执行的命令；空 = 登录 shell 或 profile `default_shell` |
+| `command` | string | 否 | — | 可执行文件；省略 = 登录 shell（默认）。仅 REPL/服务/独立原子任务需要填写 |
 | `args` | string[] | 否 | `[]` | 命令行参数，仅 `command` 非空时有效 |
 | `mode` | string | 否 | `"pty"` | `"pty"` 或 `"pipe"` |
 | `name` | string | 否 | ssh_config | 会话显示名称 |

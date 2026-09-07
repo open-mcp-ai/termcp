@@ -12,13 +12,13 @@ var annotationNone = mcpgo.WithToolAnnotation(mcpgo.ToolAnnotation{})
 // remain next to registrations as source documentation; only the description
 // advertised to MCP clients is reduced.
 var compactToolDescriptions = map[string]string{
-	"session_start":           "Start a session; returns session_id and primary shell_id. internal/default is the termcp host; other names are remote SSH profiles.",
+	"session_start":           "Start a session; returns session_id + shell_id. DEFAULT: omit command/args to drive an interactive shell (multi-step/stateful work). command/args only for REPL/TUI, daemons, or single atomic scripts — never for sequential steps.",
 	"shell_open":              "Open another shell channel on a session; returns shell_id.",
 	"shell_list":              "List shell channels for a session.",
 	"shell_close":             "Close one shell channel; use session_terminate for the whole session.",
 	"shell_input":             "Write text to shell stdin without executing; use shell_key(enter) to run it.",
 	"shell_key":               "Send a named key to a shell.",
-	"shell_output":            "Read output of a live or archived shell; unified byte-stream cursor (offset/tail_lines/reader_id).",
+	"shell_output":            "Read output of a live or archived shell; empty read != no output (poll with timeout<=3). Unified cursor (offset/tail_lines/reader_id).",
 	"session_list":            "List live sessions.",
 	"session_info":            "Get detailed information for a session.",
 	"session_terminate":       "Terminate and archive a session; closes its shells and forwards.",
