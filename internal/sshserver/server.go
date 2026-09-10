@@ -106,16 +106,18 @@ func (c *duplexConn) Read(b []byte) (int, error) {
 }
 
 func (c *duplexConn) Write(b []byte) (int, error) {
-	// Snapshot the write channel under the mutex to avoid racing with Close.
+	data := make([]byte, len(b))
+	copy(data, b)
+	// Hold writeMu across the send so Close cannot close writeCh mid-send
+	// (that would be a data race and a "send on closed channel" panic).
+	// Close closes closeCh before taking writeMu, so a blocked send here is
+	// always released instead of deadlocking the two.
 	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	wch := c.writeCh
-	c.writeMu.Unlock()
 	if wch == nil {
 		return 0, net.ErrClosed
 	}
-
-	data := make([]byte, len(b))
-	copy(data, b)
 	select {
 	case wch <- data:
 		return len(b), nil
@@ -168,6 +170,52 @@ type Server struct {
 	pending map[string]string
 }
 
+// ptyContextKey is the per-session context key under which the PTY allocated
+// for a session is handed from the session request goroutine to the session
+// handler. Keying by session keeps concurrent shells multiplexed on one SSH
+// connection apart.
+type ptyContextKey struct{ sess ssh.Session }
+
+// sessionPTY is the per-session PTY handoff cell.
+type sessionPTY struct {
+	// mu guards the PTY against concurrent use from the handler goroutine and
+	// the request goroutine. charmbracelet/ssh closes the PTY from the session
+	// request goroutine when the client closes the channel, which can land in
+	// the middle of the handler's fork/exec — and os.File.Fd is documented as
+	// unsafe to call concurrently with Close (the child could inherit a
+	// recycled descriptor). Taking mu around pty.Start in the handler and
+	// around the library's closer removes that interleaving.
+	mu  sync.Mutex
+	pty ssh.Pty
+	ok  bool
+}
+
+// stashPTY records the PTY the client requested for sess. It runs on the
+// session request goroutine — the same goroutine that applies "window-change"
+// updates — so this is the one place where the session's PTY struct can be read
+// without racing charmbracelet/ssh's unlocked `sess.pty.Window` write.
+func stashPTY(sess ssh.Session) {
+	ps, _ := sess.Context().Value(ptyContextKey{sess}).(*sessionPTY)
+	if ps == nil {
+		return
+	}
+	if pty, _, ok := sess.Pty(); ok {
+		ps.pty, ps.ok = pty, true
+	}
+}
+
+// takePTY returns the PTY stashed for sess by stashPTY, if any, and clears the
+// stash so the connection context does not retain the session (and its pty).
+func takePTY(sess ssh.Session) (*sessionPTY, bool) {
+	key := ptyContextKey{sess}
+	ps, _ := sess.Context().Value(key).(*sessionPTY)
+	if ps == nil || !ps.ok {
+		return nil, false
+	}
+	sess.Context().SetValue(key, nil)
+	return ps, true
+}
+
 // New creates an internal SSH server that communicates in-process via net.Pipe (no TCP port).
 func New() *Server {
 	s := &Server{
@@ -181,6 +229,13 @@ func New() *Server {
 			return s.passwordOK(ctx.User(), password)
 		},
 		LocalPortForwardingCallback: func(ctx ssh.Context, dHost string, dPort uint32) bool {
+			return true
+		},
+		// Capture the allocated PTY on the request goroutine (see stashPTY) so the
+		// session handler never reads the session's PTY struct while a
+		// window-change may be updating it.
+		SessionRequestCallback: func(sess ssh.Session, _ string) bool {
+			stashPTY(sess)
 			return true
 		},
 		ChannelHandlers: map[string]ssh.ChannelHandler{
@@ -199,6 +254,27 @@ func New() *Server {
 		},
 	}
 	_ = srv.SetOption(ssh.AllocatePty())
+	// Wrap the allocator so the PTY it creates is closed under the same lock the
+	// session handler holds while forking the command onto it (see sessionPTY).
+	allocPty := srv.PtyHandler
+	srv.PtyHandler = func(ctx ssh.Context, sess ssh.Session, pty ssh.Pty) (func() error, error) {
+		ps := &sessionPTY{}
+		key := ptyContextKey{sess}
+		sess.Context().SetValue(key, ps)
+		if allocPty == nil {
+			return func() error { return nil }, nil
+		}
+		closer, err := allocPty(ctx, sess, pty)
+		if err != nil {
+			sess.Context().SetValue(key, nil)
+			return nil, err
+		}
+		return func() error {
+			ps.mu.Lock()
+			defer ps.mu.Unlock()
+			return closer()
+		}, nil
+	}
 	s.server = srv
 	return s
 }
@@ -345,17 +421,21 @@ func (s *Server) handleSession(sess ssh.Session) {
 	sigCh := make(chan ssh.Signal, 8)
 	sess.Signals(sigCh)
 
-	ppty, winCh, isPty := sess.Pty()
+	// The PTY info comes from stashPTY rather than sess.Pty(): the request loop
+	// writes sess.pty.Window for every window-change without holding the session
+	// lock, so reading that struct here would race it. Window changes are applied
+	// by the library's own drain goroutine (installed by AllocatePty).
+	ps, hasPty := takePTY(sess)
 	var started bool
-	if isPty {
-		go func() {
-			for range winCh {
-			}
-		}()
+	if hasPty {
 		setPtySysProcAttr(cmd)
-		cmd.Env = append(os.Environ(), "TERM="+ppty.Term)
-		if err := ppty.Start(cmd); err != nil {
-			io.WriteString(sess, err.Error()+"\n")
+		cmd.Env = append(os.Environ(), "TERM="+ps.pty.Term)
+		// Serialized with the library's PTY teardown: see sessionPTY.
+		ps.mu.Lock()
+		startErr := ps.pty.Start(cmd)
+		ps.mu.Unlock()
+		if startErr != nil {
+			io.WriteString(sess, startErr.Error()+"\n")
 			sess.Exit(1)
 			return
 		}

@@ -12,6 +12,9 @@
 
 ### 改进
 
+- **修复快速命令输出被截断**：SSH 会话在进程退出时立即上报 exit-status，此时末尾 stdout 可能仍在通道缓冲中未读，而旧的读取循环一看到进程退出就停止、随后立刻封存缓冲，导致 `echo`/`ls` 之类快速命令丢失最后几行。现在读取循环以通道 EOF 为准持续读取，封存缓冲前先等待该 shell 的输出管道排空（带超时兜底）。
+- **修复 PTY 窗口改动被丢弃**：内部 SSH 会话（`pty` 模式）此前在服务端又开了一个 window-change 消费者，与库自身的 resize 处理竞争同一个通道，约一半的 resize 事件被丢弃——WebUI/MCP 调整窗口后子进程终端尺寸时大时小。现在统一交给库处理，客户端 resize 可靠地传到子进程（新增 `stty size` 回归测试）。
+- **清理并发读写隐患**：内部 SSH 服务端不再跨 goroutine 直接读会话的 PTY 结构（改为在 session 请求 goroutine 上取一次再交接），PTY 的 fork/exec 与库的 PTY 关闭用同一把锁串行；`ExecSession` 的 stdin 写入与关闭也串行（x/crypto 的 `Write` 与 `CloseWrite` 并发会竞争通道 EOF 标志）。内存 SSH 传输 `duplexConn` 的 `Close`/`Write` 不再可能 `send on closed channel`。`go test -race ./...` 现全绿。
 - **修复已退出/恢复会话调用文件及转发工具导致 Panic 的问题**：当对已退出（DEAD）或重启后从磁盘恢复的无活跃 SSH 连接的会话调用 `file_write`/`file_read` 等 SFTP 工具或端口转发工具时，`sftpClient` 与端口转发函数补充了 `SSHClient == nil` 的防御性校验，返回规范的 MCP 工具错误，避免了 `pkg/sftp.NewClient(nil)` 空指针解引用崩溃；同时在 `internal/sftp.NewClient` 与 Web UI 文件 API 中增加了对空连接的防守。
 - **Web UI 窗口拖拽 resize 体验与 PTY 尺寸同步**：增大拖动手柄触发面积至 30×30px 并提升 z-index 防止被右下角滚动浮标遮挡；改用 Pointer Capture 杜绝甩出窗口时的鼠标丢帧；rAF 节流配合强制重排消除拖动滞后；修复松开鼠标（`onUp`）时活动 shell 通道未派发远程 PTY 尺寸同步的问题。
 - **Web UI Sessions 列表批量选择与删除**：标题栏常驻三个纯图标按钮——全选/取消全选（复选框两态图标）、红色垃圾桶批量删除选中（无选中时置灰，气泡提示选中数量）、扫帚一键清理已退出 Dead 会话（弹窗确认后顺序批量删除）；标题栏左侧在选中数 N>0 时实时显示 `[N selected]`。卡片右上角叉号始终可单删；右下角复选框常驻，点击（`stopPropagation`）切换选中态，卡片主体点按仍打开/聚焦终端；选中卡片显示蓝色描边。动态刷新保留已选集合并与全选状态、计数双向联动。

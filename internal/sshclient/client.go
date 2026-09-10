@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/open-mcp-ai/termcp/internal/shell"
@@ -24,6 +25,10 @@ type ExecSession struct {
 	err          error
 	ownClient    bool // if false, Close() does not close the underlying SSH client
 	extraClosers []io.Closer
+	// stdinMu serializes stdin writes with stdin teardown. x/crypto's channel
+	// does not tolerate a concurrent Write and CloseWrite (they race on the
+	// channel's EOF flag), and teardown can happen at any time.
+	stdinMu sync.Mutex
 }
 
 func closeIfCloser(r io.Reader) {
@@ -256,6 +261,14 @@ func startSession(client *ssh.Client, session *ssh.Session, command string, args
 	return es, nil
 }
 
+// CloseReaders closes the stdout/stderr read sides so a reader goroutine stuck
+// on a transport that never reports EOF can be released. Used after the process
+// has exited, where the stream can no longer carry useful data.
+func (es *ExecSession) CloseReaders() {
+	closeIfCloser(es.Stdout)
+	closeIfCloser(es.Stderr)
+}
+
 // Done returns a channel that closes when the remote process exits.
 func (es *ExecSession) Done() <-chan struct{} {
 	return es.done
@@ -281,9 +294,24 @@ func (es *ExecSession) ResizePty(rows, cols int) error {
 	return es.session.WindowChange(rows, cols)
 }
 
+// WriteStdin writes to the process stdin. Safe to race with Close/termination:
+// the write is serialized with the stdin teardown.
+func (es *ExecSession) WriteStdin(data []byte) (int, error) {
+	es.stdinMu.Lock()
+	defer es.stdinMu.Unlock()
+	return es.Stdin.Write(data)
+}
+
 // Signal sends a signal to the remote process.
 func (es *ExecSession) Signal(sig ssh.Signal) error {
 	return es.session.Signal(sig)
+}
+
+// closeStdin closes the stdin pipe, serialized with in-flight writes.
+func (es *ExecSession) closeStdin() {
+	es.stdinMu.Lock()
+	defer es.stdinMu.Unlock()
+	_ = es.Stdin.Close()
 }
 
 // Close forcefully terminates the session and underlying connection.
@@ -291,7 +319,7 @@ func (es *ExecSession) Signal(sig ssh.Signal) error {
 func (es *ExecSession) SSHClient() *ssh.Client { return es.client }
 
 func (es *ExecSession) Close() error {
-	es.Stdin.Close()
+	es.closeStdin()
 	var firstErr error
 	if err := es.session.Close(); err != nil {
 		firstErr = err
@@ -308,7 +336,7 @@ func (es *ExecSession) Close() error {
 
 // CloseSessionOnly closes this session channel without touching the shared SSH client.
 func (es *ExecSession) CloseSessionOnly() error {
-	es.Stdin.Close()
+	es.closeStdin()
 	return es.session.Close()
 }
 

@@ -362,7 +362,7 @@ func (s *Session) sendInput(data []byte, pressEnter bool, persist bool) error {
 		toWrite = data
 	}
 	s.stdinMu.Lock()
-	_, err := s.execSession.Stdin.Write(toWrite)
+	_, err := s.execSession.WriteStdin(toWrite)
 	s.stdinMu.Unlock()
 	if err != nil {
 		return err
@@ -734,6 +734,9 @@ type ChildShell struct {
 	// termcp host OS, so cross-OS SSH sessions send the right line ending.
 	enterCRLF bool
 	mode      api.SessionMode // pty or pipe; affects press_key("enter")
+	// pipeWG tracks this shell's stdout/stderr reader goroutines so the final
+	// bytes can be drained into the buffer before it is sealed. See drainPipes.
+	pipeWG sync.WaitGroup
 	// deliberateClose is set by TerminateShell/CloseChildShell so the exit
 	// watcher does not treat an intentional channel close as SSH disconnect.
 	deliberateClose bool
@@ -787,7 +790,7 @@ func (cs *ChildShell) SendTerminalBytes(data []byte, pressEnter bool) error {
 		toWrite = data
 	}
 	cs.stdinMu.Lock()
-	_, err := cs.execSession.Stdin.Write(toWrite)
+	_, err := cs.execSession.WriteStdin(toWrite)
 	cs.stdinMu.Unlock()
 	return err
 }
@@ -812,7 +815,7 @@ func (cs *ChildShell) PressKey(key string, repeat int) error {
 	}
 	payload := bytes.Repeat(seq, repeat)
 	cs.stdinMu.Lock()
-	_, err = cs.execSession.Stdin.Write(payload)
+	_, err = cs.execSession.WriteStdin(payload)
 	cs.stdinMu.Unlock()
 	return err
 }
@@ -926,26 +929,47 @@ func (cs *ChildShell) TerminateShell() {
 	if parent != nil {
 		cs.retainHistory(parent)
 	}
+	// Flush output already handed to the process before sealing the buffer,
+	// otherwise the tail of the transcript is dropped.
+	cs.drainPipes()
 	cs.buf.Close()
 	// Ensure Done() channel is closed for any waiters (closeOnce prevents races with the exit watcher goroutine).
 	cs.closeOnce.Do(func() { close(cs.done) })
 }
 
-// pipeChildToBuffer pipes child shell output into the buffer.
+// pipeDrainGrace bounds how long a shell waits for the transport to hand over
+// the bytes still buffered after the process reported exit. The normal path
+// finishes in microseconds (the channel EOF follows exit-status immediately);
+// the grace only covers a peer that never closes its channel.
+const pipeDrainGrace = 2 * time.Second
+
+// pipeToBuffer pipes child shell output into the buffer.
+//
+// The loop runs until the reader reports an error (normally io.EOF once the
+// channel is closed after the process exits). It must NOT stop on cs.done: the
+// SSH session reports exit-status as soon as the process is gone, while the
+// trailing stdout may still be sitting unread in the channel buffer — bailing
+// out on cs.done truncated the tail of fast commands.
 func (cs *ChildShell) pipeToBuffer(r io.Reader) {
 	p := cs.parent
 	if p != nil {
 		p.doneWG.Add(1)
 	}
+	cs.pipeWG.Add(1)
 	go func() {
 		if p != nil {
 			defer p.doneWG.Done()
 		}
+		defer cs.pipeWG.Done()
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				cs.buf.Write(buf[:n])
+				// A closed buffer means the shell was already sealed; nothing more
+				// can be recorded, so stop rather than spin on a dead transcript.
+				if werr := cs.buf.Write(buf[:n]); werr != nil {
+					return
+				}
 				// Archive output once at the source so every session (WebUI stream and
 				// MCP read alike) leaves a transcript — regardless of which reader
 				// consumes it. Never double-recorded because each write fires once.
@@ -957,13 +981,37 @@ func (cs *ChildShell) pipeToBuffer(r io.Reader) {
 			if err != nil {
 				return
 			}
-			select {
-			case <-cs.done:
-				return
-			default:
-			}
 		}
 	}()
+}
+
+// drainPipes waits for this shell's output pipe goroutines to consume the bytes
+// buffered in the transport, so the transcript is complete before the buffer is
+// sealed for readers. Callers must run it before cs.buf.Close().
+//
+// The wait stays bounded: a transport that never reports EOF gets its read side
+// closed (which ends the stream as soon as the peer answers, and unblocks a
+// reader stuck on a dead transport when the mux tears down).
+func (cs *ChildShell) drainPipes() {
+	drained := make(chan struct{})
+	go func() {
+		cs.pipeWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		return
+	case <-time.After(pipeDrainGrace):
+	}
+	slog.Debug("output pipe still open after process exit; closing readers", "child_shell_id", cs.ID)
+	if cs.execSession != nil {
+		cs.execSession.CloseReaders()
+	}
+	select {
+	case <-drained:
+	case <-time.After(pipeDrainGrace):
+		slog.Debug("output pipe did not drain; sealing buffer anyway", "child_shell_id", cs.ID)
+	}
 }
 
 // retainHistory keeps the shell's final metadata for the archived per-shell
@@ -1033,6 +1081,9 @@ func (cs *ChildShell) startReaders() {
 				p.shellHistory.Delete(cs.ID)
 			}
 		}
+		// Drain the output still buffered in the transport (exit-status can
+		// arrive ahead of the last stdout bytes) before sealing the buffer.
+		cs.drainPipes()
 		cs.buf.Close()
 		// Keep the exited ChildShell in the parent map until explicit close/Delete.
 		// This preserves its closed buffer so shell_output and WebUI can drain
