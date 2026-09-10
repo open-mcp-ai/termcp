@@ -394,6 +394,9 @@ func (s *Client) Getwd() (string, error) {
 
 // OpenSFTPOverSSH opens an SFTP connection over an existing SSH client (for regular SSH).
 func NewClient(sshClient *ssh.Client) (*Client, error) {
+	if sshClient == nil {
+		return nil, fmt.Errorf("ssh client is nil")
+	}
 	sftpCli, err := sftp.NewClient(sshClient)
 	if err != nil {
 		return nil, fmt.Errorf("sftp: %w", err)

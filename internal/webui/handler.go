@@ -1063,13 +1063,18 @@ func (h *Handler) handleListSessionForwards(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"forwards": h.ForwardMgr.ListBySession(sessionID)})
 }
 
-func (h *Handler) getFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client) {
+func (h *Handler) resolveFileSession(sessionID string, w http.ResponseWriter) (*session.Session, *ssh.Client, bool) {
 	sess := h.Sessions.Get(sessionID)
 	if sess == nil {
-		return nil, nil
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+		return nil, nil, false
 	}
 	sshClient := sess.SSHClient()
-	return sess, sshClient
+	if sess.SSHEndpoint != "internal" && sshClient == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "session has no active SSH connection"})
+		return nil, nil, false
+	}
+	return sess, sshClient, true
 }
 
 func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
@@ -1080,9 +1085,8 @@ func (h *Handler) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Debug("handleListFiles", "session", sid, "path", path)
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {
@@ -1151,9 +1155,8 @@ func (h *Handler) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		length, _ = strconv.ParseInt(r.URL.Query().Get("length"), 10, 64)
 	}
 
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {
@@ -1273,9 +1276,8 @@ func (h *Handler) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {
@@ -1325,9 +1327,8 @@ func (h *Handler) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "path required"})
 		return
 	}
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {
@@ -1366,9 +1367,8 @@ func (h *Handler) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {
@@ -1401,9 +1401,8 @@ func (h *Handler) handleMakeDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, sshClient := h.getFileSession(sid, w)
-	if sess == nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	_, sshClient, ok := h.resolveFileSession(sid, w)
+	if !ok {
 		return
 	}
 	if sshClient == nil {

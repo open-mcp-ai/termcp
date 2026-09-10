@@ -12,6 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/open-mcp-ai/termcp/internal/ansi"
 	"github.com/open-mcp-ai/termcp/internal/session"
@@ -101,14 +102,29 @@ func (s *Server) requireSession(sessionID string) (*session.Session, *mcpgo.Call
 	return sess, nil
 }
 
+// sshClientForSession resolves a session and returns it together with its live SSH
+// client. Restored/DEAD sessions keep metadata but no transport; callers receive a
+// standard tool error instead of a nil client that would crash SFTP/forward internals.
+func (s *Server) sshClientForSession(sessionID string) (*session.Session, *ssh.Client, *mcpgo.CallToolResult) {
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return nil, nil, bad
+	}
+	cli := sess.SSHClient()
+	if cli == nil {
+		return nil, nil, mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' is not running or has no active SSH connection", sessionID))
+	}
+	return sess, cli, nil
+}
+
 // sftpClient resolves a session and creates an SFTP client over it.
 // Caller must defer Close() on the returned client.
 func (s *Server) sftpClient(sessionID string) (*sftp.Client, *mcpgo.CallToolResult) {
-	sess, bad := s.requireSession(sessionID)
+	_, sshCli, bad := s.sshClientForSession(sessionID)
 	if bad != nil {
 		return nil, bad
 	}
-	cli, err := sftp.NewClient(sess.SSHClient())
+	cli, err := sftp.NewClient(sshCli)
 	if err != nil {
 		return nil, mcpgo.NewToolResultError(fmt.Sprintf("SFTP: %v", err))
 	}
@@ -924,11 +940,11 @@ func (s *Server) handleLocalForward(ctx context.Context, request mcpgo.CallToolR
 		return mcpgo.NewToolResultError("remote_port required (1-65535)"), nil
 	}
 
-	sess, bad := s.requireSession(sessionID)
+	sess, sshCli, bad := s.sshClientForSession(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
-	fw, err := s.forwardMgr.CreateLocal(sessionID, sess.Info().Name, remoteHost, remotePort, localPort, sess.SSHClient())
+	fw, err := s.forwardMgr.CreateLocal(sessionID, sess.Info().Name, remoteHost, remotePort, localPort, sshCli)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -956,11 +972,11 @@ func (s *Server) handleRemoteForward(ctx context.Context, request mcpgo.CallTool
 		return mcpgo.NewToolResultError("remote_host and remote_port required"), nil
 	}
 
-	sess, bad := s.requireSession(sessionID)
+	sess, sshCli, bad := s.sshClientForSession(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
-	fw, err := s.forwardMgr.CreateRemote(sessionID, sess.Info().Name, localHost, localPort, remoteHost, remotePort, sess.SSHClient())
+	fw, err := s.forwardMgr.CreateRemote(sessionID, sess.Info().Name, localHost, localPort, remoteHost, remotePort, sshCli)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -979,12 +995,12 @@ func (s *Server) handleDynamicForward(ctx context.Context, request mcpgo.CallToo
 		return mcpgo.NewToolResultError("session_id required"), nil
 	}
 
-	sess, bad := s.requireSession(sessionID)
+	sess, sshCli, bad := s.sshClientForSession(sessionID)
 	if bad != nil {
 		return bad, nil
 	}
 	info := sess.Info()
-	fw, err := s.forwardMgr.CreateDynamic(sessionID, info.Name, localPort, sess.SSHClient(), info.SSHEndpoint == "internal")
+	fw, err := s.forwardMgr.CreateDynamic(sessionID, info.Name, localPort, sshCli, info.SSHEndpoint == "internal")
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}

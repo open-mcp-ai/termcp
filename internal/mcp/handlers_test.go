@@ -16,6 +16,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 	"github.com/open-mcp-ai/termcp/internal/sshserver"
 	"github.com/open-mcp-ai/termcp/internal/storage"
+	"github.com/open-mcp-ai/termcp/pkg/api"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -859,3 +860,67 @@ func TestGroupDispatch(t *testing.T) {
 	termReq := makeRequest(map[string]any{"session_id": sid, "force": true})
 	s.handleTerminateSession(context.Background(), termReq)
 }
+
+func TestDeadSessionOperationsNoPanic(t *testing.T) {
+	dir := t.TempDir()
+	store := storage.New(dir)
+	msgMgr := message.NewManager(store)
+	sessMgr := session.NewManager(msgMgr, store, nil)
+	s := New(sessMgr, msgMgr, sshconfig.NewStore(dir), nil)
+
+	// Persist a session to disk and restore it so it is in the registry without an SSH connection.
+	deadSession := api.Session{
+		ID:          "dead-sess-1",
+		Name:        "dead-session",
+		Status:      api.SessionExited,
+		SSHEndpoint: "remote",
+	}
+	if err := store.SaveSessions([]api.Session{deadSession}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessMgr.RestoreDead(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. File write on dead session must return tool error without panic.
+	writeReq := makeRequest(map[string]any{
+		"session_id":  "dead-sess-1",
+		"remote_path": "/tmp/test.txt",
+		"data":        "hello",
+	})
+	writeRes, err := s.handleFileWrite(context.Background(), writeReq)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !writeRes.IsError {
+		t.Fatal("expected error result on dead session file write")
+	}
+
+	// 2. File read on dead session must return tool error without panic.
+	readReq := makeRequest(map[string]any{
+		"session_id":  "dead-sess-1",
+		"remote_path": "/tmp/test.txt",
+	})
+	readRes, err := s.handleFileRead(context.Background(), readReq)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !readRes.IsError {
+		t.Fatal("expected error result on dead session file read")
+	}
+
+	// 3. Local forward on dead session must return tool error without panic.
+	fwdReq := makeRequest(map[string]any{
+		"session_id":  "dead-sess-1",
+		"remote_port": float64(8080),
+		"local_port":  float64(8080),
+	})
+	fwdRes, err := s.handleLocalForward(context.Background(), fwdReq)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !fwdRes.IsError {
+		t.Fatal("expected error result on dead session forward")
+	}
+}
+

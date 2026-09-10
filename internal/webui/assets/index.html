@@ -50,6 +50,32 @@
     .conn-tile.sess-tile .sess-dead { display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 10px; background: #eaeef2; color: #57606a; font-size: 0.62rem; text-transform: uppercase; letter-spacing: .03em; vertical-align: middle; }
     .conn-tile.sess-tile.archived { opacity: .68; }
     .conn-tile.sess-tile.archived:hover { opacity: .9; }
+    /* Sessions toolbar: always-visible select-all / delete-selected / clear-dead */
+    .icon-btn-sm { width: 28px; height: 28px; border-radius: 6px; }
+    .icon-btn-sm svg { width: 16px; height: 16px; }
+    .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .icon-btn-danger { color: #cf222e; }
+    .icon-btn-danger:hover:not(:disabled) { background: #cf222e; border-color: #cf222e; color: #fff; }
+    .icon-btn .ic-checked { display: none; }
+    .icon-btn.all-checked .ic-empty { display: none; }
+    .icon-btn.all-checked .ic-checked { display: block; }
+    .batch-count {
+      font-size: .68rem; font-weight: 600; text-transform: none; letter-spacing: 0;
+      color: #0969da; background: rgba(9,105,218,.1);
+      border: 1px solid rgba(9,105,218,.35); border-radius: 10px; padding: 1px 7px;
+    }
+    .conn-tile.sess-tile.batch-selected {
+      border-radius: 6px;
+      box-shadow: 0 0 0 2px #0969da;
+      background: rgba(9,105,218,.06);
+    }
+    /* × and the selection checkbox are 20×20 and mirror each other about the icon's horizontal center line:
+       × at the icon's top-right, checkbox at the icon's bottom-right, both just clearing the 40px icon. */
+    .conn-tile.sess-tile .conn-tile-stack .sess-checkbox {
+      position: absolute; right: -4px; bottom: -4px; z-index: 4;
+      width: 20px; height: 20px; margin: 0; padding: 0;
+      cursor: pointer; accent-color: #0969da;
+    }
     .conn-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
     .conn-tile { position: relative; text-align: center; user-select: none; }
     /* Entry card: horizontal layout; address only in icon title */
@@ -234,11 +260,11 @@
     }
     #ui-copy-toast.ui-copy-toast-visible { opacity: 1; }
     .conn-tile .conn-tile-stack .sess-x {
-      position: absolute; right: 2px; top: 2px; z-index: 3; width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px;
-      background: rgba(207,34,46,.12); color: #cf222e; cursor: pointer; display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 1px 2px rgba(0,0,0,.08); opacity: 1; transition: background .12s, color .12s;
+      position: absolute; right: -4px; top: -4px; z-index: 3; width: 20px; height: 20px; padding: 0; border: 1px solid rgba(207,34,46,.35); border-radius: 4px;
+      background: #fff; color: #cf222e; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,.12); opacity: 1; transition: background .12s, color .12s, border-color .12s;
     }
-    .conn-tile .conn-tile-stack .sess-x:hover { background: #cf222e; color: #fff; }
+    .conn-tile .conn-tile-stack .sess-x:hover { background: #cf222e; border-color: #cf222e; color: #fff; }
 
     .modal-backdrop { position: fixed; inset: 0; background: rgba(31,35,38,.45); z-index: 20000; display: flex; align-items: center; justify-content: center; padding: 16px; }
     .modal-backdrop.hidden { display: none; }
@@ -463,9 +489,9 @@
       border: 2px solid #1e1e1e;
     }
     .shell-terminal-wrap .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6e7681; }
-    /* Floating "back to latest output" button (appears only when scrolled away from the live tail) */
+    /* Floating "back to latest output" button (offset upward so it never covers the bottom-right resize handle) */
     .shell-term-scroll-fab {
-      position: absolute; right: 14px; bottom: 10px; z-index: 15;
+      position: absolute; right: 14px; bottom: 36px; z-index: 15;
       width: 30px; height: 30px; padding: 0;
       border: 1px solid rgba(255,255,255,.18); border-radius: 50%;
       background: rgba(46,58,76,.92); color: #d4d4d4;
@@ -481,8 +507,10 @@
     .shell-window.shell-window-collapsed .shell-window-content,
     .shell-window.shell-window-collapsed .shell-window-resize-handle { display: none; }
     .shell-window.shell-window-collapsed { height: auto; min-height: 0; }
-    .shell-window-resize-handle { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; pointer-events: none; z-index: 10; }
-    .shell-window-resize-handle::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 12px; height: 12px; pointer-events: auto; cursor: nwse-resize; border-right: 2px solid rgba(255,255,255,.28); border-bottom: 2px solid rgba(255,255,255,.28); }
+    .shell-window-resize-handle { position: absolute; right: 0; bottom: 0; width: 30px; height: 30px; z-index: 30; touch-action: none; cursor: nwse-resize; }
+    .shell-window-resize-handle::after { content: ''; position: absolute; right: 5px; bottom: 5px; width: 18px; height: 18px; pointer-events: none; border-right: 2px solid rgba(255,255,255,.4); border-bottom: 2px solid rgba(255,255,255,.4); }
+    .shell-window.shell-window-resizing { user-select: none !important; }
+    .shell-window.shell-window-resizing .shell-window-content { pointer-events: none !important; }
     .shell-tab-bar { display: flex; align-items: flex-end; gap: 0; flex-shrink: 0; padding-left: 8px; align-self: stretch; }
     .shell-tab-btn { width: 28px; height: 100%; padding: 0 4px; border: 1px solid transparent; border-radius: 4px 4px 0 0; background: transparent; color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color .12s, background .12s, border-color .12s; position: relative; bottom: -1px; }
     .shell-tab-btn:hover { color: #eee; background: rgba(255,255,255,.04); }
@@ -715,9 +743,17 @@
     <div class="section-header" id="sec-sessions" aria-expanded="true" role="button" tabindex="0">
       <svg class="sec-chevron" viewBox="0 0 12 8" width="12" height="8"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M1 2l5 4 5-4"/></svg>
       <span>Sessions</span>
+      <span id="session-batch-count" class="batch-count" style="display:none"></span>
       <span style="flex:1"></span>
-      <button type="button" class="icon-btn" style="width:28px;height:28px" id="btn-clear-dead" title="Clear dead sessions" aria-label="Clear dead sessions" onclick="event.stopPropagation()">
+      <button type="button" class="icon-btn icon-btn-sm batch-sel-all" id="batch-sel-all" title="Select all" aria-label="Select all or clear selection" onclick="event.stopPropagation()">
+        <svg class="ic-empty" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+        <svg class="ic-checked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
+      </button>
+      <button type="button" class="icon-btn icon-btn-sm icon-btn-danger" id="batch-del-btn" title="Delete selected" aria-label="Delete selected sessions" disabled onclick="event.stopPropagation()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </button>
+      <button type="button" class="icon-btn icon-btn-sm" id="btn-clear-dead" title="Clear dead sessions" aria-label="Clear all dead sessions" onclick="event.stopPropagation()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4 12 12"/><path d="M12 12l-6 6 4 1 1 4 6-6z"/><path d="M14 10l-2-2"/></svg>
       </button>
     </div>
     <div class="section-body" id="sec-sessions-body">
@@ -1847,6 +1883,36 @@
     }).join('');
   }
 
+  var _selectedSessionIds = new Set();
+
+  function updateSessionBatchBar() {
+    var countEl = document.getElementById('session-batch-count');
+    var delBtn = document.getElementById('batch-del-btn');
+    var selAllBtn = document.getElementById('batch-sel-all');
+    var snapshot = (window._lastSessionsSnapshot || []).filter(function (s) { return s && s.id; });
+    var count = _selectedSessionIds.size;
+    var total = snapshot.length;
+    var allSelected = total > 0 && count >= total;
+    if (selAllBtn) {
+      selAllBtn.classList.toggle('all-checked', allSelected);
+      selAllBtn.title = allSelected ? 'Clear selection' : 'Select all';
+      selAllBtn.disabled = total === 0;
+    }
+    if (countEl) {
+      if (count > 0) {
+        countEl.style.display = '';
+        countEl.textContent = count + ' selected';
+      } else {
+        countEl.style.display = 'none';
+        countEl.textContent = '';
+      }
+    }
+    if (delBtn) {
+      delBtn.disabled = count === 0;
+      delBtn.title = count > 0 ? 'Delete ' + count + ' selected session' + (count === 1 ? '' : 's') : 'Delete selected';
+    }
+  }
+
   function renderSessionGrid(sessions, bannerMsg) {
     var grid = document.getElementById('session-grid');
     if (!grid) return;
@@ -1857,6 +1923,8 @@
     // window in read-only mode — no separate history window.
     var all = (sessions || []).slice();
     if (all.length === 0) {
+      _selectedSessionIds.clear();
+      updateSessionBatchBar();
       var empty = document.createElement('div');
       empty.style.cssText = 'padding:8px 4px;font-size:0.85rem;color:#656d76';
       empty.textContent = 'No sessions.';
@@ -1865,18 +1933,25 @@
     }
     all.forEach(function (s) {
       var dead = !(s.status === 'running');
-      var tile = document.createElement('div');
-      tile.className = 'conn-tile sess-tile' + (dead ? ' archived' : '');
       var sid = s.id || '';
+      var isSelected = _selectedSessionIds.has(sid);
+      var tile = document.createElement('div');
+      var tileClass = 'conn-tile sess-tile' + (dead ? ' archived' : '') + (isSelected ? ' batch-selected' : '');
+      tile.className = tileClass;
       var nm = String((s.name || '').trim());
       var entryLine = nm && nm.indexOf('session-') !== 0 ? nm : displaySessionShort(s);
       var badge = dead ? '<span class="sess-dead" title="' + escapeHtml(reasonLabel(s.reason)) + '">dead</span>' : '';
+
+      var actionCornerHtml =
+        '<button type="button" class="sess-x" title="Delete session" aria-label="Delete session">' +
+          '<svg viewBox="0 0 12 12" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
+        '</button>';
+
       tile.innerHTML =
         '<div class="conn-tile-stack">' +
-        '<button type="button" class="sess-x" title="Delete session" aria-label="Delete session">' +
-          '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
-        '</button>' +
+        actionCornerHtml +
         '<div class="icon-wrap" title="' + (dead ? 'Open history' : 'Open terminal') + '"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
+        '<input type="checkbox" class="sess-checkbox" title="Select session" aria-label="Select session"' + (isSelected ? ' checked' : '') + '>' +
         '</div>' +
         '<div class="sess-tile-body">' +
         '<div class="sess-entry-line" title="' + escapeHtml(entryLine) + '">' + escapeHtml(entryLine) + badge + '</div>' +
@@ -1886,23 +1961,41 @@
         '</div>' +
         '</div>' +
         '<div class="sess-fwd-info" style="display:none;font-size:0.62rem;color:#656d76;margin-top:2px;text-align:center"></div>';
+
       tile.title = (dead ? 'Open history (read-only)' : 'Open terminal') + ' · ' + sid;
+
       var sx = tile.querySelector('.sess-x');
       var delConf = { title: 'Delete session', message: 'Delete "' + entryLine + '"?', okText: 'Delete', danger: true };
-      sx.onclick = function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        confirmDialog(delConf).then(function (ok) {
-          if (!ok) return;
-          fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
-            .then(function (r) {
-              if (!r.ok && r.status !== 204) return r.json().then(function (er) { throw new Error((er && er.error) || 'HTTP ' + r.status); });
-              var w = getShellWindowBySid(s.id);
-              if (w) closeShellWindow(w);
-            })
-            .catch(function (err) { showCopyToast('Delete failed: ' + String(err.message || err)); });
+      if (sx) {
+        sx.onclick = function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          confirmDialog(delConf).then(function (ok) {
+            if (!ok) return;
+            fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
+              .then(function (r) {
+                if (!r.ok && r.status !== 204) return r.json().then(function (er) { throw new Error((er && er.error) || 'HTTP ' + r.status); });
+                var w = getShellWindowBySid(s.id);
+                if (w) closeShellWindow(w);
+              })
+              .catch(function (err) { showCopyToast('Delete failed: ' + String(err.message || err)); });
+          });
+        };
+      }
+
+      var checkbox = tile.querySelector('.sess-checkbox');
+      if (checkbox) {
+        checkbox.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+        checkbox.addEventListener('click', function (e) {
+          // Do NOT preventDefault() here: that would revert the checkbox toggle.
+          e.stopPropagation();
+          if (checkbox.checked) _selectedSessionIds.add(sid);
+          else _selectedSessionIds.delete(sid);
+          tile.classList.toggle('batch-selected', checkbox.checked);
+          updateSessionBatchBar();
         });
-      };
+      }
+
       var copyBtn = tile.querySelector('.sess-copy-btn');
       copyBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
       copyBtn.addEventListener('click', function (e) {
@@ -1912,7 +2005,7 @@
       });
 
       tile.onclick = function (e) {
-        if (e.target.closest('.sess-x') || e.target.closest('.sess-copy-btn')) return;
+        if (e.target.closest('.sess-x') || e.target.closest('.sess-copy-btn') || e.target.closest('.sess-checkbox')) return;
         openOrFocusShellWindow(s.name || '', s.id, e, dead ? { readOnly: true } : null);
       };
       if (!dead) {
@@ -1925,6 +2018,11 @@
       }
       grid.appendChild(tile);
     });
+    var liveIds = new Set(all.map(function(s) { return s.id; }));
+    _selectedSessionIds.forEach(function(id) {
+      if (!liveIds.has(id)) _selectedSessionIds.delete(id);
+    });
+    updateSessionBatchBar();
   }
 
   /** Convert a live terminal window to read-only when its session becomes DEAD:
@@ -2389,40 +2487,95 @@
     var handle = win.querySelector('.shell-window-resize-handle');
     if (!handle) return;
     win._termcpShellResizeBound = true;
-    var resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
-    function onMove(e) {
-      if (!resizing) return;
-      var w = Math.max(320, startW + e.clientX - startX);
-      var h = Math.max(240, startH + e.clientY - startY);
-      win.style.width = w + 'px';
-      win.style.height = h + 'px';
-      var ch = win._activeChannelSid && win._channels && win._channels[win._activeChannelSid];
-      if (ch && ch.term && ch.instEl) fitShellTerminal(ch.term, ch.instEl, win, false);
-      else if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, false);
+    var resizing = false, pointerId = null;
+    var startX = 0, startY = 0, startW = 0, startH = 0;
+    var pendingW = 0, pendingH = 0, frame = 0;
+
+    function activeChannel() {
+      return (win._activeChannelSid && win._channels && win._channels[win._activeChannelSid]) || null;
     }
-    function onUp() {
+    function fitActiveChannel(syncRemote) {
+      var ch = activeChannel();
+      if (ch && ch.term && ch.instEl) return fitShellTerminal(ch.term, ch.instEl, win, syncRemote);
+      if (win._term && win._shellTermEl) return fitShellTerminal(win._term, win._shellTermEl, win, syncRemote);
+      return false;
+    }
+    function applyPending(syncRemote) {
+      if (pendingW > 0 && pendingH > 0) {
+        win.style.width = pendingW + 'px';
+        win.style.height = pendingH + 'px';
+        /* Measure after the new size is committed, not the previous layout. */
+        void win.offsetHeight;
+      }
+      fitActiveChannel(syncRemote);
+    }
+    function scheduleApply() {
+      if (frame) return;
+      frame = window.requestAnimationFrame(function () {
+        frame = 0;
+        if (resizing) applyPending(false);
+      });
+    }
+    function onMove(e) {
+      if (!resizing || e.pointerId !== pointerId) return;
+      e.preventDefault();
+      pendingW = Math.max(320, startW + e.clientX - startX);
+      pendingH = Math.max(240, startH + e.clientY - startY);
+      scheduleApply();
+    }
+    function finish() {
       if (!resizing) return;
       resizing = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      /* Drop any drag-time sync first; the final fit below schedules one
+         remote resize for the actual released dimensions. */
       if (win._shellResizeSyncTimer) {
         clearRetryTimer(win._shellResizeSyncTimer);
         win._shellResizeSyncTimer = null;
       }
-      if (win._term && win._shellTermEl) fitShellTerminal(win._term, win._shellTermEl, win, true);
+      applyPending(true);
+      if (pointerId !== null && handle.hasPointerCapture && handle.hasPointerCapture(pointerId)) {
+        try { handle.releasePointerCapture(pointerId); } catch (e) {}
+      }
+      pointerId = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      win.classList.remove('shell-window-resizing');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('blur', finish);
     }
-    handle.addEventListener('mousedown', function (e) {
+    function onUp(e) {
+      if (!resizing || e.pointerId !== pointerId) return;
+      finish();
+    }
+    handle.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
-      resizing = true;
-      startX = e.clientX; startY = e.clientY;
+      e.stopPropagation();
+      bringShellWindowToFront(win);
       var rect = win.getBoundingClientRect();
+      resizing = true;
+      pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY;
       startW = rect.width; startH = rect.height;
+      pendingW = startW; pendingH = startH;
       document.body.style.cursor = 'nwse-resize';
       document.body.style.userSelect = 'none';
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      win.classList.add('shell-window-resizing');
+      if (handle.setPointerCapture) {
+        try { handle.setPointerCapture(pointerId); } catch (e2) {}
+      }
+      /* Pointer capture keeps the drag alive outside the handle; blur and
+         pointercancel clean up when the browser loses the pointer instead. */
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', finish);
+      window.addEventListener('blur', finish);
     });
   }
 
@@ -4295,39 +4448,103 @@ SHELL_WINDOW_PANELS_HTML +
     loadConnections();
     startUIWebSocket();
   };
+  // Session selection toolbar actions
   document.getElementById('btn-clear-dead').onclick = function (e) {
     e.stopPropagation();
-    var dead = (window._lastSessionsSnapshot || []).filter(function(s) { return s && s.status !== 'running'; });
-    if (!dead.length) { showCopyToast('No dead sessions'); return; }
+    var dead = (window._lastSessionsSnapshot || []).filter(function (s) { return s && s.id && s.status !== 'running'; });
+    if (!dead.length) { showCopyToast('No dead sessions to clear'); return; }
     confirmDialog({
       title: 'Clear dead sessions',
-      message: 'Permanently delete ' + dead.length + ' exited (DEAD) session' + (dead.length === 1 ? '' : 's') + '? This cannot be undone.',
-      okText: 'Clear all',
+      message: 'Permanently delete ' + dead.length + ' dead session' + (dead.length === 1 ? '' : 's') + '? This cannot be undone.',
+      okText: 'Clear (' + dead.length + ')',
       danger: true
     }).then(function (ok) {
       if (!ok) return;
       var banner = document.getElementById('session-load-banner');
-      if (banner) setLoadBanner(banner, 'Clearing dead sessions…');
-      // Delete sequentially: Manager.Delete persists the registry on each call,
-      // so this avoids overlapping writes to sessions.json. Only retained DEAD
-      // tiles in the current snapshot are touched; history-only archives remain.
-      return dead.reduce(function(p, s) {
-        return p.then(function() {
+      if (banner) setLoadBanner(banner, 'Clearing ' + dead.length + ' dead sessions\u2026');
+      return dead.reduce(function (p, s) {
+        return p.then(function () {
           return fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
-            .then(function(r) {
-              if (r.ok || r.status === 204 || r.status === 404) return;
-              return r.text().then(function(t) { throw new Error(t || ('HTTP ' + r.status)); });
+            .then(function (r) {
+              if (r.ok || r.status === 204 || r.status === 404) {
+                var w = getShellWindowBySid(s.id);
+                if (w) closeShellWindow(w);
+                _selectedSessionIds.delete(s.id);
+                return;
+              }
+              return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
             });
         });
-      }, Promise.resolve()).then(function() {
+      }, Promise.resolve()).then(function () {
         if (banner) setLoadBanner(banner, '');
+        showCopyToast('Cleared ' + dead.length + ' dead session' + (dead.length === 1 ? '' : 's'));
         loadForwards();
         startUIWebSocket();
-      }).catch(function(err) {
+        renderSessionGrid(window._lastSessionsSnapshot || [], '');
+      }).catch(function (err) {
         if (banner) setLoadBanner(banner, 'Clear failed: ' + String(err.message || err));
+        renderSessionGrid(window._lastSessionsSnapshot || [], '');
       });
     });
   };
+
+  // Select-all / clear-selection button
+  var btnSelAll = document.getElementById('batch-sel-all');
+  if (btnSelAll) {
+    btnSelAll.onclick = function (e) {
+      e.stopPropagation();
+      var snapshot = (window._lastSessionsSnapshot || []).filter(function (s) { return s && s.id; });
+      var allSelected = snapshot.length > 0 && snapshot.every(function (s) { return _selectedSessionIds.has(s.id); });
+      if (allSelected) snapshot.forEach(function (s) { _selectedSessionIds.delete(s.id); });
+      else snapshot.forEach(function (s) { _selectedSessionIds.add(s.id); });
+      renderSessionGrid(window._lastSessionsSnapshot || [], '');
+    };
+  }
+  var btnBatchDel = document.getElementById('batch-del-btn');
+  if (btnBatchDel) {
+    btnBatchDel.onclick = function () {
+      var snapshot = window._lastSessionsSnapshot || [];
+      var targets = snapshot.filter(function (s) { return s && s.id && _selectedSessionIds.has(s.id); });
+      if (!targets.length) {
+        showCopyToast('No sessions selected');
+        return;
+      }
+      var msg = 'Permanently delete ' + targets.length + ' selected session' + (targets.length === 1 ? '' : 's') + '? This cannot be undone.';
+      confirmDialog({
+        title: 'Delete selected sessions',
+        message: msg,
+        okText: 'Delete (' + targets.length + ')',
+        danger: true
+      }).then(function (ok) {
+        if (!ok) return;
+        var banner = document.getElementById('session-load-banner');
+        if (banner) setLoadBanner(banner, 'Deleting ' + targets.length + ' sessions…');
+        return targets.reduce(function (p, s) {
+          return p.then(function () {
+            return fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
+              .then(function (r) {
+                if (r.ok || r.status === 204 || r.status === 404) {
+                  var w = getShellWindowBySid(s.id);
+                  if (w) closeShellWindow(w);
+                  _selectedSessionIds.delete(s.id);
+                  return;
+                }
+                return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+              });
+          });
+        }, Promise.resolve()).then(function () {
+          if (banner) setLoadBanner(banner, '');
+          showCopyToast('Deleted ' + targets.length + ' session' + (targets.length === 1 ? '' : 's'));
+          loadForwards();
+          startUIWebSocket();
+          renderSessionGrid(window._lastSessionsSnapshot || [], '');
+        }).catch(function (err) {
+          if (banner) setLoadBanner(banner, 'Delete failed: ' + String(err.message || err));
+          renderSessionGrid(window._lastSessionsSnapshot || [], '');
+        });
+      });
+    };
+  }
   // Delegated click handler for forward delete buttons (bound once, survives innerHTML refresh).
   (function() {
     var fwList = document.getElementById('tools-fw-list-items');

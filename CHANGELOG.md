@@ -12,6 +12,9 @@
 
 ### 改进
 
+- **修复已退出/恢复会话调用文件及转发工具导致 Panic 的问题**：当对已退出（DEAD）或重启后从磁盘恢复的无活跃 SSH 连接的会话调用 `file_write`/`file_read` 等 SFTP 工具或端口转发工具时，`sftpClient` 与端口转发函数补充了 `SSHClient == nil` 的防御性校验，返回规范的 MCP 工具错误，避免了 `pkg/sftp.NewClient(nil)` 空指针解引用崩溃；同时在 `internal/sftp.NewClient` 与 Web UI 文件 API 中增加了对空连接的防守。
+- **Web UI 窗口拖拽 resize 体验与 PTY 尺寸同步**：增大拖动手柄触发面积至 30×30px 并提升 z-index 防止被右下角滚动浮标遮挡；改用 Pointer Capture 杜绝甩出窗口时的鼠标丢帧；rAF 节流配合强制重排消除拖动滞后；修复松开鼠标（`onUp`）时活动 shell 通道未派发远程 PTY 尺寸同步的问题。
+- **Web UI Sessions 列表批量选择与删除**：标题栏常驻三个纯图标按钮——全选/取消全选（复选框两态图标）、红色垃圾桶批量删除选中（无选中时置灰，气泡提示选中数量）、扫帚一键清理已退出 Dead 会话（弹窗确认后顺序批量删除）；标题栏左侧在选中数 N>0 时实时显示 `[N selected]`。卡片右上角叉号始终可单删；右下角复选框常驻，点击（`stopPropagation`）切换选中态，卡片主体点按仍打开/聚焦终端；选中卡片显示蓝色描边。动态刷新保留已选集合并与全选状态、计数双向联动。
 - **引导 Agent 偏好长连接交互会话**：精简 instructions 第 2 条明确指出推荐单个交互会话（保持 cwd/env/审计历史），澄清 `shell_output` 返回的是新增字节（读空 ≠ 没输出，需继续轮询），警告 `session_start` 的 `command/args` 是 run-and-exit 单次程序，不应用于多次分拆 `bash -c`。
 - **归档默认读取不再全量倾倒**：无 `offset`/`tail_lines` 的归档读取默认返回末尾最近一块（≤8 KiB，行对齐），配合 `has_more`/`end_offset` 翻页；`max_bytes` 缺省 8192 与 schema 一致（显式 `0` 仍表示不限）。
 - **SSH 连接失败可见性**：会话创建失败（如 `ssh dial` 超时/拒绝）现在在 termcp 终端打出 `[ERROR] session create failed`（含目标地址、超时、模式，不含凭据）；MCP 工具错误结果从 Debug 升级为 `[WARN]` 并附带错误预览；Web UI "测试连接"失败同步打 `[WARN]`。连接类错误（超时/拒绝/不可达/重置）自动追加 `Hint:` 诊断提示，MCP 工具结果与 Web UI 响应同样携带。
