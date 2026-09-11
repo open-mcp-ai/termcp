@@ -858,3 +858,39 @@ func TestAppendEnter(t *testing.T) {
 		t.Fatalf("empty unix: expected %q, got %q", "\n", got)
 	}
 }
+
+func TestManager_TerminateListenersCompose(t *testing.T) {
+	srv := startTestServer(t)
+	command, args := testSleepCommand("60")
+	m := NewManager(nil, nil, srv)
+
+	var mu sync.Mutex
+	fired := map[string]int{}
+
+	// Set replaces; Add appends. Both must fire exactly once on Delete, so
+	// independent subsystems (forwards and notifications) can coexist.
+	m.SetTerminateListener(func(string) {
+		mu.Lock()
+		fired["forward"]++
+		mu.Unlock()
+	})
+	m.AddTerminateListener(func(string) {
+		mu.Lock()
+		fired["notify"]++
+		mu.Unlock()
+	})
+
+	s, err := m.Create(testConfig(command, args, api.ModePipe, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(s.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if fired["forward"] != 1 || fired["notify"] != 1 {
+		t.Fatalf("expected both listeners once, got %v", fired)
+	}
+}

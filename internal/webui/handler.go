@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-mcp-ai/termcp/internal/forward"
 	"github.com/open-mcp-ai/termcp/internal/history"
+	"github.com/open-mcp-ai/termcp/internal/notify"
 	"github.com/open-mcp-ai/termcp/internal/screenshot"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
@@ -45,7 +46,8 @@ type Handler struct {
 	History    *history.Manager
 	SSH        *sshconfig.Store
 	ForwardMgr *forward.ForwardManager
-	NoInternal bool // when true, hide and refuse the built-in loopback profile
+	NotifyMgr  *notify.Manager // active shell notification rules (read-only listing + delete)
+	NoInternal bool            // when true, hide and refuse the built-in loopback profile
 
 	sessHub *sessionListHub
 }
@@ -58,6 +60,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 	if h.ForwardMgr != nil {
 		h.ForwardMgr.SetOnChange(h.sessionHub().broadcast)
+	}
+	if h.NotifyMgr != nil {
+		h.NotifyMgr.SetOnChange(h.sessionHub().broadcast)
 	}
 	if h.SSH != nil {
 		h.SSH.SetOnChange(h.sessionHub().broadcast)
@@ -102,6 +107,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Session-scoped forwards
 	mux.HandleFunc("GET /api/sessions/{id}/forwards", h.handleListSessionForwards)
 	mux.HandleFunc("POST /api/sessions/{id}/forwards", h.handleCreateForward)
+
+	// Shell notification rules (registered by the MCP shell_notify tool; the UI
+	// lists them and can unregister).
+	mux.HandleFunc("GET /api/notifications", h.handleListNotifications)
+	mux.HandleFunc("DELETE /api/notifications/{id}", h.handleDeleteNotification)
 
 	// File operations
 	mux.HandleFunc("GET /api/sessions/{id}/files", h.handleListFiles)
@@ -943,6 +953,48 @@ func (h *Handler) handleListForwards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"forwards": h.ForwardMgr.List()})
+}
+
+// handleListNotifications returns active shell notification rules, optionally
+// filtered by shell_id and/or session_id query parameters.
+func (h *Handler) handleListNotifications(w http.ResponseWriter, r *http.Request) {
+	if h.NotifyMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"notifications": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	rules := h.NotifyMgr.List(q.Get("shell_id"))
+	if sessionID := q.Get("session_id"); sessionID != "" {
+		filtered := make([]notify.RuleView, 0, len(rules))
+		for _, rule := range rules {
+			if rule.SessionID == sessionID {
+				filtered = append(filtered, rule)
+			}
+		}
+		rules = filtered
+	}
+	if rules == nil {
+		rules = []notify.RuleView{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notifications": rules})
+}
+
+// handleDeleteNotification unregisters one notification rule by id.
+func (h *Handler) handleDeleteNotification(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "notification rule id required"})
+		return
+	}
+	if h.NotifyMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "notification manager not available"})
+		return
+	}
+	if !h.NotifyMgr.Unregister(id) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "notification rule not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rule_id": id})
 }
 
 func (h *Handler) handleDeleteForward(w http.ResponseWriter, r *http.Request) {

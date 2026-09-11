@@ -169,7 +169,7 @@ func main() {
 	mainSrv := &http.Server{Addr: addr, Handler: mux}
 
 	forwardMgr := forward.NewForwardManager()
-	sessMgr.SetTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
+	sessMgr.AddTerminateListener(func(sessionID string) { forwardMgr.CloseBySession(sessionID) })
 
 	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, mcpserver.WithHTTPServer(mainSrv))
 	mcpSrv.SetHistory(historyMgr)
@@ -180,7 +180,7 @@ func main() {
 	mux.Handle("GET /sse", mcpSrv.SSEHandler())
 	mux.Handle("POST /message", mcpSrv.MessageHandler())
 	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
-	(&webui.Handler{Sessions: sessMgr, History: historyMgr, SSH: sshStore, ForwardMgr: forwardMgr, NoInternal: cfg.NoInternal}).Register(mux)
+	(&webui.Handler{Sessions: sessMgr, History: historyMgr, SSH: sshStore, ForwardMgr: forwardMgr, NotifyMgr: mcpSrv.NotifyManager(), NoInternal: cfg.NoInternal}).Register(mux)
 
 	host := strings.TrimSpace(cfg.Host)
 	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)

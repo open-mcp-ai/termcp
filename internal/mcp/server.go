@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/open-mcp-ai/termcp/internal/forward"
 	"github.com/open-mcp-ai/termcp/internal/history"
 	"github.com/open-mcp-ai/termcp/internal/message"
+	"github.com/open-mcp-ai/termcp/internal/notify"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sshconfig"
 )
@@ -30,7 +32,8 @@ const mcpServerInstructions = `termcp agent rules:
 4) Lifecycle: session_terminate closes shells+forwards and archives; archived output is read with shell_output (same cursor semantics as live, use tail_lines/offset); history(action=screenshot) renders archived output as PNG; history(action=purge) deletes it. force=true = immediate kill. shell_close closes one channel.
 5) Password/sudo/passphrase/MFA prompt: stop and ask user to type it in termcp Web UI. Never guess, paste, or echo secrets.
 6) Other keys use JSON \u001b escapes in shell_input. Repeating traceback → session_terminate, retry with PYTHON_BASIC_REPL=1. Silent hang → session_info.
-7) forward(action=local/remote/dynamic) = ssh -L/-R/-D, all take session_id. ssh_config(action=list) only returns names; never expose credentials.`
+7) forward(action=local/remote/dynamic) = ssh -L/-R/-D, all take session_id. ssh_config(action=list) only returns names; never expose credentials.
+8) Non-blocking notifications: shell_notify(action=register, shell_id, channel="resource"|"sampling", event="output"|"exit"|"silence") receives asynchronous wake-ups (signaling only, no payload); poll output via shell_output when awakened.`
 
 // Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
 type Server struct {
@@ -42,14 +45,58 @@ type Server struct {
 	historyMgr      *history.Manager
 	sshConfigs      *sshconfig.Store
 	forwardMgr      *forward.ForwardManager
+	notifyMgr       *notify.Manager
 	baseURL         string // http://host:port, set from Start()
 	NoInternal      bool   // when true, hide and refuse the built-in loopback profile
 	sshConfigWrites bool   // expose write actions on the unified ssh_config tool
 }
 
+// SendResourceNotification broadcasts an MCP resource update event.
+func (s *Server) SendResourceNotification(ctx context.Context, shellID string) error {
+	uri := fmt.Sprintf("termcp://shells/%s", shellID)
+	s.mcpServer.SendNotificationToAllClients("notifications/resources/updated", map[string]any{
+		"uri": uri,
+	})
+	return nil
+}
+
+// SendSamplingNotification issues an MCP sampling/createMessage request to the
+// client session that registered the rule, waking the AI. target is the opaque
+// handle captured by shell_notify(action=register); notifications are dispatched
+// from timer/exit goroutines, so the client session cannot be recovered from the
+// dispatch context and must be carried on the rule.
+func (s *Server) SendSamplingNotification(ctx context.Context, shellID string, target any, event notify.Event, status string) error {
+	sess, ok := target.(mcpserver.SessionWithSampling)
+	if !ok || sess == nil {
+		return fmt.Errorf("no sampling-capable client session for shell %q", shellID)
+	}
+	prompt := fmt.Sprintf("[termcp reminder] Shell '%s' emitted event '%s' (status: %s). Inspect output via shell_output if needed.", shellID, event, status)
+	req := mcpgo.CreateMessageRequest{
+		CreateMessageParams: mcpgo.CreateMessageParams{
+			SystemPrompt: "termcp notification daemon",
+			Messages: []mcpgo.SamplingMessage{
+				{
+					Role:    mcpgo.RoleUser,
+					Content: mcpgo.NewTextContent(prompt),
+				},
+			},
+			MaxTokens: 50,
+		},
+	}
+	_, err := sess.RequestSampling(ctx, req)
+	return err
+}
+
 // SetHistory attaches the archived-session history manager (list/transcript/search/purge tools).
 func (s *Server) SetHistory(h *history.Manager) {
 	s.historyMgr = h
+}
+
+// NotifyManager exposes the shell notification rule manager so other subsystems
+// (e.g. the Web UI) can list and unregister rules. May return nil in tests that
+// construct a bare Server.
+func (s *Server) NotifyManager() *notify.Manager {
+	return s.notifyMgr
 }
 
 // New creates and configures the MCP server with all tools registered.
@@ -65,7 +112,16 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 
 	mcpServer := mcpserver.NewMCPServer("termcp", "0.0.4",
 		mcpserver.WithInstructions(mcpServerInstructions),
+		mcpserver.WithResourceCapabilities(true, true),
 	)
+
+	s.notifyMgr = notify.NewManager(s)
+	if sessMgr != nil {
+		sessMgr.SetNotifyHooks(s.notifyMgr.OnOutput, s.notifyMgr.OnExit, s.notifyMgr.ClearShell)
+		sessMgr.AddTerminateListener(func(sessionID string) {
+			s.notifyMgr.ClearSession(sessionID)
+		})
+	}
 	mcpServer.AddTool(newTool("session_start",
 		mcpgo.WithDescription("Start a session (connection container) plus its primary shell. ssh_config \"internal\" (default) = termcp host loopback; otherwise a remote profile name. Empty command/args = login shell / profile defaults. WARNING: command/args = single run-and-exit program; for multi-step or stateful work omit them and drive an interactive shell instead. Returns session_id and shell_id."),
 		mcpgo.WithString("command", mcpgo.Description("Executable line; empty with no args = login shell / profile default_shell")),
@@ -185,6 +241,16 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 		mcpgo.WithString("shell_id", mcpgo.Required()),
 		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Non-zero reader id from shell_reader_register")),
 	), withLogging("shell_reader_unregister", s.handleUnregisterReader))
+
+	mcpServer.AddTool(newTool("shell_notify",
+		mcpgo.WithDescription("Manage event notifications (reverse wake-up signal) for a shell channel: action=register sets a rule on channel resource or sampling; action=unregister removes by rule_id; action=list returns active rules."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("register", "unregister", "list")),
+		mcpgo.WithString("shell_id", mcpgo.Description("Target shell_id (required for register; optional filter for list)")),
+		mcpgo.WithString("channel", mcpgo.Description("Delivery channel (required for register): resource (MCP notifications/resources/updated) or sampling (MCP sampling/createMessage)"), mcpgo.Enum("resource", "sampling")),
+		mcpgo.WithString("event", mcpgo.Description("Trigger event (register only): output (default, dual-edge: immediate + 2s trailing delay), exit (one-shot on exit/abort), silence (one-shot after N sec without output)"), mcpgo.DefaultString("output"), mcpgo.Enum("exit", "silence", "output")),
+		mcpgo.WithNumber("silence_seconds", mcpgo.Description("Silence window in seconds for event=silence (default 3)"), mcpgo.DefaultNumber(3)),
+		mcpgo.WithString("rule_id", mcpgo.Description("Rule identifier (required for unregister)")),
+	), withLogging("shell_notify", s.handleShellNotifyOps))
 
 	// --- Port forwarding: one entry, action selects mode (OpenSSH names) ---
 	mcpServer.AddTool(newTool("forward",

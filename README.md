@@ -84,6 +84,7 @@ In these scenarios the process keeps running, and the Agent must **read and writ
 - **🟧 Built-in visual UI** — Access live terminals, session lists, and output-history replay straight from a browser. Served from a single port, no extra deployment needed.
 - **🟨 Multiple Agents, no conflicts** — Multiple Agents can read the same session simultaneously, each maintaining its own independent cursor, with no output stealing.
 - **🟩 Remote operations, all integrated** — Command execution, file transfer, and port forwarding all over a single SSH connection, with no need to re-establish connections.
+- **🟥 Event notifications (reverse wake-up)** — With `shell_notify`, termcp proactively wakes the Agent on process exit / output going quiet / new output (signal only, no payload), so polling is unnecessary; the Web UI lists and can remove active rules.
 
 ## Quick Start
 

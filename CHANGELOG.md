@@ -10,6 +10,10 @@
 - **删除 9 个低频文件工具**：`file_chmod` / `file_chown` / `file_chtimes` / `file_readlink` / `file_symlink` / `file_link` / `file_truncate` / `file_realpath` / `file_statvfs` → `file_perm` / `file_link` / `file_fs`（各带 `action` 枚举）。
 - **工具总数 保持 29**：`history(action=get_transcript)` 移除，`shell_output` 新增 `offset`/`tail_lines` 两参数，`tools/list` 13,585 B → 13,803 B（+1.6%）。
 
+### 新功能
+
+- **反向唤醒通知 `shell_notify`**（信令与数据分离）：新增 `internal/notify` 统一通知内核，支持 `event=output`（双沿触发：立即 + 2s 尾沿兜底）/`exit`（一次性，进程退出/SSH 中断）/`silence`（N 秒无输出，一次性）；双通道 `resource`（广播 `notifications/resources/updated`，uri `termcp://shells/<id>`）与 `sampling`（向**注册规则的客户端 session** 发送 `sampling/createMessage`，systemPrompt `termcp notification daemon`）；全局 1s 冷却阀防刷屏；`register`/`unregister`/`list` 三个 action，shell 退出/关闭/会话删除自动级联反注册（零协程/定时器泄漏）。MCP 层用 `AddTerminateListener` 与 forward 清理共存（不再互相覆盖）；sampling 在注册时捕获 `ClientSession`，解决定时器 goroutine 中无 session 导致发送失败的问题。Web UI 终端窗口新增 **Notifications 标签页**：实时列出该会话已注册的通知规则（event/channel/silence 秒数），可一键拆除；新增 `GET /api/notifications`（支持 `shell_id`/`session_id` 过滤）与 `DELETE /api/notifications/{id}`，规则变更经 `notify.Manager` 回调广播实时刷新。文档：`docs/mcp-tools.md` 新增 `shell_notify` 章节，README 特性表补充。
+
 ### 改进
 
 - **修复快速命令输出被截断**：SSH 会话在进程退出时立即上报 exit-status，此时末尾 stdout 可能仍在通道缓冲中未读，而旧的读取循环一看到进程退出就停止、随后立刻封存缓冲，导致 `echo`/`ls` 之类快速命令丢失最后几行。现在读取循环以通道 EOF 为准持续读取，封存缓冲前先等待该 shell 的输出管道排空（带超时兜底）。

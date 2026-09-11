@@ -236,6 +236,46 @@ ssh_config(action=list)
 | `shell_id` | string | **是** | |
 | `reader_id` | number | **是** | 非零 reader id（来自 `shell_reader_register`） |
 
+### shell_notify
+
+为某个 shell 注册**反向唤醒通知**：termcp 在事件发生时主动发一个“醒来”信号，Agent 收到后再用 `shell_output` 拉取输出（通知**只带信令、不带终端内容**，避免污染上下文）。
+
+`action` 三选一：
+
+| action | 参数 | 说明 |
+|--------|------|------|
+| `register` | `shell_id`（必填）、`channel`（必填）、`event`（可选，默认 `output`）、`silence_seconds`（可选，默认 3，仅 `silence` 生效，范围 1–300） | 新增规则，返回 `{ ok, rule_id, shell_id, channel, event }` |
+| `unregister` | `rule_id`（必填） | 删除规则，返回 `{ ok, rule_id }`；规则不存在时 `error_code=rule_not_found` |
+| `list` | `shell_id`（可选，过滤） | 返回 `{ rules: [...] }`，每条含 `rule_id`/`session_id`/`shell_id`/`channel`/`event`/`created_at` |
+
+`channel`（下发通道）：
+
+- `resource`：广播 MCP `notifications/resources/updated`，资源 uri = `termcp://shells/<shell_id>`。
+- `sampling`：向注册该规则的 MCP 客户端发 `sampling/createMessage`（systemPrompt `termcp notification daemon`），直接唤起模型。
+
+`event`（触发时机）：
+
+| event | 触发 | 行为 |
+|-------|------|------|
+| `output`（默认） | 终端产生新输出 | **双沿**：立即发一次；输出停止 2s 后再兼底一次 |
+| `exit` | 进程退出 / SSH 断开 | **一次性**：发一次后自动注销 |
+| `silence` | 输出停止 N 秒（`silence_seconds`） | **一次性**：发一次后自动注销 |
+
+**流控与生命周期**：所有下发共享一个全局 **1s 冷却阀**（防止风暴/刷屏）；shell 退出/`shell_close`/会话 `session_terminate` 或 `Delete` 时，该 shell/session 的规则**自动级联清理**，无定时器/协程泄漏。
+
+**典型用法**（长任务编译）：
+
+```jsonc
+// 1) 编译命令跑起来后，注册退出通知
+{ "action": "register", "shell_id": "<shell_id>", "channel": "sampling", "event": "exit" }
+// → { "ok": true, "rule_id": "notif_...", "...": "..." }
+
+// 2) 等 termcp 主动唤醒（通知不带内容），再用 shell_output 拉取结果
+{ "shell_id": "<shell_id>", "timeout": 0 }
+```
+
+> 进程还活但只是“输出停了”，用 `event="silence", silence_seconds=10`；需要持续跟踪输出变化用 `event="output"`。
+
 ---
 
 ## 服务端发现与配置

@@ -12,9 +12,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/open-mcp-ai/termcp/internal/ansi"
+	"github.com/open-mcp-ai/termcp/internal/notify"
 	"github.com/open-mcp-ai/termcp/internal/session"
 	"github.com/open-mcp-ai/termcp/internal/sftp"
 	"github.com/open-mcp-ai/termcp/internal/shell"
@@ -221,7 +223,7 @@ func (s *Server) handleStartSession(_ context.Context, request mcpgo.CallToolReq
 		Remote:  remote,
 	})
 	if err != nil {
-		return toolError(CodeOperationFailed, "%s", sshclient.DescribeDialError(err)), nil
+		return toolError(CodeConnectionFailed, "%s", sshclient.DescribeDialError(err)), nil
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -1384,6 +1386,92 @@ func (s *Server) handleFileGetwd(_ context.Context, request mcpgo.CallToolReques
 		return toolError(CodeOperationFailed, "%s", err.Error()), nil
 	}
 	return jsonResult(map[string]any{"directory": dir}), nil
+}
+
+// handleShellNotifyOps dispatches register, unregister, and list actions on shell_notify.
+func (s *Server) handleShellNotifyOps(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	if s.notifyMgr == nil {
+		return toolError(CodeNotConfigured, "%s", "notification manager not initialized"), nil
+	}
+	args := request.GetArguments()
+	action := strings.TrimSpace(getString(args, "action", ""))
+
+	switch action {
+	case "register":
+		shellID := strings.TrimSpace(getString(args, "shell_id", ""))
+		if shellID == "" {
+			return toolError(CodeInvalidArgument, "%s", "shell_id is required for register"), nil
+		}
+		// Validate that the shell exists in running sessions
+		shell, bad := s.requireShell(shellID)
+		if bad != nil {
+			return bad, nil
+		}
+
+		channelStr := strings.TrimSpace(getString(args, "channel", ""))
+		var channel notify.Channel
+		switch channelStr {
+		case "resource":
+			channel = notify.ChannelResource
+		case "sampling":
+			channel = notify.ChannelSampling
+		default:
+			return toolError(CodeInvalidArgument, "%s", "channel must be resource or sampling"), nil
+		}
+
+		eventStr := strings.TrimSpace(getString(args, "event", "output"))
+		var event notify.Event
+		switch eventStr {
+		case "exit":
+			event = notify.EventExit
+		case "silence":
+			event = notify.EventSilence
+		case "output":
+			event = notify.EventOutput
+		default:
+			return toolError(CodeInvalidArgument, "%s", "event must be exit, silence, or output"), nil
+		}
+
+		silenceSec := int(getFloat64(args, "silence_seconds", 3))
+		if silenceSec <= 0 {
+			silenceSec = 3
+		}
+
+		sessionID := shell.ParentSessionID()
+		// Capture the MCP client session that registered this rule so sampling
+		// notifications can be delivered later from timer/exit goroutines, where
+		// the dispatch context no longer carries the client session.
+		target := mcpserver.ClientSessionFromContext(ctx)
+		rule, err := s.notifyMgr.Register(sessionID, shellID, channel, event, silenceSec, target)
+		if err != nil {
+			return toolError(CodeOperationFailed, "%s", err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"ok":       true,
+			"rule_id":  rule.ID,
+			"shell_id": rule.ShellID,
+			"channel":  string(rule.Channel),
+			"event":    string(rule.Event),
+		}), nil
+
+	case "unregister":
+		ruleID := strings.TrimSpace(getString(args, "rule_id", ""))
+		if ruleID == "" {
+			return toolError(CodeInvalidArgument, "%s", "rule_id is required for unregister"), nil
+		}
+		if !s.notifyMgr.Unregister(ruleID) {
+			return toolError(CodeRuleNotFound, "%s", fmt.Sprintf("rule %q not found", ruleID)), nil
+		}
+		return jsonResult(map[string]any{"ok": true, "rule_id": ruleID}), nil
+
+	case "list":
+		shellID := strings.TrimSpace(getString(args, "shell_id", ""))
+		rules := s.notifyMgr.List(shellID)
+		return jsonResult(map[string]any{"rules": rules}), nil
+
+	default:
+		return toolError(CodeInvalidArgument, "%s", "action must be register, unregister, or list"), nil
+	}
 }
 
 // toMap converts a struct to map[string]any via JSON round-trip.

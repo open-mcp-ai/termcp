@@ -78,8 +78,11 @@ type Session struct {
 	msgMgr         *message.Manager
 	onDead         atomic.Pointer[func()] // invoked once when the session turns DEAD; assigned by the manager right after New(), while exit watchers may already be reading
 	onChildChange  atomic.Pointer[func()] // invoked when child shells are added/removed; assigned under the same constraint
-	enterCRLF      bool                   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
-	primaryShellID string                 // first shell id (≠ session id); used for legacy Session-level helpers
+	onOutput       atomic.Pointer[func(shellID string)]
+	onShellExit    atomic.Pointer[func(shellID string, exitCode *int)]
+	onShellClose   atomic.Pointer[func(shellID string)]
+	enterCRLF      bool   // line-ending for pipe-mode enter (\r\n for cmd/powershell, \n for unix)
+	primaryShellID string // first shell id (≠ session id); used for legacy Session-level helpers
 
 	shells sync.Map // *ChildShell by ID
 	// shellHistory retains the last-known per-shell metadata (id, name, status)
@@ -748,6 +751,16 @@ type ChildShell struct {
 	closed atomic.Bool
 }
 
+// ParentSessionID returns the parent Session ID for this child shell.
+func (cs *ChildShell) ParentSessionID() string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	if cs.parent != nil {
+		return cs.parent.ID
+	}
+	return ""
+}
+
 // Info returns a snapshot of the child shell's public metadata.
 func (cs *ChildShell) Info() api.Session {
 	cs.mu.RLock()
@@ -974,8 +987,13 @@ func (cs *ChildShell) pipeToBuffer(r io.Reader) {
 				// MCP read alike) leaves a transcript — regardless of which reader
 				// consumes it. Never double-recorded because each write fires once.
 				// Tagged with the originating shell so archived history can split tabs.
-				if p := cs.parent; p != nil && p.msgMgr != nil {
-					p.msgMgr.AppendShell(p.ID, cs.ID, api.MsgOutput, string(buf[:n]))
+				if p := cs.parent; p != nil {
+					if fn := p.onOutput.Load(); fn != nil {
+						(*fn)(cs.ID)
+					}
+					if p.msgMgr != nil {
+						p.msgMgr.AppendShell(p.ID, cs.ID, api.MsgOutput, string(buf[:n]))
+					}
 				}
 			}
 			if err != nil {
@@ -1036,6 +1054,9 @@ func (s *Session) notifyChildChange() {
 
 // removeChildShell deletes a shell from the parent's map and triggers UI notification.
 func (s *Session) removeChildShell(id string) {
+	if fn := s.onShellClose.Load(); fn != nil {
+		(*fn)(id)
+	}
 	s.shells.Delete(id)
 	s.notifyChildChange()
 }
@@ -1089,6 +1110,9 @@ func (cs *ChildShell) startReaders() {
 		// This preserves its closed buffer so shell_output and WebUI can drain
 		// final output after a fast pipe command has already exited.
 		if p := cs.parent; p != nil {
+			if fn := p.onShellExit.Load(); fn != nil {
+				(*fn)(cs.ID, cs.ExitCode)
+			}
 			p.notifyChildChange()
 		}
 		// If the shell ended due to SSH disconnect (not deliberate close and not

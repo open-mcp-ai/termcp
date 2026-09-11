@@ -13,8 +13,8 @@ func TestTokenBudgetGuard(t *testing.T) {
 	s.RegisterSSHConfigWriteTools()
 
 	tools := s.mcpServer.ListTools()
-	if len(tools) != 29 {
-		t.Fatalf("expected 29 tools, got %d", len(tools))
+	if len(tools) != 30 {
+		t.Fatalf("expected 30 tools, got %d", len(tools))
 	}
 
 	total := 0
@@ -55,7 +55,7 @@ func TestTokenBudgetGuard(t *testing.T) {
 	if propDescBytes > 4000 {
 		t.Errorf("property descriptions %d B exceeds 4000 B budget", propDescBytes)
 	}
-	if instructionsLen > 2000 {
-		t.Errorf("instructions %d B exceeds 2000 B budget", instructionsLen)
+	if instructionsLen > 2400 {
+		t.Errorf("instructions %d B exceeds 2400 B budget", instructionsLen)
 	}
 }
