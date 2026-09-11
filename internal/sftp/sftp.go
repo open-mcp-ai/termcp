@@ -28,11 +28,11 @@ type FileResult struct {
 
 // FileStatResult holds the result of a file_stat operation.
 type FileStatResult struct {
-	Name     string              `json:"name"`
-	Size     int64               `json:"size"`
-	IsDir    bool                `json:"is_dir"`
-	ModTime  string              `json:"mod_time,omitempty"`
-	Children []FileStatResult    `json:"children,omitempty"`
+	Name     string           `json:"name"`
+	Size     int64            `json:"size"`
+	IsDir    bool             `json:"is_dir"`
+	ModTime  string           `json:"mod_time,omitempty"`
+	Children []FileStatResult `json:"children,omitempty"`
 }
 
 // sftpClient abstracts SFTP operations.
@@ -59,7 +59,6 @@ func (s *Client) RenameFile(oldPath, newPath string) error {
 func (s *Client) MakeDir(remotePath string) error {
 	return s.client.MkdirAll(remotePath)
 }
-
 
 // StreamReadTo reads from remotePath (optionally at offset for length bytes) and streams
 // raw bytes into w. Uses io.CopyN for zero-buffer streaming — never loads the whole file
@@ -118,6 +117,39 @@ func (s *Client) StreamWriteFrom(r io.Reader, remotePath string, offset int64) (
 	return io.Copy(f, r)
 }
 
+// maxInlineRead caps how many bytes a single text/hex read pulls into memory.
+// The file is still fully reachable: callers page with offset + has_more.
+// mode=file streams to a local file and is intentionally uncapped.
+const maxInlineRead = 8 << 20 // 8 MiB
+
+// normalizeReadRange clamps a requested byte window to [0, totalSize] and to an
+// optional in-memory limit. It is overflow-safe by construction: it never
+// computes offset+length, so an enormous length (or a huge/negative offset)
+// can never yield a negative or out-of-range allocation in make([]byte, length).
+// length <= 0 means "the rest of the file".
+func normalizeReadRange(totalSize, offset, length, limit int64) (int64, int64) {
+	if totalSize < 0 { // some SFTP servers report -1 for special files
+		totalSize = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > totalSize {
+		offset = totalSize
+	}
+	remaining := totalSize - offset // >= 0
+	if length <= 0 || length > remaining {
+		length = remaining
+	}
+	if limit > 0 && length > limit {
+		length = limit
+	}
+	if length < 0 {
+		length = 0
+	}
+	return offset, length
+}
+
 // ReadFile reads a file (or segment) from the remote.
 func (s *Client) ReadFile(remotePath string, offset, length int64, mode string, localPath string) (*FileResult, error) {
 	f, err := s.client.Open(remotePath)
@@ -132,12 +164,11 @@ func (s *Client) ReadFile(remotePath string, offset, length int64, mode string, 
 	}
 	totalSize := fi.Size()
 
-	if offset < 0 {
-		offset = 0
+	inlineCap := int64(maxInlineRead)
+	if mode == "file" {
+		inlineCap = 0 // io.CopyN bounds itself to the file; no memory blow-up
 	}
-	if length <= 0 || offset+length > totalSize {
-		length = totalSize - offset
-	}
+	offset, length = normalizeReadRange(totalSize, offset, length, inlineCap)
 
 	result := &FileResult{
 		Mode:      mode,

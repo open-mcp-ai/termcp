@@ -2,6 +2,7 @@ package forward
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+// ErrNotFound reports that no forward with the given id exists. Callers can
+// branch on it with errors.Is instead of matching the message.
+var ErrNotFound = errors.New("not found")
 
 // ForwardManager manages port forwards for SSH connections.
 type ForwardManager struct {
@@ -512,7 +517,7 @@ func (fm *ForwardManager) Close(forwardID string) error {
 	if !ok {
 		fm.mu.Unlock()
 		slog.Warn("forward close: not found", "forward_id", forwardID)
-		return fmt.Errorf("forward %q not found", forwardID)
+		return fmt.Errorf("forward %q %w", forwardID, ErrNotFound)
 	}
 	delete(fm.forwards, forwardID)
 	fm.mu.Unlock()

@@ -24,6 +24,36 @@ termcp 通过 **SSE** 与 **Streamable HTTP** 两套对等传输暴露同一套 
 
 ---
 
+## 错误返回（错误码）
+
+工具失败时返回 `isError=true`，其文本内容是一个带**专用错误码字段**的 JSON 对象，调用方据此分支处理，无需解析自然语言：
+
+```json
+{"error_code":"shell_not_found","error":"Shell '12d3e2f8-a15' not found"}
+```
+
+- `error_code`：稳定的 snake_case 错误码（仅失败结果携带；成功结果没有该字段）。
+- `error`：人类可读的说明，仅用于展示/日志。
+
+| 错误码 | 含义 | 典型处理 |
+|--------|------|----------|
+| `invalid_argument` | 参数缺失或非法 | 按提示修正参数后重试 |
+| `session_not_found` | 无此 session_id | 用 `session_list` 复核 id |
+| `shell_not_found` | 无此 shell_id（可能已 `shell_close` 删除） | 用 `shell_list` 复核 id |
+| `session_not_running` | 会话已 DEAD/恢复但无活跃 SSH 连接 | 重新 `session_start` |
+| `reader_not_registered` | `reader_id` 未在该 shell 注册 | 先 `shell_reader_register` |
+| `history_not_found` | 归档中无此会话 | 用 `history(action=list)` 复核 |
+| `forward_not_found` | 无此 forward_id | 用 `forward(action=list)` 复核 |
+| `ssh_config_not_found` | 无此 ssh_config | 用 `ssh_config(action=list)` 复核 |
+| `rule_not_found` | 无此通知规则 rule_id | 用 `shell_notify(action=list)` 复核 |
+| `conflict` | 资源已存在 | 改用 edit/其它名称 |
+| `not_configured` | 功能未启用/未初始化 | 检查服务启动参数 |
+| `connection_failed` | SSH 拨号/连接失败 | 检查网络与目标地址 |
+| `operation_failed` | 其它操作失败 | 查看 `error` 详情 |
+| `internal_error` | 服务端内部错误 | 查看服务端日志 |
+
+---
+
 ## 会话生命周期
 
 ```

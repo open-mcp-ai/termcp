@@ -15,7 +15,7 @@ func (s *Server) handleMessageOps(ctx context.Context, request mcpgo.CallToolReq
 	case "get":
 		return s.handleGetMessage(ctx, request)
 	default:
-		return mcpgo.NewToolResultError("action must be list or get"), nil
+		return toolError(CodeInvalidArgument, "%s", "action must be list or get"), nil
 	}
 }
 
@@ -35,7 +35,7 @@ func (s *Server) handleHistoryOps(ctx context.Context, request mcpgo.CallToolReq
 	case "screenshot":
 		return s.handleScreenshot(ctx, request)
 	default:
-		return mcpgo.NewToolResultError("action must be list, search_messages, rename_session, update_session_meta, purge, or screenshot"), nil
+		return toolError(CodeInvalidArgument, "%s", "action must be list, search_messages, rename_session, update_session_meta, purge, or screenshot"), nil
 	}
 }
 
@@ -53,7 +53,7 @@ func (s *Server) handleForwardOps(ctx context.Context, request mcpgo.CallToolReq
 	case "close":
 		return s.handleCloseForward(ctx, request)
 	default:
-		return mcpgo.NewToolResultError("action must be local, remote, dynamic, list, or close"), nil
+		return toolError(CodeInvalidArgument, "%s", "action must be local, remote, dynamic, list, or close"), nil
 	}
 }
 
@@ -67,7 +67,7 @@ func (s *Server) handleSSHConfigOps(ctx context.Context, request mcpgo.CallToolR
 		return s.handleListSSHConfigs(ctx, request)
 	case "create", "edit", "copy", "delete":
 		if !s.sshConfigWrites {
-			return mcpgo.NewToolResultError("SSH config write actions are disabled; start termcp with --mcp-manage-ssh-configs"), nil
+			return toolError(CodeOperationFailed, "%s", "SSH config write actions are disabled; start termcp with --mcp-manage-ssh-configs"), nil
 		}
 		switch action {
 		case "create":
@@ -80,6 +80,6 @@ func (s *Server) handleSSHConfigOps(ctx context.Context, request mcpgo.CallToolR
 			return s.handleDeleteSSHConfig(ctx, request)
 		}
 	default:
-		return mcpgo.NewToolResultError("action must be list, create, edit, copy, or delete"), nil
+		return toolError(CodeInvalidArgument, "%s", "action must be list, create, edit, copy, or delete"), nil
 	}
 }

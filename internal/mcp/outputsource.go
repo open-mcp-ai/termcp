@@ -87,13 +87,13 @@ func (s *Server) resolveOutputSource(id string) (*outputSource, *mcpgo.CallToolR
 		// Restored DEAD session: no live shell objects, but its on-disk message
 		// log can still serve a merged persisted stream.
 		if s.historyMgr == nil {
-			return nil, mcpgo.NewToolResultError("history not configured")
+			return nil, toolError(CodeNotConfigured, "%s", "history not configured")
 		}
 		return &outputSource{sessID: sess.ID, hist: s.historyMgr, status: sess.Info().Status}, nil
 	}
 	if sess := s.sessMgr.GetSessionByShellID(id); sess != nil {
 		if s.historyMgr == nil {
-			return nil, mcpgo.NewToolResultError("history not configured")
+			return nil, toolError(CodeNotConfigured, "%s", "history not configured")
 		}
 		return &outputSource{sessID: sess.ID, shellID: id, hist: s.historyMgr, status: sess.Info().Status}, nil
 	}
@@ -117,7 +117,7 @@ func (s *Server) resolveOutputSource(id string) (*outputSource, *mcpgo.CallToolR
 			}
 		}
 	}
-	return nil, mcpgo.NewToolResultError(fmt.Sprintf("Shell '%s' not found", id))
+	return nil, toolError(CodeShellNotFound, "%s", fmt.Sprintf("Shell '%s' not found", id))
 }
 
 // countLines counts newline-delimited lines in raw bytes; a trailing partial

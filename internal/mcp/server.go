@@ -199,11 +199,11 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfi
 	), withLogging("forward", s.handleForwardOps))
 	// --- File operation tools (session-scoped SFTP) ---
 	mcpServer.AddTool(newTool("file_read",
-		mcpgo.WithDescription("Read a remote file via SSH/SFTP. mode text = printable with \\xHH escapes; hex = hex dump; file = download to the termcp host. Omit offset/length for whole file. Example: read first 1KB hex of /var/log/syslog — {session_id, remote_path, mode:\"hex\", offset:0, length:1024}."),
+		mcpgo.WithDescription("Read a remote file via SSH/SFTP. mode text = printable with \\xHH escapes; hex = hex dump; file = download to the termcp host. text/hex reads return at most 8 MiB per call: page with offset + has_more/total_size from the result. mode=file streams the whole file (omit offset/length). Example: read first 1KB hex of /var/log/syslog — {session_id, remote_path, mode:\"hex\", offset:0, length:1024}."),
 		mcpgo.WithString("session_id", mcpgo.Required()),
 		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
 		mcpgo.WithNumber("offset", mcpgo.Description("Start byte offset (0-based)"), mcpgo.DefaultNumber(0)),
-		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0=all)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0 = rest of file; text/hex capped at 8 MiB per call)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex", "file")),
 		mcpgo.WithString("local_path", mcpgo.Description("Download destination path on the termcp host. Only used with mode=file.")),
 	), withLogging("file_read", s.handleFileRead))

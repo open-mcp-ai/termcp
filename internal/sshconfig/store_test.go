@@ -1,6 +1,7 @@
 package sshconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,5 +75,12 @@ func TestStoreRemoteRoundTrip(t *testing.T) {
 	}
 	if err := s.Save("internal", InternalTemplate()); err == nil {
 		t.Fatal("expected Save(internal) to fail")
+	}
+}
+
+func TestLoad_UnknownReturnsErrNotFound(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if _, err := s.Load("no-such-config"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }

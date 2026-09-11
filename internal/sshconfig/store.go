@@ -1,6 +1,7 @@
 package sshconfig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,10 @@ import (
 	"sync"
 	"sync/atomic"
 )
+
+// ErrNotFound reports that a named ssh config does not exist. Callers can
+// branch on it with errors.Is instead of matching the message.
+var ErrNotFound = errors.New("not found")
 
 // Store manages dataDir/ssh_configs/<name>/config.toml for remote profiles.
 // The built-in "internal" profile is virtual: it is never written to disk.
@@ -88,7 +93,7 @@ func (s *Store) Load(name string) (*Entry, error) {
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("ssh config %q not found (use data-dir/ssh_configs/%s/config.toml)", name, name)
+			return nil, fmt.Errorf("ssh config %q %w (use data-dir/ssh_configs/%s/config.toml)", name, ErrNotFound, name)
 		}
 		return nil, err
 	}
@@ -240,7 +245,7 @@ func (s *Store) Rename(oldName, newName string) error {
 	newDir := filepath.Dir(newPath)
 	if st, err := os.Stat(oldPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("ssh config %q not found", oldName)
+			return fmt.Errorf("ssh config %q %w", oldName, ErrNotFound)
 		}
 		return err
 	} else if st.IsDir() {
